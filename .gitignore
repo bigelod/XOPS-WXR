@@ -39,9 +39,14 @@
 *.app
 
 # Build directories
-build/
-Build/
+# NOTE: build/ is deliberately TRACKED - it holds the .vcxproj and
+# build-and-deploy.ps1, not build output. Intermediate output goes to obj/ and
+# out/, which are ignored below. Do not re-add a "Build/" line either: this
+# repository has core.ignorecase=true, so "Build/" also ignores "build/".
 build-*/
+obj/
+out/
+bin/
 
 # CMake generated files
 CMakeFiles/
