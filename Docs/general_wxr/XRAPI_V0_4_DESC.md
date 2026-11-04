@@ -118,18 +118,23 @@ document previously said "make and model". Line 2 is a **product codename** -
 them. `opentrackWXR` carries such a mapping, commented out.
 
 Here's how Halo CE VR WinlatorXR (HWXR) handles it, for example:
->> if (hmdMake.empty())      hmdMake = "META";
->> else if (hmdMake == "OCULUS") hmdMake = "META";
->>
->> if (hmdModel.empty())     hmdModel = "QUEST 3";
->> 
->> else if (hmdModel == "EUREKA" || hmdModel == "PANTHER") hmdModel = "QUEST 3";
->> else if (hmdMake == "META") {
->>	 //SEACLIFF - Quest Pro - Untested, assuming hands upside down
->> 	 //HOLLYWOOD - Quest 2 - Works! Hands upside down...
->> 	 //MONTEREY - Quest 1 - Untested, unsupported
->>   hmdModel = "QUEST 2";
->> }
+
+***HMD DETECTION FOR UPSIDE DOWN HANDS DETECTION EXAMPLE***
+
+ if (hmdMake.empty())      hmdMake = "META";
+ else if (hmdMake == "OCULUS") hmdMake = "META";
+
+ if (hmdModel.empty())     hmdModel = "QUEST 3";
+ 
+ else if (hmdModel == "EUREKA" || hmdModel == "PANTHER") hmdModel = "QUEST 3";
+ else if (hmdMake == "META") {
+	 //SEACLIFF - Quest Pro - Untested, assuming hands upside down
+ 	 //HOLLYWOOD - Quest 2 - Works! Hands upside down...
+ 	 //MONTEREY - Quest 1 - Untested, unsupported
+   hmdModel = "QUEST 2";
+ }
+
+***NOTE***: This should also support a in-game VR menu setting for "Hands roll" TRUE/FALSE, or a handsfix.txt being added to the game or mod directory in order to allow a player to override detection, as some headsets report the hand controls as literally being upside down and/or backwards
 
 
 Line 7 is how a runtime advertises that binary packets are available; a client

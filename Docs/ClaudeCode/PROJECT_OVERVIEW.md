@@ -58,7 +58,7 @@ the cheap fallbacks if the engine will not give it up.
 |---|---|---|
 | Year | 2002-2003 | a 2003 renderer has enormous headroom on a Quest 3 **[general]** |
 | Bitness | 32-bit native C/C++ | stays in-process, no IPC, Box86 handles it **[general]** |
-| Renderer | Direct3D 8.1 | `SetTransform(D3DTS_VIEW)` is a writable camera **[unverified]** |
+| Renderer | Direct3D 8.1 | **[device]** `SetTransform(D3DTS_VIEW)` tracks the live camera every frame the player moves, so the camera is readable. Whether it is *writable* depends on which draw path the world uses - open, see `CURRENT_STATUS.md` |
 | Size | small single EXE, no anti-tamper | DLL proxy injection is viable |
 | Multiplayer | not in scope | no anti-cheat and no netcode to desync |
 
@@ -144,10 +144,11 @@ way. The decision was made with that known. The consequences we accept:
 
 **Out of scope for now, and each needs a named reason to come in**
 
-- **Stereo (SBS or AER).** Depends on finding and offsetting the view and
-  projection matrices twice per frame in a binary we do not own. Revisit after
-  mono is device-verified; AER before SBS, since it buys depth at mono cost.
-  **[general]**
+- **Stereo (SBS or AER).** Now substantially harder than first written: there
+  are no device matrices to offset, so stereo would mean making the game's own
+  software renderer run twice per frame with different camera values. Revisit
+  only after mono is device-verified, and expect to conclude that mono ships.
+  **[device, 2 Nov 2026]**
 - **Hand and weapon models rendered from controller poses.** Drawing art
   attached to a tracked hand is the expensive part of any port in this family,
   and it is not needed to deliver decoupled aim.

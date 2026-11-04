@@ -34,7 +34,7 @@ scope until mono is device-verified.
 |---|---|
 | Game, version, patch level | X Operations **0.96** (Team MITEI; programmer nine-two, art TENNKUU; 2002-2003) |
 | Store or distribution | freeware; original distribution. Exact archive the owner has: `TBD` |
-| Install path | **`D:/VR/xops096-wxr`** (owner, 31 Oct 2026). Treat this as the single install the mod is deployed to; the container path, if it differs, is `TBD` |
+| Install paths | Two, holding a **byte-identical** `xops096.exe` (SHA-256 `1e6c9022...`): `E:/tmp/Q3Mods/xops096` is the owner's **desktop test install and the deploy default**; `D:/VR/xops096-wxr` is the WinlatorXR-bound copy. The EXE is `xops096.exe`, not `XOPS.exe`. Container path, if it differs: `TBD` |
 | Bitness | 32-bit native C/C++ **[MetaAI, plausible - confirm with `dumpbin /headers`]** |
 | Renderer | Direct3D **8.1** (`Direct3DCreate8`, SDK version `0xDC` = 220) **[MetaAI, plausible - confirm by `d3d8.dll` in the import table]** |
 | Engine | Team MITEI in-house. Not Genesis3D, not .NET **[MetaAI]** |
@@ -72,6 +72,7 @@ scope until mono is device-verified.
 | Who verifies on hardware, and how fast is the loop? | The owner, on a Quest 3. Loop length: `TBD` |
 | Prior work to inherit or discard? | `Docs/MetaAI/` - **keep the IDA findings, discard the code and the protocol**. See `PROJECT_OVERVIEW.md` section 6 and `BUG_FIXES.md` |
 | Is `adb` / `scrcpy` available to the owner? | `TBD` - it changes how diagnostics are collected |
+| Reverse-engineering tools available | **IDA Free** (owner, 2 Nov 2026). **No Cheat Engine.** IDA Free covers both halves of the job: static disassembly plus a local x86 debugger and a cloud x86 decompiler. Note it is licensed **non-commercial only** - fine for a free mod, and worth remembering if this ever changes. Free stand-ins if a live memory hunt is ever wanted anyway: **x32dbg** (search, and "find what accesses this address") and **Ghidra** (static, with a local decompiler) |
 
 > ### CHECKPOINT 0 - with the owner
 > Q-A is settled, the install path is known, the `d3d8.dll` override is
@@ -157,7 +158,7 @@ session.
 **Stage 1 has not happened.** Nothing else can be attributed to anything until
 the unmodified game is known to run flat in a container, and until the remaining
 intake `TBD`s are answered. The three that were blocking are now closed: the
-install path is `D:/VR/xops096-wxr`, the `d3d8.dll` override works, and no
+install paths are known, the `d3d8.dll` override works, and no
 Japanese locale is needed. What is left is device and owner observation, not
 code.
 
@@ -377,8 +378,10 @@ in their container (31 Oct 2026), which was the only real doubt.
 **Must be proven first.** Nothing structural. The first build is itself the
 test: a proxy that only forwards and logs. Record the override setting's exact
 location while doing it, for the installer.
-**Deploy target.** `D:/VR/xops096-wxr` - the owner's install, and the path the
-deploy script writes to.
+**Deploy target.** `E:/tmp/Q3Mods/xops096` by default - the owner's desktop
+test install. `build-probe.bat` takes an alternative path as its first
+argument; pass `D:\VR\xops096-wxr` for the WinlatorXR copy. Both hold the same
+`xops096.exe`.
 **Fallbacks.** 1. `dinput.dll` proxy + MinHook on `Direct3DCreate8`.
 2. `ddraw.dll` or another early-loaded name. 3. An external process (last
 resort - it reintroduces IPC).
@@ -420,24 +423,76 @@ frame. Log a counter against `Present` for one run.
 
 ### F-5 - 6DOF head tracking, mono
 
+> **Rewritten 2 Nov 2026.** The original plan hooked
+> `SetTransform(D3DTS_VIEW)`. Probe run 2 proved the game never calls it
+> in-game - XOPS transforms, projects, clips and culls on the CPU and submits
+> only `D3DFVF_XYZRHW` screen-space triangles. See `CURRENT_STATUS.md`. The
+> old text is kept at the end of this section, because a later session will
+> otherwise propose the same dead route.
+
 **Goal.** Looking around and leaning work, and feel locked.
-**Can it be done?** Depends on a single unknown: **does XOPS set its view
-matrix through `SetTransform(D3DTS_VIEW)` once per frame?** The first attempt
-asserts it does but recorded the wrong vtable index, which means it was reading
-the disassembly rather than observing calls.
-**Must be proven first.** With the proxy in place, log every `SetTransform`
-call for one frame - type, and the matrix. That answers it in one run, and it
-also gives us the game's handedness and unit scale for free. **Do this before
-writing any camera code.**
-**Fallbacks.** 1. Patch the game's own camera variables directly (the first
-attempt's `dword_48C5BC` xrefs are the starting point). 2. Hook the engine's
-camera setup function rather than the D3D call. 3. Non-VR mode (`MODE_VR=2`),
-which needs no camera work at all and stays available if the camera proves
-unreachable.
-**Settings.** `pos_scale`, `rot_enabled`, `recentre` binding, `verbose`. Hot
-reloaded from a text file next to the DLL; defaults chosen to be right rather
-than tunable.
+
+**Can it be done?** **Unknown, and this is now the project's gating question.**
+The camera must be driven by writing the game's own camera variables in memory.
+A software renderer is guaranteed to hold them and to read them every frame, so
+they exist; whether we can find them and whether writing them is well-behaved
+is what has to be proven.
+
+There is one genuine upside over the matrix route we lost: writing the game's
+own camera means **its culling, clipping and FOV follow the new camera
+automatically**. A matrix hook would have left all three pointing the old way.
+
+**What must be proven first.**
+
+1. **Find the camera position.** Probe v3 scans `.data` and `.data1` for three
+   consecutive floats matching the eye position recovered from the view matrix
+   the game sets at level load (`-18.402 3.481 4.180` in run 2), reports the
+   candidates, then prints each one every sampled frame. The candidate that
+   tracks the player is the camera.
+2. **Find the angles.** The probe also dumps a window of floats around the best
+   candidate. Whichever change when the player turns and not when they walk are
+   the view angles. Expect yaw and pitch; check for roll.
+3. **Prove a write takes.** Write a small constant offset into the position
+   every frame and confirm the rendered view moves, without the game fighting
+   it back or the collision system objecting.
+4. **Measure the unit scale.** With the position readable, walk a measured
+   distance and divide. **Do not guess** - the first attempt's `50.0f` is what
+   guessing looks like. Put the answer in one named constant.
+
+**Approach, once those are answered.** Read the game's camera each frame, add
+the head pose converted into engine units and the engine's **left-handed** axis
+convention (confirmed `[device]`), write it back before the game's transform
+runs. Orientation first, position second. Recentre binding from the start.
+Freeze on the last good pose when packets drop.
+
+**Where to write it.** Needs care: the write must land after the game updates
+its camera from input and before it transforms the world. The single draw call
+site at `0x00406189` is downstream of both, so working back from it in IDA
+locates the transform entry point. Failing that, `GetKeyboardState` - which the
+game calls exactly once per frame - is a reliable per-frame hook we already own.
+
+**Fallbacks, ranked.**
+1. Patch the game's camera variables (above).
+2. Unproject / rotate / reproject the XYZRHW vertices in `DrawPrimitiveUP`.
+   Mathematically sound and cheap (~900 vertices a frame) but the game has
+   already culled to its own 65-degree frustum, so head rotation reveals black
+   where geometry was discarded. Viable only for small positional offsets, and
+   only after the FOV is widened. Recorded so it is not mistaken for a
+   breakthrough later.
+3. **Non-VR mode** (`MODE_VR = 2`): a flat window in the headset with tracking
+   still flowing, and **no camera work at all**. If F-5 cannot be made to work,
+   this is the port, and it is a legitimate one - for a game whose camera is
+   unreachable the general docs call it the route that stays open. **[general]**
+
+**Settings.** `pos_scale`, `rot_enabled`, recentre binding, `verbose`.
+
 **Acceptance.** Checkpoint 6, on device, in the owner's words.
+
+**Superseded approach, for the record.** Hook `SetTransform(D3DTS_VIEW)` and
+compose `V_new = V_game * inverse(H_head)`. The composition maths is correct
+and is kept in section 4 in case a future need arises, but the hook has no
+effect in this game: `SetTransform` is called 25 times during startup and never
+again.
 
 ### F-6 - non-VR / flat-window mode
 
@@ -471,11 +526,43 @@ on top of a matrix we already see go past; the aim cannot.
 **What must be proven first**, before any aim code is written:
 
 1. **Does the game keep a player aim angle in memory that is distinct from the
-   render camera?** Cheap test, and the right tool is Cheat Engine, not a
-   disassembler: search for a float that changes as the mouse turns, then check
-   whether writing it turns the shots without turning the view.
-   `Docs/general_wxr/TOOLS.md` is explicit that this beats reading
-   disassembly for exactly this job.
+   render camera?** This is the whole feature's load-bearing question, and it is
+   **answerable statically**, which is better than a live float hunt: the
+   question is not "where is the angle" but "**do the camera code and the
+   weapon-fire code read the same variable?**"
+
+   **With IDA Free** (the owner has it; no Cheat Engine needed - and IDA Free
+   also ships a local x86 debugger and a cloud x86 decompiler, so it covers both
+   halves of this):
+
+   a. Start at the `SetTransform(D3DTS_VIEW)` call site - `Docs/MetaAI/` puts it
+      near `sub_401120`, though its vtable index is wrong (`BUG_FIXES.md` D-6).
+      Walk back into the function that *builds* the matrix and note the globals
+      it reads: a position triple and a yaw/pitch pair. Name them in the IDB.
+   b. Take the yaw global and list its cross-references (`Ctrl+X`). **That list
+      is the answer.** If every reader is camera or render code, view and aim
+      are the same variable and writing it moves both. If a player structure
+      carries its own rotation field that the weapon code reads, they are
+      separable and motion aim is buildable.
+   c. Find the fire path to confirm from the other end - the bullet or hitscan
+      spawn - and see which angle it actually reads.
+   d. Confirm live with IDA Free's debugger: set a **hardware write breakpoint**
+      on the yaw address, move the mouse to catch the writer, then change the
+      value while paused and resume. Does the view turn? Do the shots?
+
+   **A shortcut worth taking: read OpenXOPS.** It is out of scope as a build
+   target (Q-A) but it is a BSD-licensed reimplementation of *this game's
+   logic*, so its player and weapon structures are a free map of what to look
+   for in the binary - how XOPS stores player angles, and whether bullet
+   direction comes from the same pair the camera uses. Reading it is research,
+   not a change of route.
+
+   **And once F-1 exists, the cheapest probe is our own DLL.** The proxy is
+   already inside the process with the view matrix in hand; a verbose-mode probe
+   that logs candidate floats and writes them on a keypress needs no external
+   tool, works identically under Box86 on the device, and is code we need anyway
+   for the real feature. Prefer it over any desktop-only tool for anything that
+   has to be confirmed on hardware.
 2. **If there is only one angle pair**, then aim and view cannot be separated at
    this layer, and the options narrow to: (a) drive the single angle from the
    dominant controller and let the *head* add a view-only offset on top of it -
@@ -515,10 +602,31 @@ another. Head-relative means every head turn re-aims the walk. The owner has
 asked for head-relative; implement it, and expose the alternative as a setting
 if it turns out to fight the player during combat.
 
-**Mechanism for input generally.** Hook the game's input reads, or inject with
-`SendInput` in-container, or use WinlatorXR's InputAPI for keys and clicks -
-noting that **InputAPI cannot move the mouse**, only click and scroll, so any
-mouse *motion* must come from inside the container. **[general]**
+**Mechanism: settled, and far cheaper than budgeted.** `xops096.exe`'s import
+table was read on 2 Nov 2026 **[code]**. XOPS uses **no DirectInput at all** -
+its entire input path is USER32: `GetKeyboardState` for the keyboard, and
+`GetCursorPos` / `SetCursorPos` / `ScreenToClient` for mouse look, the classic
+recentre-and-read-the-delta pattern. All of them sit in the EXE's import
+address table, which the probe already patches.
+
+So we **supply** input rather than synthesise it:
+
+- **Keyboard** - own `GetKeyboardState` and fill the 256-byte array ourselves.
+  Total keyboard control, no synthetic events, nothing for Wine to mishandle.
+- **Mouse** - own `GetCursorPos`. The game computes its look delta from the
+  cursor against where it last recentred it, so returning a chosen position
+  *is* handing it a chosen delta.
+
+**This sidesteps the problem the general docs warn about at length.**
+`Docs/general_wxr/` treats "head-look drives the mouse" as the hard case for a
+closed-source game, because **WinlatorXR's InputAPI cannot move the mouse** -
+clicks and scroll only - and recommends `SendInput` from inside the container
+as an unverified workaround. We need none of that: we are in the process and we
+own the function the game asks. No InputAPI, no `SendInput`, no spoofing.
+
+See `BUG_FIXES.md` D-16 and D-17 for the import table and what it rules out -
+including that the first attempt's entire `dinput.dll` proxy could never have
+loaded.
 
 **Note.** Decide per control whether the game wants a *held state* or a
 *key-down edge*; a trigger held forever where an edge was expected is why the
@@ -593,7 +701,11 @@ headset. **[general]**
 | R-5 | ~~The Wine DLL override for `d3d8.dll` is unavailable or unreliable~~ | **CLOSED** | owner confirms `d3d8.dll` override works, 31 Oct 2026 |
 | R-6 | ~~The game needs a Japanese locale or codepage~~ | **CLOSED** | owner confirms none needed, 31 Oct 2026 |
 | R-7 | ~~`.gitignore` ignores `build/`~~ | **CLOSED** | `build/` un-ignored 31 Oct 2026; `obj/`, `out/`, `bin/` ignored instead. Note `core.ignorecase=true`, so a `Build/` line would re-ignore `build/` - do not add one |
-| R-12 | **Aim cannot be decoupled from the view in a binary we do not own** - the game's mouse look *is* its aim, and the chosen design (dominant-hand motion aim) needs them separate | **high** | feature F-7 test 1: settle it with Cheat Engine before building anything on it. Fallback is right-stick aim via injected mouse motion, which needs no memory writing and still satisfies "aim is not the head" |
+| R-12 | **Aim cannot be decoupled from the view** - the game's mouse look *is* its camera, and the chosen design (dominant-hand motion aim) needs them separate | medium (was high) | **downgraded 2 Nov 2026.** Owning `GetCursorPos` lets us aim the game's single angle from the controller, then rotate the *view* off it to follow the head - no memory writing needed. What remains is the crosshair, which then no longer marks where shots go; we draw our own. F-7 test 1 still worth doing, but it is no longer the only route |
+| R-14 | ~~The in-game world may be drawn with pre-transformed vertices~~ | **CONFIRMED 2 Nov 2026 [device]** - it is. Every draw is XYZRHW; `SetTransform` is never called in-game | the camera route is now memory work on the game's own variables; see F-5, rewritten. Non-VR mode (`MODE_VR = 2`) stays as the no-camera-work fallback |
+| R-15 | **The camera variables cannot be found, or are not writable in a useful form** | unknown - this is now the project's gating risk | probe v3 hunts them from the level-load eye position. If that fails: derive and hunt the angles, or work back in IDA from `0x00406189`, the single draw call site. If it fails entirely, **non-VR mode is the port** |
+| R-16 | **Resolution is baked into the software renderer**, so a larger back buffer does not enlarge the view | **confirmed** - 640x480 is in the code; `config.dat` has no resolution field | find the game's own screen-size and FOV constants as part of the same memory work. Fallback: 640x480 stretched borderless to the display, which keeps the sync corner and costs sharpness |
+| R-13 | **The game recentres the cursor every frame** (`SetCursorPos` + `ScreenToClient`), so our synthesised positions fight its own | medium | own both calls, not just `GetCursorPos`: track where the game thinks it put the cursor and answer relative to that. The probe counts both per frame so we can see the pattern before writing any of it |
 | R-8 | Tuned values do not transfer from tester to device | high | measure offsets in the frame they are used in; a correct value transfers **[general]** |
 | R-9 | A saved config on the test device overrides a changed default | medium | say so explicitly when handing over a build |
 | R-10 | The `Reset` path loses the resolution and window override | high | re-apply from `Reset` and from `EndScene`, idempotently |

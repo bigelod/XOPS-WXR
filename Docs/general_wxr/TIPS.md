@@ -221,6 +221,112 @@ Camera yaw/pitch driven per-hand makes the view jerk on every off-hand action.
 Drive the *view* from one source - head, or the dominant hand - and let only
 the *shot* vary per hand.
 
+### The player's world yaw is not the client's view-angle variable
+
+Every room-to-world transform - where the hand is, which way a positional
+lean goes - needs the player's yaw **in the world**. In id Tech 3 and its
+derivatives the client-side variable with the obvious name is only half of
+it: `cl.viewangles` is what the client has accumulated, and the server keeps
+the rest in `ps.delta_angles` and adds it back. That is how a spawn point, a
+teleporter or a `setviewpos` turns the player without the mouse moving.
+
+Use `cl.viewangles[YAW] + SHORT2ANGLE( cl.snap.ps.delta_angles[YAW] )`.
+Expect the same split under another name in any engine where the server can
+reorient the player. The symptom is subtle and constant: a hand drawn beside
+the wrong hip, a lean that goes sideways - everything off by the map's spawn
+angle, which is why it never shows up standing at yaw 0 in a test harness.
+
+### If you compensate for something, test it against a MOVING input
+
+A compensation - "the aim follows the hand, so rotate the camera back" -
+cannot be tested with the input held still. Two different traps, both paid
+for in Tremulous WXR:
+
+- Many such errors are **exactly zero** at the origin. A frame correction
+  that forgets the body's yaw is perfect at yaw 0 and wrong everywhere else.
+  Testing at the origin is testing the one case that cannot fail.
+- A **fixed** controller angle gets absorbed by the engine. Here the server
+  folded it into `delta_angles` the moment anything set the view angles,
+  after which the aim was constant and a camera that tracked the gun was
+  indistinguishable from one that did not.
+
+Sweep the input, on a different period from anything else that moves, and
+assert the compensated quantity holds still. A spoofer needs a sweep mode for
+this reason, not just a hold mode.
+
+### A rotation does not cancel against itself across a change of basis
+
+Tempting and wrong: "that term is in both frames, so it cancels - leave it
+out of both." True for an additive offset. False for a rotation. Re-express a
+basis through `V . G^T . H` with a shared rotation `Rz(b)` left out of `G`
+and `H`, and what survives is `b` conjugated by `G` - equal to `Rz(b)` only
+when `b` is zero or every rotation shares an axis. Build each frame with the
+full angle, and let the arithmetic do the cancelling.
+
+### Get a capture before you write a sanity check
+
+A bound on incoming tracking data is an assumption about a coordinate
+system, written as an assertion. Tremulous WXR saw a first packet reporting
+a head height of 0.006 m, decided no real head is six millimetres off the
+floor, and gated recentring behind "at least 0.5 m up".
+
+XrApi positions are HEAD-CENTRED. A real Quest 3 capture has the head at
+y = 0.006 and both hands at y = -0.23, a palm's drop below it. There is no
+floor in that space. The gate never passed on hardware, the recentre never
+happened, and the hands collapsed onto the head - which presented as "the
+gun is stuck to my forehead" and, separately, as the dominant-hand setting
+having no effect, because with no offset both hands resolve to one place.
+
+The check did not validate the data. It validated a belief, and rejected the
+hardware when the two disagreed. Worse, the synthetic poses in the test
+spoofer had been "corrected" to the same wrong space, so the rig agreed with
+the bug.
+
+Get one real capture, commit it, and replay it. One packet of ground truth
+is worth more than any amount of synthesised input, because synthetic poses
+encode what you BELIEVE the protocol says and a capture encodes what it
+does. Tremulous WXR keeps `scripts/SamplePoseData.txt` and replays it with
+`xr_spoof.py --sample`.
+
+### Send the FOV you actually rendered with, not a configured one
+
+The FOV field in the outbound packet tells the runtime how wide the image it
+is compositing is. Tremulous WXR sent a cvar holding 104.5 x 104.5 while the
+engine rendered 99.3 x 67.0 - the vertical out by 37 degrees, because the
+configured value was square and the real frame is 16:9.
+
+This does not present as "the FOV is wrong". The runtime maps the frame onto
+the display at the wrong scale, so the world moves at a different rate from
+the head, and differently in pitch than in yaw. From inside the headset that
+reads as the view sliding, as rotations that do not return to where they
+started - as drift. Owner's words: *"up/down/left/right rotations start to
+feel like they drift off from their axes."*
+
+Take the value from the live frame every frame. Games change FOV - zoom,
+aspect, cutscenes - so this cannot be a setting even if the first value
+happens to be right.
+
+### Controller poses arrive upside down on some headsets - ship the override
+
+Meta controllers report the hands rolled 180 degrees. HWXR carries this as
+comments against the Meta codenames in its detection chain (`XRAPI_V0_4_DESC.md`,
+"HMD DETECTION FOR UPSIDE DOWN HANDS"), and Tremulous WXR confirmed a Quest 3
+behaves the same way even though it takes a different branch there - so key
+the correction off the MAKE, not the model. Some headsets are also reported
+backwards, so provide a yaw trim as well as a roll one.
+
+Detection is a guess about hardware you do not have. Ship the guess, and ship
+an override with it that a player can use **without the console** - typing
+from inside a headset means the on-screen keyboard. A `handsfix.txt` read
+with plain `fopen` next to the executable costs twenty lines and saves a
+device round trip per wrong guess. Read it outside the game's filesystem: the
+player creates it by hand, so it is not in an archive, and on a pure server
+the filesystem would refuse to see it at all.
+
+Note what this kind of defect does to your test discipline: a rolled model is
+visible and **not measurable**. No log line is wrong, so no amount of
+instrumentation finds it. Those are the cases worth a screenshot.
+
 ### Handle handedness once, at ingest
 
 Swap the two hands' poses as the packet is parsed, so everything downstream
@@ -294,3 +400,32 @@ Not the code structure - git shows that. Document the things that are
 model nodes are named inconsistently, the measured container size and its
 cost, what a wrong value looked like on screen. That is what the next port -
 or the next agent on this one - cannot reconstruct.
+
+### Version your config before you need to
+
+Settings that are archived outlive the defaults that created them, and the
+people holding stale values are exactly the people testing for you. A
+Tremulous WXR trim changed its "detect" sentinel from `-1` to `auto`; every
+machine that had run the previous build still had `-1` saved, read it as a
+literal minus one degree, and silently lost detection. The bug looked like
+the original defect had never been fixed.
+
+Keep a `cfgVersion` setting. Bump it when a default changes in a way an old
+saved value would defeat, and migrate on startup - touching **only** values
+equal to the old default, because discarding a player's deliberate tuning is
+worse than the bug you are fixing. Log what you changed.
+
+Knowing the trap is not a mechanism for it. The deploy script here had been
+warning about stale configs for weeks when this happened.
+
+### If the log is the only channel back, it must work from the first line
+
+Initialisation is where configuration is decided, and it usually happens
+before the log file is open. Tremulous WXR registered cvars, migrated stale
+ones and read a player override file before `fopen`, and the logging for all
+three was silently dropped - so a settings repair happened invisibly and an
+override file announced itself into nothing.
+
+Buffer early lines in memory and flush them as soon as the file exists,
+after the build stamp so the order still reads. Count anything you had to
+drop.

@@ -172,6 +172,12 @@ reason `CURRENT_PROGRESS.md`'s "build system - complete" cannot be true.
 
 ## D-6 - `SetTransform` is at vtable index 37, not 44
 
+**CONFIRMED in the binary, 2 Nov 2026 (owner, IDA Free).** There is a
+`call [...+94h]` at **`0x403AA4`** preceded by `push 3` - `SetTransform` with
+`D3DTS_PROJECTION`. `0x94` is index 37, which settles it: the inherited
+`vtbl[44]` (`0xB0`) is `SetLight`. The derivation below stands, and it is now
+backed by the disassembly rather than by reasoning alone.
+
 **Severity: high.** Index 44 is `SetLight`, so the inherited code would hook
 lighting and pass a `D3DMATRIX*` where a `D3DLIGHT8*` was expected.
 
@@ -198,7 +204,10 @@ first: `TestCooperativeLevel` 3, `GetAvailableTextureMem` 4,
 in the inherited code - which is what makes the `0xB0` claim look like a
 coincidence rather than a reading: `SetLight(2, ...)` and
 `SetTransform(D3DTS_VIEW = 2, ...)` both compile to a `push 2`, so a
-disassembly search for `push 2` near a `call [ecx+...]` finds either.
+disassembly search for `push 2` near a `call [ecx+...]` finds either. The
+`0x403AA4` site resolves it from the other direction: a `push 3` there can only
+be `D3DTS_PROJECTION`, because `SetLight` index 3 would be followed by a light
+structure, not a matrix.
 
 **Fix.** Avoid the question entirely: **wrap the interfaces instead of detouring
 the vtable** (`PROJECT_PLAN.md` section 4). A wrapper's method is selected by
@@ -206,10 +215,25 @@ the compiler from the header, so there is no index to get wrong, and there is no
 detour that might behave differently under Box86/Wine. If MinHook is used as a
 fallback, index 37.
 
-**Confirm.** With the wrapper in place, log every `SetTransform` call for one
-frame with its `Type` and matrix. That single log both proves the camera is
-reachable through `D3DTS_VIEW` and hands over the game's handedness and unit
-scale - and it is the experiment that should precede any camera code at all.
+**Confirm.** Done, statically. Two follow-ons worth doing while the IDB is open,
+because both are free now:
+
+- **Find the `D3DTS_VIEW` site** - the same `call [...+94h]` shape with
+  `push 2`, which is almost certainly in the same function or close to it.
+  Whatever builds the matrix it passes reads the camera globals, and those are
+  what feature F-7 test 1 needs the cross-references of.
+- **Keep `0x403AA4` itself.** It is where the projection matrix is set, which
+  makes it the anchor for FOV and the near plane later (the first attempt's
+  future goals 4 and 7). Work back to whatever computes it - if it is a
+  `D3DXMatrixPerspectiveFovLH`-shaped calculation, the FOV is a value we can
+  override rather than a matrix we have to rebuild.
+
+Note that with the wrapper vector neither address is *needed* to hook anything -
+the wrapper sees every `SetTransform` call regardless. Their value is as a map:
+confirmation of the index, a route to the camera globals, and the FOV anchor.
+Still log every `SetTransform` for one frame once the wrapper exists; that hands
+over the game's handedness and unit scale, which no amount of static reading
+will.
 
 ---
 
@@ -469,6 +493,96 @@ had already happened.
 it is useful: the R5G6B5 back-buffer format, the loader-lock hang, the ASLR
 hazard of hardcoded addresses, and the hook-ordering trap are all real traps
 that a port of this kind can hit.
+
+---
+
+## D-16 - The first attempt's whole injection vector could never have loaded
+
+**Severity: fatal, and it invalidates the inherited architecture rather than a
+detail of it.**
+
+**[code]** `Docs/MetaAI/` builds a **`dinput.dll`** proxy, with a `.def` that
+forwards `DirectInputCreateA` and friends to `real_dinput.dll`, on the stated
+premise that XOPS "loads `dinput.dll` -> perfect for DLL proxy injection".
+
+**XOPS does not import `dinput.dll`.** Read straight out of `xops096.exe`'s
+import table on 2 Nov 2026 **[code]**, its imports are exactly:
+
+| Module | Count | Notes |
+|---|---|---|
+| `KERNEL32.dll` | 77 | nothing input-related |
+| `USER32.dll` | 21 | **the entire input path** - see D-17 |
+| `GDI32.dll` | 10 | `CreateDIBSection`, `CreateFontIndirectA`, `DrawTextA/W` - text rendered through GDI into a DIB |
+| `WINMM.dll` | 3 | `timeGetTime`, `timeBeginPeriod`, `timeEndPeriod` - the frame clock |
+| `d3d8.dll` | **1** | `Direct3DCreate8`, and nothing else |
+| `ADVAPI32.dll` | 3 | registry reads |
+
+No `dinput.dll`, no `dinput8.dll`, no `xinput`. A `dinput.dll` placed next to
+the EXE would simply never be loaded, so **every feature built on that proxy
+would have been silently dead** - which is consistent with the rest of
+`Docs/MetaAI/`, and is one more reason to treat its progress claims as
+untested.
+
+**Fix.** The chosen `d3d8.dll` proxy is correct, and this strengthens it: XOPS
+imports exactly **one** function from `d3d8.dll`, so the proxy has one export
+that must be right and four that only need forwarding.
+
+**Confirm.** Done, statically. `src/d3d8probe.cpp` also dumps the import table
+at runtime, so it is re-checked on every probe run and on device.
+
+---
+
+## D-17 - Input is pure USER32, which is better news than it sounds
+
+**Not a defect - a finding that reshapes feature F-7**, recorded here because it
+overturns what the inherited plan assumed.
+
+**[code]** The complete set of input-related imports in `xops096.exe`:
+
+```
+  GetKeyboardState        keyboard, polled - not WM_KEYDOWN
+  GetCursorPos            mouse position
+  SetCursorPos            ... and recentring it: the classic
+  ScreenToClient          "warp the cursor to the middle each frame and
+  ClientToScreen           read the delta" mouse-look pattern
+  ShowCursor
+  PeekMessageA / TranslateMessage / DispatchMessageA / DefWindowProcA
+  GetForegroundWindow / GetSystemMetrics
+  CreateWindowExA / RegisterClassExA / ShowWindow / UpdateWindow
+```
+
+**Why this matters.** Every one of those is in the EXE's import address table,
+and the probe already proves they can be patched there. So the mod can
+**supply** XOPS its input directly, in-process:
+
+- **Keyboard**: own `GetKeyboardState` and fill the 256-byte array ourselves.
+  That is total keyboard control in about ten lines, with no synthetic events,
+  no `SendInput`, and nothing for Wine to get wrong.
+- **Mouse**: own `GetCursorPos`. Since the game derives its look delta from the
+  difference between the cursor and where it last `SetCursorPos`'d it, handing
+  back a chosen position *is* handing it a chosen look delta.
+
+**This removes the problem `Docs/general_wxr/` warns about at length.** The
+general docs spend a section on the fact that **WinlatorXR's InputAPI cannot
+move the mouse** - only click and scroll - and treat "head-look drives the
+mouse" as the hard case for a closed-source game, needing `SendInput` or
+similar from inside the container. We need none of it: we are inside the
+process and we own the function the game asks.
+
+**What it does *not* solve.** Feeding mouse deltas still turns the game's
+**camera**, because XOPS's mouse look is its camera. So this makes every
+button, key and turn clean, but it does not by itself decouple aim from view -
+see `PROJECT_PLAN.md` F-7, which now has a cheaper route but the same crosshair
+problem.
+
+**Also worth noting:** `GetKeyboardState` rather than `GetAsyncKeyState` means
+the game reads a snapshot, and `PeekMessageA` means it pumps messages itself -
+so a patched `GetKeyboardState` answers the whole keyboard, one call per frame,
+with no edge/held ambiguity to reason about at the API layer.
+
+**Confirm.** The probe patches all five candidate entry points and prints
+whether each was found in the IAT, then counts calls per frame. A function with
+a per-frame count is a live path; the totals are printed at shutdown.
 
 ---
 
