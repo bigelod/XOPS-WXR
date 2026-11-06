@@ -1,11 +1,11 @@
-﻿# XOPS-WXR â€” NEXT STEPS
+# XOPS-WXR — NEXT STEPS
 
 **Only work that is still open lives here.** Implemented features are in
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 14:28:55`, SHA-256
-`7e024792ae45de869c5b24b911a5276b8c7d486f27daa7243ba93dbb31804308`.
+**Last build:** `built Nov  6 2026 14:45:41`, SHA-256
+`06364bc1ffed8bc56c580c4395405ef312d3c795b01adf42b646390659efb59d`.
 
 ---
 

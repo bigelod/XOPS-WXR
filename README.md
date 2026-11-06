@@ -114,7 +114,7 @@ build\build-release.bat    REM release: no probe log, keys, dumps or grabs
 ```
 
 - `build-dev.bat` compiles with `XOPS_DEV_BUILD=1` to `out\dev\d3d8.dll` and deploys to `E:\tmp\Q3Mods\xops096` by default. This is the build to use while developing or diagnosing on a Windows PC: it keeps the probe keys, `HOOKS`/`HOOK` trace, verbose log, draw dumps and frame grabs.
-- `build-release.bat` compiles with `XOPS_DEV_BUILD=0` to `out\release\d3d8.dll`, builds `launcher-xr\XOPSVR.exe`, and assembles the `Release\` folder. The release DLL has no probe log, no debug keys and no draw/frame capture.
+- `build-release.bat` compiles with `XOPS_DEV_BUILD=0` to `out\release\d3d8.dll`, builds `launcher-xr\XOPSVR.exe`, and assembles the `Release\` folder. The release DLL has no probe keys, draw dumps or frame grabs. Set `verbose_debug = true` in Options for a safe Quest diagnostic log (XrApi raw/sticks, mode, EYE, ROLL); with `false` it writes no log.
 - `build\build-probe.bat` is kept as the old dev-build alias.
 - `XOPS_DEV_BUILD` defaults to `1` if a build script does not define it.
 

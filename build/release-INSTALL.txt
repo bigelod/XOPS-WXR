@@ -40,5 +40,7 @@ eye_height  Manual vertical render offset in metres (default 0, +/-5).
 roll_sign   -1 default; set +1 if the horizon tilts the wrong way.
 hand_flip   false for Quest 3; true for the old/other-device hand roll.
 
-This is the release build: there is no probe log, no debug keys and no
-draw/frame capture.
+This is the release build: there are no probe keys and no draw/frame capture.
+Set verbose_debug = true in the launcher Options for a safe diagnostic run;
+the mod then writes xops_wxr_probe.log with the XrApi raw packet, thumbsticks,
+MODE_VR/pose/EYE/ROLL lines. With verbose_debug = false it writes no log.

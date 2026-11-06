@@ -186,7 +186,7 @@ static void WriteStartupFiles(void)
        UDP listener at all - total silence that looks like a socket bug. */
     _snprintf(file, sizeof(file) - 1, "%s\\version", g_dir); file[sizeof(file)-1] = 0;
     f = fopen(file, "w");
-    if (f) { fputs("0.5", f); fclose(f); }
+    if (f) { fputs("0.4", f); fclose(f); }
 
     _snprintf(file, sizeof(file) - 1, "%s\\vr", g_dir); file[sizeof(file)-1] = 0;
     f = fopen(file, "w");

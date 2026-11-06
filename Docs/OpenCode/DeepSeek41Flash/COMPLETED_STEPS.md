@@ -1,11 +1,11 @@
-﻿# XOPS-WXR â€” COMPLETED STEPS
+# XOPS-WXR — COMPLETED STEPS
 
 **Everything in this file is implemented.** Unless a line says otherwise it is
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 14:28:55`, SHA-256
-`7e024792ae45de869c5b24b911a5276b8c7d486f27daa7243ba93dbb31804308`.
+**Last build covered:** `built Nov  6 2026 14:45:41`, SHA-256
+`06364bc1ffed8bc56c580c4395405ef312d3c795b01adf42b646390659efb59d`.
 
 ---
 
@@ -100,7 +100,7 @@ pass; `BUG_FIXES.md` will be created from that run.
 - Hand model: compact dark **palm plate**, four **short chunky finger slabs**
   and a thick **thumb angled outward** from its own side; all glove-textured
   with black outlines. Shape follows the SixDOFinator calibration reference.
-- **Quest 3 hand roll is the default:** `hand_flip = false` applies the 180Â°
+- **Quest 3 hand roll is the default:** `hand_flip = false` applies the 180°
   roll correction; `hand_flip = true` recreates the old roll for non-Quest-3
   devices.
 - **Dominant-hand laser**, depth-tested; a continuous strip that walls cut off.
@@ -172,7 +172,7 @@ pass; `BUG_FIXES.md` will be created from that run.
   target res `M`, verbose diagnostics on demand. All are **locked behind `0`**
   while VR input is active.
 
-## 8. Experimental stereo â€” AER
+## 8. Experimental stereo — AER
 
 - **AER is implemented and desktop-verified.** `stereo = aer` opts in;
   `mono` is the shipping default.

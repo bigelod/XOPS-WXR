@@ -1,9 +1,13 @@
 // ===========================================================================
-//  xrapi.h - in-process WinlatorXR XrApi client (protocol 0.5) for XOPS-WXR
+//  xrapi.h - in-process WinlatorXR XrApi client (protocol 0.4) for XOPS-WXR
 //
 //  Adapted from Shogo-VR-WXR's game/XrApiUDP.cpp, which is a working 0.4/0.5
 //  client on a Quest 3. Rewritten in plain C-style C++ with no engine types,
 //  and converting into XOPS space rather than LithTech space.
+//
+//  The `version` file advertises **0.4**. 0.5 is the same tracking packet plus
+//  the InputAPI listener on 7728, which this client does not implement;
+//  advertising 0.5 made the runtime expect that side of the protocol.
 //
 //  Three channels, per Docs/general_wxr/XRAPI_V0_4_DESC.md:
 //

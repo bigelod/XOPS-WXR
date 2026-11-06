@@ -1220,7 +1220,27 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  6 2026 14:28:55`, SHA-256
-`7e024792ae45de869c5b24b911a5276b8c7d486f27daa7243ba93dbb31804308`.
-Release build: 264,704 bytes, SHA-256
-`c5f112b564a96e40eb1db19365558527ecdf47bce918b544a86a12d4f6af4215`.
+Current dev build: `built Nov  6 2026 14:45:41`, SHA-256
+`06364bc1ffed8bc56c580c4395405ef312d3c795b01adf42b646390659efb59d`.
+Release build: 279,552 bytes, SHA-256
+`782bcb094ec5f4118e5f6377b1d6ea0dfa8e2910786d3ff3f15275ba42444a87`.
+
+### Device follow-up: version 0.4, pitch sign, release verbose
+
+- The `version` file advertised **0.5**, but this client only implements the
+  0.4 packet. 0.5 adds the InputAPI listener on 7728, which is not present.
+  It now writes **0.4**; the runtime reads the file once, so a runtime restart
+  is required.
+- Look up/down and the hand-aim shot were both inverted on the Quest because
+  the device had no `xops_wxr_steer.ini` and fell back to the code default
+  `pitchSign = -1`. The saved desktop INI and the device report both settle
+  **+1**; `SteerAimWrite` uses the same sign for the camera and the shot, so
+  one default fixes both. `hand_flip` is visual only: it negates the hand's
+  up/right vectors, not its forward/aim vector.
+- Release now keeps **safe verbose logging** when `verbose_debug = true`:
+  build/config, XrApi raw packet + sticks every ~2 s, MODE_VR/pose, EYE, ROLL,
+  HUD. Probe keys, CAMHUNT/scan ticks, draw dumps and frame grabs remain
+  dev-only. With `verbose_debug = false` release writes no log.
+- Open: AER works in-game but crashes on the transition back to a menu. Need
+  the probe log and Winelog from that transition to see whether it is the
+  `AerDraw*` path, `RESET`, or the runtime's MODE_3D switch.

@@ -1,12 +1,12 @@
-﻿# XOPS-WXR â€” CURRENT STEPS / handover
+# XOPS-WXR — CURRENT STEPS / handover
 
 **Date:** 6 Nov 2026, DeepSeek V4.1 Flash session.
 **Read with:** `COMPLETED_STEPS.md` (what is done), `NEXT_STEPS.md` (what is
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 14:28:55`, SHA-256
-`7e024792ae45de869c5b24b911a5276b8c7d486f27daa7243ba93dbb31804308`,
+**Current build:** `built Nov  6 2026 14:45:41`, SHA-256
+`06364bc1ffed8bc56c580c4395405ef312d3c795b01adf42b646390659efb59d`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---

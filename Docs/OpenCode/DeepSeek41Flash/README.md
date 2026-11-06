@@ -25,7 +25,7 @@ WinlatorXR and no build has been verified on the Quest 3.**
 |---|---|
 | Injection vector - `d3d8.dll` proxy | works on the desktop, forwards to `C:\Windows\system32\d3d8.dll` |
 | Camera position and angles | **solved and writable** `[device, runs 8-13]` - see the address table below |
-| XrApi 0.5 client | parses the **UDP Tester**, not yet a real device packet |
+| XrApi 0.4 client | advertises 0.4; parses the UDP Tester |
 | HUD / menu flag | **solved**: game state flags drive `MODE_VR`; `InGameplay()` uses mission/result/player fields |
 | Window / sync pixel / FOV | **implemented and desktop-verified** |
 | Replacement HUD | **implemented**: target-resolution D3D texture in the centre square, desktop-verified |
@@ -122,7 +122,7 @@ The outbound packet now sends **`80.7 x 65.0`** degrees instead of
 
 ### 2d. Desktop verification - PASSED, 5 Nov 2026
 
-Run on the desktop install with synthetic XrApi 0.5 packets matching the
+Run on the desktop install with synthetic XrApi 0.4 packets matching the
 tester's `Form1.BuildDataPacket` layout, in the game's own fullscreen mode.
 **This is desktop-verified, not Quest-3 device-verified.**
 
@@ -503,8 +503,8 @@ deployed copy with SHA-256 (`match=True`). The DLL is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 14:28:55`, SHA-256
-`7e024792ae45de869c5b24b911a5276b8c7d486f27daa7243ba93dbb31804308`,
+Current handover build: `built Nov  6 2026 14:45:41`, SHA-256
+`06364bc1ffed8bc56c580c4395405ef312d3c795b01adf42b646390659efb59d`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---

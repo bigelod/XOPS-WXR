@@ -517,35 +517,26 @@ static BOOL g_verboseDebug = FALSE;
 
 static void LogV(const char* fmt, va_list ap)
 {
-#if XOPS_DEV_BUILD
     if (!g_log) return;
     vfprintf(g_log, fmt, ap);
     fputc('\n', g_log);
     fflush(g_log);                      // a crash must not cost us the log
-#else
-    (void)fmt; (void)ap;
-#endif
 }
 
 static void Log(const char* fmt, ...)
 {
-#if XOPS_DEV_BUILD
     va_list ap;
     va_start(ap, fmt);
     EnterCriticalSection(&g_lock);
     LogV(fmt, ap);
     LeaveCriticalSection(&g_lock);
     va_end(ap);
-#else
-    (void)fmt;
-#endif
 }
 
 /* Verbose-only logging: snapshots, probes, draw dumps, raw packets and other
    diagnostics. Suppressed unless config.txt has verbose_debug = true. */
 static void LogD(const char* fmt, ...)
 {
-#if XOPS_DEV_BUILD
     va_list ap;
     if (!g_verboseDebug) return;
     va_start(ap, fmt);
@@ -553,9 +544,6 @@ static void LogD(const char* fmt, ...)
     LogV(fmt, ap);
     LeaveCriticalSection(&g_lock);
     va_end(ap);
-#else
-    (void)fmt;
-#endif
 }
 
 // IDA shows addresses against the preferred base (0x400000 for this EXE), so
@@ -3075,15 +3063,16 @@ static void ProbeCyclePhase(void)
 
 static int   g_dofMode    = DOF_FULL;
 static float g_yawSign    = 1.0f;
-/* Pitch sign -1 [device, run 13]. XOPS pitch is positive-DOWN, so the pose's
-   positive-up value has to be negated.
+/* Pitch sign +1. The saved desktop INI and the Quest 3 report both settle +1;
+   the old -1 default only survived because the device had no
+   xops_wxr_steer.ini, and it inverted BOTH look up/down and the hand-aim
+   shot pitch (SteerAimWrite uses this sign for both).
 
-   Recorded carefully because I got it wrong twice by reasoning instead of
-   asking: runs 11 and 12 each ended on +1 after the owner flipped the sign,
-   and I read that as evidence for +1. The flips were him comparing, not
-   settling. The owner's direct report - "it was still up/down reverse" - is
-   the evidence; a toggle history is not. */
-static float g_pitchSign  = -1.0f;
+   Recorded because the sign was flipped repeatedly by reasoning rather than
+   by the owner's direct report. Runs 11-13 ended on conflicting values; the
+   device test is the authority. `hand_flip` is NOT involved: it only negates
+   the hand's visual up/right vectors, not its forward/aim vector. */
+static float g_pitchSign  = 1.0f;
 static int   g_cluster    = CLU_BOTH;
 static float g_posScale   = 1.0f;   /* gain on HMD translation; 1.0 = 1:1 */
 /* Render-side eye height: the game re-clamps its camera Y every frame, so
@@ -4649,12 +4638,10 @@ static void EnsureInit(void)
     _snprintf(g_baseDir, MAX_PATH, "%s", dir);
     g_baseDir[MAX_PATH - 1] = 0;
 
-#if XOPS_DEV_BUILD
     char logPath[MAX_PATH];
     _snprintf(logPath, MAX_PATH, "%sxops_wxr_probe.log", dir);
     logPath[MAX_PATH - 1] = 0;
     g_log = fopen(logPath, "w");
-#endif
 
     g_exeBase = (UINT_PTR)GetModuleHandleA(NULL);
 
@@ -4666,6 +4653,17 @@ static void EnsureInit(void)
     /* Loaded before the diagnostic startup block so verbose_debug is known
        before anything is written through LogD(). */
     HandLoadConfig();
+#if !XOPS_DEV_BUILD
+    /* Release logging exists only when the owner turns verbose_debug on.
+       The safe per-frame diagnostics remain (XrApi raw/sticks, mode, EYE,
+       ROLL); the probe keys, scanners, draw dumps and frame grabs are
+       compiled out of use. */
+    if (!g_verboseDebug) {
+        if (g_log) fclose(g_log);
+        g_log = NULL;
+        remove(logPath);
+    }
+#endif
     Log("FONT  CreateFontIndirectA IAT patched: %s",
         g_realCreateFontIndirectA ? "yes" : "no");
     for (int fi = 0; fi < g_fontLogN; ++fi) LogFontRequest(&g_fontLog[fi]);
@@ -7718,10 +7716,12 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
     }
 
     if ((g_frame % 120) == 0 && g_frame > 60) { WatchDump("periodic"); SteerLog(); }
+#if XOPS_DEV_BUILD
     BallisticTick();
     IdleTick();
     if ((g_frame % 5) == 0) SampleRanges();
     HuntTick();
+#endif
 
     g_lastXforms  = g_xformThisFrame;
     g_lastIndexed = g_drawsIDX;
