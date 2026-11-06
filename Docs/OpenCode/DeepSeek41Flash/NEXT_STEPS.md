@@ -193,31 +193,68 @@ Checklist for the Quest 3 / WinlatorXR run:
 
 ---
 
-## 6. EXPERIMENTAL - true stereo (SBS first, AER fallback)
+## 6. EXPERIMENTAL - true stereo (AER working; SBS deferred)
 
-**Status:** not started. Owner explicitly allows cancelling/postponing until
-after V1.0 if it cannot be done tidily. Take time and test on the desktop.
+**Status (6 Nov, late): AER is implemented and desktop-verified. SBS is not,
+and is deliberately deferred.** Owner allows cancelling/postponing until after
+V1.0 if it cannot be done tidily. `stereo = mono` is the shipping default;
+`stereo = aer` opts in. The test install is set back to `mono`.
 
-**Reference:** `D:\Daven Bigelow\Documents\GitHub\HaloCEWXR`. Use its stereo
-path only - **do not port its non-VR mode**.
+### What the engine actually does (the decisive discovery)
 
-- **SBS:** double the presented width, same height (two eye images side by
-  side). Runtime must be told the stereo layout.
-- **AER fallback:** top-and-bottom, same 4:3 resolution per eye.
-- The XrApi outbound packet already carries `MODE_3D`; confirm the value the
-  runtime expects for SBS vs AER before drawing anything.
-- The mod owns camera and projection, so both eyes can be rendered from the
-  same world with an IPD offset and a per-eye projection.
-- The 640x480 render target, HUD, hands, laser and composite must be evaluated
-  per eye; decide whether the HUD is duplicated or drawn once in screen space.
-- Sync pixel stays in the top-left of the **final presented** frame.
+- During gameplay there are **0 `SetTransform` calls**. The game
+  pre-transforms the world on the CPU and submits **`DrawPrimitive` (non-
+  indexed) vertex buffers** in **centimetres**: a room spans roughly -300..200
+  units, 0..206 units high. That path carries the walls, floor and ceiling.
+- The **indexed** `DrawIndexedPrimitive` path (about 84 draws/frame) carries
+  smaller geometry in metre-ish units (actors/view models). The real FVF is
+  `0x102`/`0x142` (XYZ[+DIFFUSE]+TEX1, stride 20/24), not the stale
+  `0x144` the probe logs from `SetVertexShader`.
+- The game's projection is set once and stays; the world's cm path and the
+  model path use different internal scales.
+- Consequence: a view-matrix offset cannot move the camera. **Reprojection at
+  draw time is the only route** in this engine.
 
-Open questions to answer from the HaloCEWXR code first:
+### AER - implemented
 
-- Exact `MODE_3D` values and whether the runtime wants a specific eye order.
-- Whether the runtime crops/letterboxes the SBS image itself.
-- How HaloCEWXR builds the per-eye projection (asymmetry, convergence).
-- Whether the game's own 2D UI is duplicated or suppressed per eye.
+- `g_eyeRight` alternates once per presented frame, **after** Present, so the
+  sync pixel, the image and the blue eye flag all describe the same frame.
+- `AerDrawPrimitive` (non-indexed world path): copy the draw's vertices to a
+  scratch buffer and shift `x` by `-d * 100` (cm path).
+- `AerDrawIndexed` (model path): copy the draw, shift `x` by `-d` (m path);
+  the XYZRHW stride-28 branch keeps a depth-based screen-space shift for other
+  paths. The three `primCount=28/numV=34` HUD-slot draws and everything after
+  them (`g_hudModelPass`) are left screen-fixed.
+- The virtual hands/laser get the same eye offset through their view matrix.
+- Sync pixel is `RGB(HMD_SYNC, 0, eyeFlag)`, blue 255 = right. `MODE_3D = 2`.
+- IPD comes from packet float 25 (fallback 64 mm).
+
+**Desktop evidence:** pair grabs with the test pose feeder:
+`DUMP ... eye=left` then `eye=right`; full-frame MAD between the pair rose
+from ~1 (animation) to **8.07**, with a depth-dependent horizontal shift of
+5-12 px at 1920 across wall and floor regions. An anaglyph of the pair shows
+the world doubled at the wall corner while the custom HUD stays identical in
+both eyes. Mono consecutive frames stay at MAD 0.033.
+
+**Open on-device questions:** eye sign (if depth looks inverted, flip the sign
+in the two reproject helpers and in the hand-pass view), and whether the
+centimetre scale is exactly 100 on the device. Both are one-line values.
+
+### SBS - deferred, with the plan
+
+SBS needs each frame rendered twice, side by side. The pieces are now known:
+
+1. A double-width game render target (e.g. 1280x480 for two 640x480 eyes).
+2. Every world/model draw duplicated into the left and right half viewports
+   with the same `-d`/`+d` shift used by AER; the hand pass duplicated too.
+3. The custom HUD drawn once per half (screen-space).
+4. A double-width presented image: the owner's assumption is SBS = double
+   width, same height, so the container/window must be double width
+   (e.g. 2560x960). That is the part that is not tidy on a 4:3 container and
+   is why it is deferred.
+5. Two sync squares: top-left of the full frame and top-left of the right half.
+
+Do this only after the AER sign/scale is settled on device.
 
 ---
 

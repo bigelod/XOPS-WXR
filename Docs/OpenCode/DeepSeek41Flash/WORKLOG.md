@@ -773,3 +773,70 @@ deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 - No true stereo yet (next experimental step).
 - Launcher not started.
 - Per-weapon offset persistence still in memory only.
+
+## 2026-11-06 - experimental AER stereo (desktop-verified)
+
+### The discovery that shaped it
+
+During gameplay the log shows **0 SetTransform calls**: XOPS pre-transforms
+the world on the CPU and submits it through the **non-indexed
+`DrawPrimitive`** path with vertex buffers. Dumping a world draw shows
+camera-space coordinates in **centimetres** (a room spans x -300..200,
+y 0..206, z -21..178) and layout XYZ + DIFFUSE + TEX1, stride 24. The real
+current FVF from `GetVertexShader` is `0x102`/`0x142`; the probe's
+`g_curFvf` is stale at `0x144` because the game sets the drawing FVF through
+a state block. The **indexed** path (about 84 draws) carries smaller
+metre-scale geometry (actors / view models).
+
+A view-matrix eye offset therefore does nothing to the world; the camera is
+already baked into the vertices. Stereoscopic AER has to be done by
+**reprojecting each draw** at submission time.
+
+### Implemented - AER
+
+- `stereo = mono | sbs | aer` in `config.txt`, default `mono`.
+- `g_eyeRight` flips once per presented frame, **after** `Present`, so the
+  image, the blue sync eye flag and the log label all agree. (Flipping it
+  before the composite made the flag describe the opposite eye.)
+- `AerDrawPrimitive`: the cm world path copies the draw into a scratch buffer
+  and shifts x by `-d*100`; `AerDrawIndexed`: the m path shifts x by `-d`.
+  Both re-submit with `DrawPrimitiveUP` / `DrawIndexedPrimitiveUP` so the
+  game's shared buffers are never modified. `g_hudModelPass` leaves the 3D
+  HUD slot models and everything after them screen-fixed.
+- The virtual hands/laser get the same offset through their view matrix.
+- Sync square: `RGB(HMD_SYNC, 0, eyeFlag)`, blue 255 = right. `MODE_3D=2`.
+- IPD is packet float 25 (64 mm fallback).
+
+### Verification - desktop
+
+Test pose feeder (left hand forward of the right), `building.ext`:
+
+```
+DUMP  wrote ...\\xops_frame_592.bmp  eye=right
+DUMP  wrote ...\\xops_frame_593.bmp  eye=left
+full-frame MAD between the pair: 8.07   (mono consecutive frames: 0.033)
+region shift at 1920: walls ~5-9 px, near floor ~12 px
+```
+
+An anaglyph of the pair shows the world doubled at the wall corner (depth
+parallax) while the custom HUD panels are identical in both eyes. The gun
+clone stays intact after `g_hudModelPass`; an earlier build without that flag
+turned the game's slot model into black spikes.
+
+`. ` (VK_OEM_PERIOD) now grabs **two consecutive** composited frames
+(`xops_frame_<n>.bmp`), which is exactly an AER left/right pair.
+
+### Not done - SBS
+
+SBS needs two viewports per draw and a double-width render target/presented
+image. The draw duplication is now well understood, but the container/window
+has to be double width for each half to keep a 4:3 eye image, and that is not
+tidy on the supported 1280x960 container. Deferred until the AER eye sign and
+centimetre scale are confirmed on the device; the plan is in `NEXT_STEPS.md`.
+
+### Build
+
+`built Nov  6 2026 05:21`, SHA-256
+`e2c96caef36c37a697a8cbd8d8f6b8121f0339acbd5fbdedf57f4a40f9752cf7`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
+Test config left at `stereo = mono`, `verbose_debug = true`.

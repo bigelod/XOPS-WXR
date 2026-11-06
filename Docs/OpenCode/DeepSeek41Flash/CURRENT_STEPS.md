@@ -190,6 +190,7 @@ haptics = true
 haptics_hand = dominant
 haptic_frames = 2
 verbose_debug = true     # this test PC; ship with false
+stereo = mono            # experimental: aer
 ```
 
 Useful log lines (most need `verbose_debug = true`):

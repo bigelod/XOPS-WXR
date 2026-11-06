@@ -278,6 +278,7 @@ enum {
 #define D3DTS_WORLD       256
 #define D3DFVF_XYZRHW     0x004
 #define D3DCLEAR_TARGET   0x00000001
+#define D3DFMT_INDEX16    101
 #define D3DCOLOR_XRGB(r,g,b) ((DWORD)(((DWORD)(r) << 16) | \
                                       ((DWORD)(g) <<  8) |  \
                                        (DWORD)(b)))
@@ -313,6 +314,7 @@ typedef HRESULT (__stdcall *PFN_DrawPrimitiveUP)(void*, DWORD, UINT, const void*
 typedef HRESULT (__stdcall *PFN_DrawPrimitive)(void*, DWORD, UINT, UINT);
 typedef HRESULT (__stdcall *PFN_DrawIndexedPrim)(void*, DWORD, UINT, UINT, UINT, UINT);
 typedef HRESULT (__stdcall *PFN_SetVertexShader)(void*, DWORD);
+typedef HRESULT (__stdcall *PFN_GetVertexShader)(void*, DWORD*);
 
 // ---------------------------------------------------------------------------
 // State
@@ -428,6 +430,7 @@ static BOOL   g_gameRTFirstScene = TRUE;
 static void*  g_savedRT     = NULL;
 static void*  g_savedDepth  = NULL;
 static int    g_grabFrames = 0;      /* J: save the next composited frame */
+static BOOL   g_grabPair   = FALSE;  /* also save the frame after it (AER L/R) */
 static char   g_baseDir[MAX_PATH] = "";
 static int    g_dumpDraws  = 0;
 static BOOL   g_dumpArmed  = FALSE;
@@ -1181,6 +1184,23 @@ static long  g_hapShots     = 0;
    Both hands are on the weapon, so a shot buzzes both controllers; the pose
    work will hang the off hand off the same state. */
 static BOOL  g_twoHanded    = FALSE;
+
+/* Stereo experiment. 0 = mono (shipping), 1 = SBS, 2 = AER. AER alternates
+   one eye per presented frame and offsets the view by +/- IPD/2 along the
+   camera's right vector; SBS renders both eyes into the same frame. */
+#define STEREO_MONO 0
+#define STEREO_SBS  1
+#define STEREO_AER  2
+static int   g_stereoMode   = STEREO_MONO;
+static BOOL  g_eyeRight     = FALSE;   /* the eye being rendered this frame */
+static BOOL  g_hudModelPass = FALSE;   /* reached the 3D HUD weapon models */
+
+/* AER reprojection scratch: the game's shared vertex buffers are never
+   modified, each draw is copied here and re-submitted as a UP draw. */
+#define AER_MAX_V 65536
+#define AER_MAX_I 196608
+static BYTE g_aerVerts[AER_MAX_V * 28];
+static WORD g_aerIdx[AER_MAX_I];
 
 /* Manual right-hand override for test driving, active only while the "0"
    user-control mode is ON. See ManualHandKeys for the key map.
@@ -4129,7 +4149,8 @@ static void ProbeKeys(PBYTE p)
        are the VR/debug controls. */
     const int watch[] = {
         '0', 'F', 'M', 'H', 'V', 'T', 'N', 'J', 'K',
-        VK_OEM_4, VK_OEM_6, VK_OEM_1, VK_OEM_7, VK_OEM_5, VK_OEM_3
+        VK_OEM_4, VK_OEM_6, VK_OEM_1, VK_OEM_7, VK_OEM_5, VK_OEM_3,
+        VK_OEM_PERIOD
     };
     const int watchN = (int)(sizeof(watch) / sizeof(watch[0]));
     BYTE now[256];
@@ -4300,6 +4321,13 @@ static void ProbeKeys(PBYTE p)
                 g_stickMove = !g_stickMove;
                 Log("STICK    left stick -> W/A/S/D: %s",
                     g_stickMove ? "ON (only while steering)" : "off");
+            } else if (vk == VK_OEM_PERIOD) {
+                /* '.' grabs the next composited frame, then the one after it
+                   (a stereo pair under AER) - the only reliable way to inspect
+                   the D3D output on this box. */
+                g_grabFrames = 1;
+                g_grabPair = TRUE;
+                Log("DUMP     armed: next two composited frames -> xops_frame_<n>.bmp");
             } else if (vk == VK_OEM_3) {
                 g_cluster = (g_cluster + 1) % 3;
                 SteerRecentre();
@@ -4366,6 +4394,7 @@ static void ProbeKeys(PBYTE p)
     p['0'] = 0;             /* desktop-input toggle */
     p[VK_OEM_4] = 0; p[VK_OEM_6] = 0; p[VK_OEM_1] = 0; p[VK_OEM_7] = 0;
     p[VK_OEM_5] = 0; p[VK_OEM_3] = 0;
+    p[VK_OEM_PERIOD] = 0;
     /* Stage-3 comparison switch, always live so it works before probe mode. */
     p['F'] = 0;
     /* Fullscreen-resolution experiment; applies at the next Reset. */
@@ -4509,6 +4538,8 @@ static void HandLoadConfig(void)
             fputs("# verbose_debug: true writes diagnostic detail (probes, dumps,\n", f);
             fputs("# raw packets). false (default) keeps errors and state changes only.\n", f);
             fputs("verbose_debug = false\n", f);
+            fputs("# stereo: mono (default), sbs, or aer (experimental)\n", f);
+            fputs("stereo = mono\n", f);
             fclose(f);
             Log("HAND     created %s with defaults", path);
         } else {
@@ -4522,6 +4553,7 @@ static void HandLoadConfig(void)
         g_hapticFrames = 2;
         g_twoHanded = FALSE;
         g_verboseDebug = FALSE;
+        g_stereoMode = STEREO_MONO;
         return;
     }
 
@@ -4560,6 +4592,10 @@ static void HandLoadConfig(void)
         } else if (!_stricmp(key, "verbose_debug")) {
             g_verboseDebug = (!_stricmp(val, "true") || !_stricmp(val, "yes") ||
                               !strcmp(val, "1")) ? TRUE : FALSE;
+        } else if (!_stricmp(key, "stereo")) {
+            if (!_stricmp(val, "sbs") || !strcmp(val, "1"))      g_stereoMode = STEREO_SBS;
+            else if (!_stricmp(val, "aer") || !strcmp(val, "2")) g_stereoMode = STEREO_AER;
+            else                                                 g_stereoMode = STEREO_MONO;
         }
     }
     fclose(f);
@@ -4573,6 +4609,9 @@ static void HandLoadConfig(void)
         g_hapticHand == 1 ? "both" : g_hapticHand == 2 ? "left" :
         g_hapticHand == 3 ? "right" : "dominant", g_hapticFrames);
     Log("LOG      verbose_debug=%s", g_verboseDebug ? "true" : "false");
+    Log("STEREO   %s", g_stereoMode == STEREO_SBS ? "SBS (experimental)"
+                      : g_stereoMode == STEREO_AER ? "AER (experimental)"
+                                                   : "mono");
 }
 
 static void EnsureInit(void)
@@ -4780,6 +4819,15 @@ static BOOL Verbose(void)
            ((g_frame < VERBOSE_FRAMES) || (g_frame % VERBOSE_EVERY == 0));
 }
 
+/* Eye separation in metres. The runtime's IPD is authoritative; fall back to
+   a Quest-class default if the packet carries nonsense. */
+static float EyeIpd(void)
+{
+    const float v = g_pose.ipd;
+    if (v > 0.01f && v < 0.12f) return v;
+    return 0.064f;
+}
+
 static HRESULT __stdcall hkSetTransform(void* dev, DWORD type, const D3DMATRIX8* m)
 {
     NoteCallSite(type, _ReturnAddress());
@@ -4795,6 +4843,21 @@ static HRESULT __stdcall hkSetTransform(void* dev, DWORD type, const D3DMATRIX8*
         LogMatrix(XformName(type), m);
         if (type == D3DTS_VIEW)       LogViewDecomposed(m);
         else                          LogProjDecomposed(m);
+    }
+    /* AER: render one eye per frame by shifting the camera +/- IPD/2 along
+       its own right vector. In a row-vector view matrix m[3][0] is the
+       camera-space translation along right, so moving the camera right by d
+       subtracts d there. The projection and everything else stay untouched;
+       the runtime holds the other eye's frame. */
+    if (type == D3DTS_VIEW && m &&
+        g_stereoMode == STEREO_AER && InGameplay()) {
+        D3DMATRIX8 adj = *m;
+        const float d = (g_eyeRight ? 0.5f : -0.5f) * EyeIpd();
+        adj.m[3][0] -= d;
+        if ((g_frame % 120) == 0)
+            LogD("STEREO   view offset eye=%s d=%+.4f  m30 %+.4f -> %+.4f",
+                 g_eyeRight ? "right" : "left", d, m->m[3][0], adj.m[3][0]);
+        return o_SetTransform(dev, type, &adj);
     }
     return o_SetTransform(dev, type, m);
 }
@@ -5009,6 +5072,50 @@ static HRESULT __stdcall hkDrawIndexedPrimitiveUP(void* dev, DWORD prim,
                                     vertexStride);
 }
 
+/* AER reprojection for the non-indexed path (the world comes through here as
+   camera-space XYZ lists). Same lateral eye shift as the indexed path. */
+static HRESULT AerDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
+{
+    void* vb = NULL;
+    UINT stride = 0, i;
+    BYTE* data = NULL;
+    PFN_VBLock lock;
+    PFN_VBUnlock unlock;
+    float d;
+    static long logged = 0;
+
+    if (!o_GetStreamSource || !o_DrawPrimitiveUP) return E_FAIL;
+    if (count == 0 || count > AER_MAX_V) return E_FAIL;
+    if (o_GetStreamSource(dev, 0, &vb, &stride) != S_OK || !vb) return E_FAIL;
+    if (stride != 20 && stride != 24) { ReleaseIUnknown(vb); return E_FAIL; }
+
+    lock   = (PFN_VBLock)(*(void***)vb)[11];
+    unlock = (PFN_VBUnlock)(*(void***)vb)[12];
+    if (lock(vb, 0, 0, &data, 0x10) != S_OK || !data) {
+        ReleaseIUnknown(vb);
+        return E_FAIL;
+    }
+    data += (SIZE_T)start * stride;
+    /* The non-indexed world path is in centimetres (a room spans ~500 units),
+       so the metre eye offset is scaled by 100 here. */
+    d = (g_eyeRight ? 0.5f : -0.5f) * EyeIpd() * 100.0f;
+    for (i = 0; i < count; ++i) {
+        const BYTE* src = data + (SIZE_T)i * stride;
+        BYTE* dst = g_aerVerts + (SIZE_T)i * stride;
+        memcpy(dst, src, stride);
+        *(float*)(dst + 0) = *(const float*)(src + 0) - d;
+    }
+    unlock(vb);
+    ReleaseIUnknown(vb);
+
+    if (logged < 20 || (g_frame % 600) == 0) {
+        ++logged;
+        LogD("STEREO   AER primitive: count=%u stride=%u eye=%s d=%+.4f",
+             count, stride, g_eyeRight ? "right" : "left", d);
+    }
+    return o_DrawPrimitiveUP(dev, prim, count, g_aerVerts, stride);
+}
+
 static HRESULT __stdcall hkDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
 {
     ++g_drawsThisFrame; ++g_drawsVB;
@@ -5026,6 +5133,10 @@ static HRESULT __stdcall hkDrawPrimitive(void* dev, DWORD prim, UINT start, UINT
         --g_dumpDraws;
     }
     if (g_handDrawnThisFrame && HideThisDraw()) return 0;
+    if (g_stereoMode == STEREO_AER && InGameplay() && !g_hudModelPass) {
+        if (AerDrawPrimitive(dev, prim, start, count) == S_OK)
+            return S_OK;
+    }
     return o_DrawPrimitive(dev, prim, start, count);
 }
 
@@ -5680,13 +5791,121 @@ static void HandDrawAttachedBatch(void* dev, const float vp[3], const float vf[3
     o_DrawPrimitiveUP(dev, D3DPT_TRIANGLELIST, n / 3, out, sizeof(CompVert3D));
 }
 
+/* ---- AER reprojection ---------------------------------------------------
+   XOPS pre-transforms the world on the CPU and submits XYZRHW vertices, so
+   moving the D3D view has no effect. A lateral eye shift of d metres moves a
+   vertex at camera-space depth z by -d * fpx / z pixels, and leaves y and the
+   depth unchanged: exactly the parallax AER needs. The game's vertices are
+   copied into a scratch buffer, so its shared vertex buffer is never touched.
+
+   fpx and the depth constants come from the game's own projection:
+   fpx = m00 * (width/2), A = m22, B = -m32, z = B / (A - zNdc). */
+static HRESULT AerDrawIndexed(void* dev, DWORD prim, UINT minIdx, UINT numV,
+                              UINT startIdx, UINT primCount)
+{
+    void* vb = NULL;
+    void* ib = NULL;
+    UINT stride = 0, base = 0, nI, i;
+    BYTE* vdata = NULL;
+    BYTE* idata = NULL;
+    PFN_VBLock lock, ilock;
+    PFN_VBUnlock unlock, iunlock;
+    float A, B, fpx, d, zndc, zcam, dx;
+    static long logged = 0;
+
+    if (!o_GetStreamSource || !o_GetIndices || !o_DrawIndexedPrimitiveUP)
+        return E_FAIL;
+    if (prim != 4 /* D3DPT_TRIANGLELIST */ || !g_haveProj) return E_FAIL;
+    if (!(g_curFvf & D3DFVF_XYZRHW)) return E_FAIL;
+    if (numV == 0 || numV > AER_MAX_V) return E_FAIL;
+    if (primCount == 0 || primCount * 3 > AER_MAX_I) return E_FAIL;
+
+    if (o_GetStreamSource(dev, 0, &vb, &stride) != S_OK || !vb) return E_FAIL;
+    if (stride != 20 && stride != 28) { ReleaseIUnknown(vb); return E_FAIL; }
+
+    A = g_lastProj.m[2][2];
+    B = -g_lastProj.m[3][2];
+    fpx = g_lastProj.m[0][0] * 320.0f;
+    if (stride == 28 && (A <= 0.0f || B <= 0.0f || fpx <= 0.0f)) {
+        ReleaseIUnknown(vb);
+        return E_FAIL;
+    }
+    d = (g_eyeRight ? 0.5f : -0.5f) * EyeIpd();
+
+    lock   = (PFN_VBLock)(*(void***)vb)[11];
+    unlock = (PFN_VBUnlock)(*(void***)vb)[12];
+    if (lock(vb, 0, 0, &vdata, 0x10) != S_OK || !vdata) {
+        ReleaseIUnknown(vb);
+        return E_FAIL;
+    }
+    vdata += (SIZE_T)minIdx * stride;
+
+    for (i = 0; i < numV; ++i) {
+        const BYTE* src = vdata + (SIZE_T)i * stride;
+        BYTE* dst = g_aerVerts + (SIZE_T)i * stride;
+        float x;
+        memcpy(dst, src, stride);
+        x = *(const float*)(src + 0);
+        if (stride == 20) {
+            /* World vertices are camera-space XYZ + TEX1, so the eye shift is
+               a plain lateral translation; D3D applies the fixed projection. */
+            *(float*)(dst + 0) = x - d;
+        } else {
+            /* XYZRHW: pre-transformed. Move the vertex in screen space by the
+               parallax for its depth. */
+            float z = *(const float*)(src + 8);
+            zndc = z;
+            if (zndc < 0.0f) zndc = 0.0f;
+            if (zndc > 0.9999f) zndc = 0.9999f;
+            zcam = B / (A - zndc);
+            if (zcam < 0.05f) zcam = 0.05f;
+            dx = -d * fpx / zcam;
+            if (dx >  60.0f) dx =  60.0f;
+            if (dx < -60.0f) dx = -60.0f;
+            *(float*)(dst + 0) = x + dx;
+        }
+    }
+    unlock(vb);
+    ReleaseIUnknown(vb);
+
+    if (o_GetIndices(dev, &ib, &base) != S_OK || !ib) return E_FAIL;
+    if (base != 0) { ReleaseIUnknown(ib); return E_FAIL; }
+    nI = primCount * 3;
+    ilock   = (PFN_VBLock)(*(void***)ib)[11];
+    iunlock = (PFN_VBUnlock)(*(void***)ib)[12];
+    if (ilock(ib, 0, 0, &idata, 0x10) != S_OK || !idata) {
+        ReleaseIUnknown(ib);
+        return E_FAIL;
+    }
+    idata += (SIZE_T)startIdx * 2;
+    for (i = 0; i < nI; ++i) {
+        UINT vi = ((const WORD*)idata)[i];
+        if (vi < minIdx) vi = minIdx;             /* keep it in range */
+        g_aerIdx[i] = (WORD)(vi - minIdx);
+    }
+    iunlock(ib);
+    ReleaseIUnknown(ib);
+
+    if (logged < 40 || (g_frame % 600) == 0) {
+        ++logged;
+        LogD("STEREO   AER reproject: numV=%u prim=%u eye=%s d=%+.4f fpx=%.1f",
+             numV, primCount, g_eyeRight ? "right" : "left", d, fpx);
+    }
+
+    return o_DrawIndexedPrimitiveUP(dev, prim, 0, numV, primCount,
+                                    g_aerIdx, D3DFMT_INDEX16,
+                                    g_aerVerts, 28);
+}
+
 static HRESULT __stdcall hkDrawIndexedPrim(void* dev, DWORD prim, UINT minIdx,
                                            UINT numV, UINT startIdx, UINT primCount)
-{
-    /* The world is drawn; the last three primCount=28/numV=34 draws are the
+{    /* The world is drawn; the last three primCount=28/numV=34 draws are the
        3D HUD weapon-slot models. Draw the virtual hands/laser just before the
        first of those, so they are in the gameplay layer underneath the HUD
-       layer, not after it. */
+       layer, not after it. From that draw on, everything is HUD/view-model
+       geometry and must not be eye-reprojected. */
+    if (InGameplay() && primCount == 28 && numV == 34)
+        g_hudModelPass = TRUE;
     if (g_compositeActive && g_gameRTActive && !g_handDrawnThisFrame &&
         InGameplay() && primCount == 28 && numV == 34) {
         DrawHandAndLaserWorld(dev);
@@ -5744,6 +5963,13 @@ static HRESULT __stdcall hkDrawIndexedPrim(void* dev, DWORD prim, UINT minIdx,
             DumpWorldZ(dev, minIdx, numV);
         --g_dumpDraws;
     }
+    /* AER: reproject the pre-transformed world into the current eye. The
+       three primCount=28/numV=34 draws are the game's 3D HUD weapon slots and
+       stay screen-fixed, like a view model. */
+    if (g_stereoMode == STEREO_AER && InGameplay() && !g_hudModelPass) {
+        if (AerDrawIndexed(dev, prim, minIdx, numV, startIdx, primCount) == S_OK)
+            return S_OK;
+    }
     return o_DrawIndexedPrim(dev, prim, minIdx, numV, startIdx, primCount);
 }
 
@@ -5756,7 +5982,7 @@ static HRESULT __stdcall hkDrawIndexedPrim(void* dev, DWORD prim, UINT minIdx,
 static void DrawSyncPixel(void* dev)
 {
     static long drawn = 0;
-    int r;
+    int r, b;
     D3DRECT8 rc;
 
     if (!dev || !o_Clear || !g_posed || !g_pose.valid) return;
@@ -5764,12 +5990,16 @@ static void DrawSyncPixel(void* dev)
     r = (int)(g_pose.sync + 0.5f);
     if (r < 0) r = 0; else if (r > 255) r = 255;
 
+    /* AER carries the eye in blue: 0 = left, 255 = right. Every other mode
+       keeps blue 0 (section 5 of the XrApi spec). */
+    b = (g_stereoMode == STEREO_AER && InGameplay()) ? (g_eyeRight ? 255 : 0) : 0;
+
     rc.x1 = 0; rc.y1 = 0; rc.x2 = 10; rc.y2 = 10;
-    o_Clear(dev, 1, &rc, D3DCLEAR_TARGET, D3DCOLOR_XRGB(r, 0, 0), 0.0f, 0);
+    o_Clear(dev, 1, &rc, D3DCLEAR_TARGET, D3DCOLOR_XRGB(r, 0, b), 0.0f, 0);
 
     if (drawn == 0)
-        Log("SYNC    first red square drawn: RGB(%d,0,0), 10x10 at (0,0)"
-            " - echo of HMD_SYNC", r);
+        Log("SYNC    first sync square drawn: RGB(%d,0,%d), 10x10 at (0,0)"
+            " - echo of HMD_SYNC", r, b);
     ++drawn;
 }
 
@@ -6356,7 +6586,14 @@ static void DrawHandAndLaserWorld(void* dev)
        depth values exactly comparable with the world's depth buffer. */
     ZeroMemory(&view, sizeof(view));
     view.m[0][0] = view.m[1][1] = view.m[2][2] = view.m[3][3] = 1.0f;
-    world = view;                       /* identity: no leftover model matrix */
+    /* AER: the hand/laser vertices are already in camera space, so the same
+       eye shift becomes a translation of the view. */
+    if (g_stereoMode == STEREO_AER && InGameplay())
+        view.m[3][0] = (g_eyeRight ? -0.5f : 0.5f) * EyeIpd();
+    /* World must stay identity: no leftover model matrix. Do not copy the
+       translated view into it or the eye shift is applied twice. */
+    ZeroMemory(&world, sizeof(world));
+    world.m[0][0] = world.m[1][1] = world.m[2][2] = world.m[3][3] = 1.0f;
     if (g_haveProj) proj = g_lastProj;
     else HandMakeProjection(&proj, 65.0f, 4.0f / 3.0f, 0.1f, 80.0f);
     if (o_GetTransform) {
@@ -6744,7 +6981,9 @@ static void DumpBackBuffer(void* dev)
         for (y = 0; y < (int)g_bbH; ++y)
             fwrite((BYTE*)lr.pBits + (SIZE_T)y * lr.Pitch, 1, rowBytes, f);
         fclose(f);
-        LogD("DUMP     wrote %s (%ux%u)", path, g_bbW, g_bbH);
+        LogD("DUMP     wrote %s (%ux%u)  eye=%s", path, g_bbW, g_bbH,
+             (g_stereoMode == STEREO_AER && InGameplay())
+                 ? (g_eyeRight ? "right" : "left") : "mono");
     } else {
         LogD("DUMP     could not open %s", path);
     }
@@ -6752,6 +6991,12 @@ static void DumpBackBuffer(void* dev)
     SurfUnlock(sys);
     ReleaseIUnknown(sys);
     ReleaseIUnknown(bb);
+
+    /* Pair grab: the next presented frame is the other eye under AER. */
+    if (g_grabPair) {
+        g_grabPair = FALSE;
+        g_grabFrames = 1;
+    }
 }
 
 static HRESULT __stdcall hkSetViewport(void* dev, const D3DVIEWPORT8* vp)
@@ -7080,7 +7325,20 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
         /* Haptics ride in the first two fields: a duration in frames, per
            hand. Updated from the magazine counter, gameplay only. */
         HapticTick(modeVr == XR_VR_ON, &hapL, &hapR);
-        XrSendFrame(hapL, hapR, modeVr, XR_3D_MONO, g_outFovX, g_outFovY);
+        {
+            /* AER only exists in gameplay; menus stay mono so their 2D UI is
+               not alternated between eyes. SBS is not implemented yet. */
+            const int mode3d =
+                (g_stereoMode == STEREO_AER && modeVr == XR_VR_ON)
+                    ? XR_3D_AER : XR_3D_MONO;
+            if (modeVr != XR_VR_ON) g_eyeRight = FALSE;
+            XrSendFrame(hapL, hapR, modeVr, mode3d, g_outFovX, g_outFovY);
+            if (g_stereoMode == STEREO_AER && modeVr == XR_VR_ON) {
+                if ((g_frame % 120) == 0)
+                    LogD("STEREO   AER eye=%s  ipd=%.3f m  mode3d=%d",
+                         g_eyeRight ? "right" : "left", EyeIpd(), mode3d);
+            }
+        }
     }
 
     if ((g_frame % 120) == 0 && g_frame > 60) { WatchDump("periodic"); SteerLog(); }
@@ -7110,6 +7368,12 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
         /* Leave the game target bound for the next frame, including any
            title/demo draws that happen before BeginScene. */
         if (g_compositeActive) BindGameRenderTarget(dev);
+        /* Flip the AER eye only after this frame has been rendered, composited
+           (including the blue eye flag) and presented. Flipping earlier made
+           the flag disagree with the image. */
+        if (g_stereoMode == STEREO_AER && InGameplay())
+            g_eyeRight = !g_eyeRight;
+        g_hudModelPass = FALSE;
         return hr;
     }
 }
