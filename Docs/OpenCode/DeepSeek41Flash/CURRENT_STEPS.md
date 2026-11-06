@@ -210,9 +210,9 @@ HAPTIC fires=N dur=F frames hand=both|left|right ...
 TAIL  idx N  vb=0x... numV=.. prim=.. tex=0x...
 ```
 
-Last built/deployed (haptics + two-handed aim + input mute + verbose):
-`built Nov  6 2026 04:27:08`, SHA-256
-`cdad87a2f59813e1a9ebcb00a3ccedea79e48359acb1439e896a68df0ddc19b5`.
+Last built/deployed (XrApi input while unfocused + stereo experiment):
+`built Nov  6 2026 05:59:03`, SHA-256
+`f5cc9688be65beb193290fea45a04b6750af6954a2b80d94ed1a1819c1ccdbb9`.
 
 ## 8. Next steps
 
