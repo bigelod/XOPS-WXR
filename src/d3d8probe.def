@@ -1,12 +1,10 @@
 ; XOPS-WXR d3d8 probe - export table
 ;
-; Only export what the game actually uses. The game imports Direct3DCreate8
-; and looks up DebugSetMute dynamically. Exporting the other debug helpers as
-; naked jumps was a trap on Wine/DXVK: GetProcAddress returned a valid export,
-; but the forward pointer was NULL and the game jumped to address 0.
-;
-; DebugSetMute is a safe wrapper in d3d8probe.cpp, not a naked jump.
+; Only export Direct3DCreate8, which is the one function the game imports.
+; The game looks up DebugSetMute via GetProcAddress; DXVK 1.10.1's d3d8.dll
+; does not export it, so the game handles NULL when the mod is absent. Do the
+; same here: exporting a wrapper changed the call/return stack shape and moved
+; the crash from address 0 to address 1.
 LIBRARY d3d8
 EXPORTS
     Direct3DCreate8                             @1
-    DebugSetMute                                @4

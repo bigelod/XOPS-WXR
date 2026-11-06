@@ -7926,25 +7926,14 @@ extern "C" void* __stdcall Direct3DCreate8(UINT sdkVersion)
     return d3d;
 }
 
-// DXVK 1.10.1 provides d3d8.dll on the device. It does NOT export the
-// optional Microsoft debug helpers (DebugSetMute, ValidateVertexShader,
-// ValidatePixelShader, Direct3D8EnableMaximizedWindowedModeShim). Exporting
-// them as naked jumps made GetProcAddress return a valid pointer whose real
-// target was NULL, so the game jumped to address 0. The .def now exports only
-// Direct3DCreate8 and DebugSetMute; DebugSetMute is a typed no-op wrapper.
-typedef void (WINAPI *PFN_DebugSetMute)(BOOL);
-static PFN_DebugSetMute g_realDebugSetMute = NULL;
-
-extern "C" void WINAPI DebugSetMute(BOOL mute)
-{
-    if (g_realDebugSetMute) g_realDebugSetMute(mute);
-}
-
+// DXVK 1.10.1 provides d3d8.dll on the device and does not export the
+// optional Microsoft debug helpers. The .def deliberately exports only
+// Direct3DCreate8. Do not re-export DebugSetMute (or the Validate* helpers):
+// the game's call/return shape for those does not match a wrapper here, and
+// a visible export makes GetProcAddress return a pointer the game will call.
 static void ResolveForwards(void)
 {
-    if (!g_hRealD3D8) return;
-    g_realDebugSetMute = (PFN_DebugSetMute)GetProcAddress(g_hRealD3D8,
-                                                          "DebugSetMute");
+    /* Nothing to forward: the .def exports Direct3DCreate8 only. */
 }
 
 // ---------------------------------------------------------------------------
