@@ -956,6 +956,14 @@ and the `/` toggle, same camera and hands:
 - A mirrored **-25 degree** head roll produces the symmetric sprite angle
   (+25 with the default `roll_sign = -1`) and the same fixed hand/laser axis,
   so the sign is consistent.
+- **Independent check of the hand frame:** with the head level and the sprite
+  off, the laser axis is 45.0 degrees at (1159,740). With +25 degrees of head
+  roll and the sprite still off, it is 70.0 degrees at (1058,806) - exactly a
+  +25 degree rotation about the screen centre. The hands therefore naturally
+  rotate +25 degrees with the head, and the sprite with `roll_sign = -1`
+  rotates +25 degrees too: world and hands agree. The hand counter (camera
+  +25, screen -25) cancels the sprite, keeping the hands at their tracked
+  +25 degrees.
 
 Build `built Nov  6 2026 07:13:13`, SHA-256
 `037e219d977ff1b556ae256e1d567e46bb3367f19b209797b1547f707d083f11`.
