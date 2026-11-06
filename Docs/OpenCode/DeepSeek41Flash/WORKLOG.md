@@ -674,3 +674,102 @@ deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
   hidden; if it is, narrow the suppression on the death screen.
 - The composite keeps the 640x480 RT bound outside Present and binds the back
   buffer for the final quad. It is smooth on the desktop; measure on the Quest.
+
+## 2026-11-06 - haptics, two-handed aim, input boundary, verbose logs
+
+### Haptics (implemented, desktop-verified)
+
+Protocol fact from `XRAPI_V0_4_DESC.md` section 4: outbound 7278 fields 1-2 are
+a vibration **duration in frames**, per hand, not an amplitude, and the runtime
+only stores values greater than zero. So the value is decayed locally and
+re-sent each frame; sending 0 does not stop a buzz.
+
+- `HapticTick()` watches both magazine counters (`+0C/+0D`) each frame, not
+  only when the HUD redraws. A drop of 1..8 rounds is a shot; a bigger drop is
+  a reload/pickup/respawn and is ignored.
+- One pulse per shot, `2` frames by default, **decayed before it is sent** -
+  the SHOGO MAD WXR order (`VRStereo.cpp` line ~2403). The runtime sees `1`
+  then `0`, a short kick. Automatic fire feels stronger because pulses arrive
+  faster, not because each is longer.
+- Dominant hand by default; **both hands while the left grip is held**.
+- Gameplay only; counters reset on menus/death so a respawn is silent.
+
+Config (`config.txt`, one directory above the game):
+`haptics`, `haptics_hand` (dominant|both|left|right), `haptic_frames` (1..5).
+
+Evidence, desktop `building.ext`, synthetic tester:
+
+```
+HAPTIC fires=1 dur=2 frames hand=right slot 1 weapon 14 ammo 12/29 (shots 1)
+...
+capture: 0.0 4.0 1 0 80.7 65.0 -> 3,2,1,0   (4-frame build)
+capture: 0.0 1.0 1 0 80.7 65.0 -> 0          (2-frame build, Shogo order)
+grip held: HAPTIC ... hand=both ... capture 1.0 1.0 1 0 80.7 65.0
+```
+
+### Two-handed aim (implemented, geometry verified)
+
+- The `two_handed` config key was removed. Two-handed aim is **held on the
+  left grip**, off otherwise.
+- `HandTwoHandedAim()` mirrors SHOGO's `UpdateTwoHanded`: aimF =
+  normalize(offP - domP); aimU = normalize(domU - aimF*dot(aimF,domU));
+  aimR = up x forward. Position stays at the dominant hand, roll is kept.
+- Used by the draw pass (gun, hand box, laser) **and** `SteerAimWrite`, so the
+  barrel, beam and shot agree.
+- Left grip no longer sends `TAB`; walk is gone.
+
+Evidence with a synthetic pose feeder (right hand 0.250,-0.250,0.350; left
+0.100,-0.100,0.750):
+
+```
+HAND two-handed aim ON: dom 0.250 -0.250 0.350 off 0.100 -0.100 0.750
+     aim -0.331 +0.331 +0.883
+HAND two-handed aim off
+```
+
+`normalize(off-dom) = normalize(-0.15, 0.15, 0.4) = (-0.331, 0.331, 0.883)`,
+exact.
+
+### Input boundary (implemented, negative-tested)
+
+- `GameWindowFocused()` asks the **real** (unhooked) `GetForegroundWindow`,
+  because the hook lies to keep the game running unfocused.
+- Unfocused: `GetKeyboardState` is zeroed, `GetAsyncKeyState`/`GetKeyState`
+  return 0, the cursor delta is forced to zero, and all synthetic stick/VR/
+  debug input is skipped. Edge tables are synced so a held key/button is not a
+  new press when focus returns.
+- VR mode (`g_vrExclusive`): physical `A B X Y` are always swallowed; the four
+  arrows are swallowed while `MODE_VR = 1`. Manual PC mode (`0`) allows them.
+
+Evidence: with Notepad focused, a synthetic `0` produced **no** `HAND user
+control ON` line. With the game focused the same key toggled it, and the
+subsequent fire test worked.
+
+### Verbose logging (implemented)
+
+- New `LogD()` (verbose only) and `g_verboseDebug`, loaded from
+  `verbose_debug` in `config.txt` (default FALSE). 219 informational call
+  sites moved to `LogD`; errors, config and game-state changes stayed on
+  `Log`. The frame dump also requires `verbose_debug`.
+- `HandLoadConfig()` now runs before the diagnostic startup block so the flag
+  is known before anything is written.
+- The test install (`E:\tmp\Q3Mods\config.txt`) is set to
+  `verbose_debug = true`; a shipped install defaults to false.
+
+### Controls (owner, 6 Nov)
+
+Left stick move; right stick turn; **left grip two-handed aim**; left trigger
+fire mode; right trigger shoot; right grip jump; B reload; A switch; X drop;
+Y zoom. Left-handed swaps only shoot/fire-mode.
+
+### Build
+
+`built Nov  6 2026 04:27:08`, SHA-256
+`cdad87a2f59813e1a9ebcb00a3ccedea79e48359acb1439e896a68df0ddc19b5`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
+
+### Deliberately not done
+
+- No true stereo yet (next experimental step).
+- Launcher not started.
+- Per-weapon offset persistence still in memory only.

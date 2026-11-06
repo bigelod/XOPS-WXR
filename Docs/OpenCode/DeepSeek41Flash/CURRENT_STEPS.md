@@ -1,8 +1,9 @@
 # XOPS-WXR — CURRENT STEPS / handover
 
-**Date:** 6 Nov 2026, end of the DeepSeek V4.1 Flash session.
-**Read with:** `README.md` (architecture) and `WORKLOG.md` (history). This file
-is the live "where we are right now and what is next".
+**Date:** 6 Nov 2026, DeepSeek V4.1 Flash session.
+**Read with:** `README.md` (architecture), `WORKLOG.md` (history),
+`NEXT_STEPS.md` (the live plan, including stereo and the launcher).
+This file is the live "where we are right now and what is next".
 
 ---
 
@@ -15,6 +16,17 @@ is the live "where we are right now and what is next".
 - Dominant-hand laser, depth-tested, from the hand.
 - **Hand aim:** while firing, the game's shot is aimed at the laser endpoint,
   and the view is restored before the world is drawn.
+- **Haptics:** one short pulse per shot from the magazine counter, 2 frames
+  (SHOGO-matched), dominant hand by default.
+- **Two-handed aim:** hold the **left grip**; the gun stays on the dominant
+  hand and points at the off hand. Both controllers buzz on firing while it
+  is held. No config key.
+- **Input boundary:** while the game window lacks focus it receives no input
+  at all (keyboard, mouse, sticks, VR buttons, debug keys). In VR mode the
+  physical A/B/X/Y keys are always swallowed, and the arrows are swallowed
+  while `MODE_VR = 1`. Manual PC mode (`0`) is exempt.
+- **Verbose logging** behind `verbose_debug` (default false); errors and
+  state changes always log.
 - **Manual/user mode (`0`):** ignores incoming 6DOF, installs a default pose
   for both hands, centres the cursor once, and drives the right hand with
   `E` + numpad (rotate) / `E` + numpad (move). `N` = attach, `J/K` = hunt.
@@ -24,6 +36,25 @@ is the live "where we are right now and what is next".
   - It follows weapon swaps, drops, pickups and empty slots.
   - Grenade is scaled to 1/3 and mapped vertical.
 - **Per-weapon hand offset (`Q` + numpad, `T` saves it).**
+
+## 1a. VR controller mapping (owner, 6 Nov)
+
+| Input | Action |
+|---|---|
+| Left stick | Move |
+| Right stick L/R | Turn L / R |
+| Left grip (held) | Two-handed aim |
+| Left trigger | Fire mode |
+| Right trigger | Shoot |
+| Right grip | Jump |
+| B | Reload |
+| A | Switch weapon |
+| X | Drop weapon |
+| Y | Zoom (toggle) |
+
+- **Walk is gone** (the left grip used to send `TAB`).
+- Left-handed mode swaps only shoot and fire mode; every other button is the
+  same.
 
 ## 2. The weapon-model discovery (important)
 
@@ -150,7 +181,18 @@ or the agent helper `deploy-probe.bat`. Deploy target:
 `E:\tmp\Q3Mods\xops096\d3d8.dll`.
 Game log: `E:\tmp\Q3Mods\xops096\xops_wxr_probe.log`.
 
-Useful log lines:
+**Config is `E:\tmp\Q3Mods\config.txt`** (one directory above the game):
+
+```
+handedness = right
+hand_flip = false
+haptics = true
+haptics_hand = dominant
+haptic_frames = 2
+verbose_debug = true     # this test PC; ship with false
+```
+
+Useful log lines (most need `verbose_debug = true`):
 
 ```
 HIDE  weapon VB 0x...; capturing parts next frame
@@ -159,25 +201,27 @@ HIDE  part N: <verts> v <indices> i tex=0x...
 HIDE  assembled N part(s) for '<weapon>'
 HIDE  current weapon NONE: hands only
 HIDE  sanity: ammo ... with empty hand - showing weapon
-HIDE  saved adj '<weapon>' (id N): x y z
+HAND  saved adj '<weapon>' (id N): x y z
+HAND  two-handed aim ON: dom x y z  off x y z  aim x y z
+HAPTIC fires=N dur=F frames hand=both|left|right ...
 TAIL  idx N  vb=0x... numV=.. prim=.. tex=0x...
 ```
 
-Last built/deployed (WRAP fix + drop latch + MAC 10 scale):
-`built Nov  6 2026 02:42`, SHA-256
-`74a001f201409a601afe4a29aa674912330e8cfae01b0790845ce84f7ce319b9`.
+Last built/deployed (haptics + two-handed aim + input mute + verbose):
+`built Nov  6 2026 04:27:08`, SHA-256
+`cdad87a2f59813e1a9ebcb00a3ccedea79e48359acb1439e896a68df0ddc19b5`.
 
 ## 8. Next steps
 
-1. **Build/deploy the WRAP addressing fix** and verify AUG, M1, Glock18 SD,
-   MK23, MAC 10 (multi-part) show their textures.
-2. If a part is still black, dump its stride/UVs with `model fmt` and check
-   whether a second texture stage or a lightmap is involved.
-3. Persist `g_handAdjTable` and per-weapon scale in `config.txt`.
-4. Hand grip passes (the owner said these come after capture is solid).
-5. Move the game's own muzzle flash / smoke / shell effects to the dominant
-   hand — reuse the game's effects, do not draw new ones.
-6. Update `README.md`/`WORKLOG.md` with the final capture pipeline.
+The live list is `NEXT_STEPS.md`. Immediate order:
+
+1. Persist `g_handAdjTable` and per-weapon scale in `config.txt`.
+2. Off-hand pose/offset in two-handed aim.
+3. Per-weapon muzzle mapping.
+4. Device test checklist (NEXT_STEPS section 5).
+5. **Experimental:** true stereo, SBS first with AER fallback, using
+   HaloCEWXR. May be postponed until after V1.0.
+6. **Bonus:** custom EXE launcher (Shogo `launcher-xr`), auto-update later.
 
 ## 9. Standing rules
 
@@ -187,3 +231,10 @@ Last built/deployed (WRAP fix + drop latch + MAC 10 scale):
 - Reuse the game's models and effects; do not invent replacements.
 - Only `0` remains from the old number keys; numpads, `J/K/N/T/Q/E` are ours.
 - `SetCursorPos` must never move the real cursor when the game is unfocused.
+- **No input may cross between windows:** unfocused means mute, debug keys
+  included.
+- **A/B/X/Y and (in `MODE_VR=1`) the arrows are never taken from the physical
+  keyboard in VR mode;** manual PC mode (`0`) is the exception.
+- `verbose_debug = false` ships; diagnostics never replace errors/state.
+- Normalise every quaternion on ingest; freeze on the last good pose.
+- Never commit XOPS's own data files or binaries.

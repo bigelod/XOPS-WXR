@@ -365,6 +365,18 @@ image is genuinely stretched. `tools/record_clicks.py` records a new sequence
 and filters by **process id**, because XOPS changes its window handle during
 the transition.
 
+**Haptics + two-handed aim + input boundary + verbose logs (6 Nov, late
+pass).** The outbound fields 1-2 are a per-hand vibration **duration in
+frames**; the mod sends a 2-frame pulse per shot, decayed locally in the SHOGO
+order, on the dominant hand - or both while the **left grip** is held.
+Two-handed aim mounts the gun on the dominant hand and points it at the off
+hand (`HandTwoHandedAim`, SHOGO's `UpdateTwoHanded`), and the shot follows it.
+The left grip no longer walks. While the game window is unfocused the game
+receives **no input at all**; in VR mode the physical A/B/X/Y keys are always
+swallowed and the arrows are swallowed in gameplay, with manual PC mode (`0`)
+exempt. Informative logging is behind `verbose_debug` (default false) in
+`config.txt`; errors and state changes always log.
+
 ### What is still not built
 
 **Desktop-verified now:** target-resolution composite, replacement HUD,

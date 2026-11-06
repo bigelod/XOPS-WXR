@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdlib.h>
 #include <math.h>
 
 static void ResolveForwards(void);
@@ -87,6 +88,8 @@ static void ReleaseHudBatches(void);
 static void HandViewPose(const float* hp, const float* hf, const float* hu,
                          BOOL isRight, BOOL flip,
                          float vp[3], float vf[3], float vu[3], float vr[3]);
+static void HandTwoHandedAim(const float offP[3], const float vp[3],
+                             float vf[3], float vu[3], float vr[3]);
 static UINT PrimVertexCount(DWORD prim, UINT primCount);
 static BOOL SafeWrite(UINT_PTR a, float v);
 static UINT_PTR WatchAddr(int i);
@@ -495,6 +498,10 @@ static int   g_fvfCount = 0;
 // Logging
 // ---------------------------------------------------------------------------
 
+/* Informative diagnostics are off by default; config.txt can turn them on.
+   Errors and game-state changes always use Log(). */
+static BOOL g_verboseDebug = FALSE;
+
 static void LogV(const char* fmt, va_list ap)
 {
     if (!g_log) return;
@@ -506,6 +513,19 @@ static void LogV(const char* fmt, va_list ap)
 static void Log(const char* fmt, ...)
 {
     va_list ap;
+    va_start(ap, fmt);
+    EnterCriticalSection(&g_lock);
+    LogV(fmt, ap);
+    LeaveCriticalSection(&g_lock);
+    va_end(ap);
+}
+
+/* Verbose-only logging: snapshots, probes, draw dumps, raw packets and other
+   diagnostics. Suppressed unless config.txt has verbose_debug = true. */
+static void LogD(const char* fmt, ...)
+{
+    va_list ap;
+    if (!g_verboseDebug) return;
     va_start(ap, fmt);
     EnterCriticalSection(&g_lock);
     LogV(fmt, ap);
@@ -533,9 +553,9 @@ static const char* XformName(DWORD t)
 
 static void LogMatrix(const char* tag, const D3DMATRIX8* m)
 {
-    if (!m) { Log("    %s: (null)", tag); return; }
+    if (!m) { LogD("    %s: (null)", tag); return; }
     for (int r = 0; r < 4; ++r)
-        Log("    %s[%d]  % .5f  % .5f  % .5f  % .5f",
+        LogD("    %s[%d]  % .5f  % .5f  % .5f  % .5f",
             tag, r, m->m[r][0], m->m[r][1], m->m[r][2], m->m[r][3]);
 }
 
@@ -558,10 +578,10 @@ static void LogViewDecomposed(const D3DMATRIX8* m)
     for (int j = 0; j < 3; ++j)
         eye[j] = -(t0 * m->m[j][0] + t1 * m->m[j][1] + t2 * m->m[j][2]);
 
-    Log("    eye      % .3f  % .3f  % .3f   (engine units)", eye[0], eye[1], eye[2]);
-    Log("    right    % .4f  % .4f  % .4f", m->m[0][0], m->m[1][0], m->m[2][0]);
-    Log("    up       % .4f  % .4f  % .4f", m->m[0][1], m->m[1][1], m->m[2][1]);
-    Log("    forward  % .4f  % .4f  % .4f", m->m[0][2], m->m[1][2], m->m[2][2]);
+    LogD("    eye      % .3f  % .3f  % .3f   (engine units)", eye[0], eye[1], eye[2]);
+    LogD("    right    % .4f  % .4f  % .4f", m->m[0][0], m->m[1][0], m->m[2][0]);
+    LogD("    up       % .4f  % .4f  % .4f", m->m[0][1], m->m[1][1], m->m[2][1]);
+    LogD("    forward  % .4f  % .4f  % .4f", m->m[0][2], m->m[1][2], m->m[2][2]);
 
     // right x up should equal forward in a left-handed basis, and -forward in a
     // right-handed one. This single line settles the handedness question.
@@ -569,7 +589,7 @@ static void LogViewDecomposed(const D3DMATRIX8* m)
     const float cy = m->m[2][0] * m->m[0][1] - m->m[0][0] * m->m[2][1];
     const float cz = m->m[0][0] * m->m[1][1] - m->m[1][0] * m->m[0][1];
     const float dot = cx * m->m[0][2] + cy * m->m[1][2] + cz * m->m[2][2];
-    Log("    (right x up) . forward = % .4f  -> %s-handed",
+    LogD("    (right x up) . forward = % .4f  -> %s-handed",
         dot, dot > 0 ? "LEFT" : "RIGHT");
 }
 
@@ -582,7 +602,7 @@ static void LogProjDecomposed(const D3DMATRIX8* m)
     const float m22 = m->m[2][2], m32 = m->m[3][2];
     if (m11 != 0.0f) {
         const double fovY = 2.0 * atan(1.0 / (double)m11) * 180.0 / 3.14159265358979;
-        Log("    fovY ~ %.2f deg   aspect ~ %.4f", fovY, (m00 != 0.0f) ? (m11 / m00) : 0.0f);
+        LogD("    fovY ~ %.2f deg   aspect ~ %.4f", fovY, (m00 != 0.0f) ? (m11 / m00) : 0.0f);
     }
     if (m22 != 1.0f && m22 != 0.0f) {
         // LH perspective: m22 = zf/(zf-zn), m32 = -zn*zf/(zf-zn).
@@ -590,7 +610,7 @@ static void LogProjDecomposed(const D3DMATRIX8* m)
         // an earlier version dropped them and reported a negative near plane.
         const float zn = -m32 / m22;
         const float zf = -m32 / (m22 - 1.0f);
-        Log("    near ~ %.4f   far ~ %.2f", zn, zf);
+        LogD("    near ~ %.4f   far ~ %.2f", zn, zf);
     }
 }
 
@@ -743,7 +763,7 @@ static void BuildSnapshot(void)
     g_rgnCount = 0; g_snapUsed = 0;
     if (!g_snap) {
         g_snap = (BYTE*)VirtualAlloc(NULL, MAX_SNAP_BYTES, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-        if (!g_snap) { Log("CAMHUNT  could not reserve snapshot memory"); g_huntDone = TRUE; return; }
+        if (!g_snap) { LogD("CAMHUNT  could not reserve snapshot memory"); g_huntDone = TRUE; return; }
     }
 
     MEMORY_BASIC_INFORMATION mbi;
@@ -777,7 +797,7 @@ static void BuildSnapshot(void)
             if (!ReadProcessMemory(GetCurrentProcess(), mbi.BaseAddress,
                                    g_snap + g_snapUsed, mbi.RegionSize, &got)
                 || got != mbi.RegionSize) {
-                Log("CAMHUNT  skipped unreadable region %p (%u KB, got %u)",
+                LogD("CAMHUNT  skipped unreadable region %p (%u KB, got %u)",
                     mbi.BaseAddress, (unsigned)(mbi.RegionSize / 1024),
                     (unsigned)(got / 1024));
                 /* Fall through to p = next; do not spin on this region. */
@@ -792,11 +812,11 @@ static void BuildSnapshot(void)
         if (next <= p) break;
         p = next;
     }
-    Log("CAMHUNT  snapshot: %d regions, %u KB  (of which %u KB is xops096.exe's"
+    LogD("CAMHUNT  snapshot: %d regions, %u KB  (of which %u KB is xops096.exe's"
         " own writable data - the probe itself is excluded)",
         g_rgnCount, (unsigned)(g_snapUsed / 1024), g_exeRgnKB);
     if (g_exeRgnKB == 0)
-        Log("CAMHUNT  WARNING: no EXE data section in the snapshot - a static"
+        LogD("CAMHUNT  WARNING: no EXE data section in the snapshot - a static"
             " global cannot be found from here.");
 }
 
@@ -830,7 +850,7 @@ static void CollectChanged(void)
         g_picked   = (short*)   VirtualAlloc(NULL, MAX_CANDS * sizeof(short),    MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
         if (!g_cands || !g_candPrev || !g_score || !g_candMin || !g_candMax || !g_candMoves
             || !g_candIdle || !g_candVeto) {
-            Log("CAMHUNT  out of memory"); g_huntDone = TRUE; return;
+            LogD("CAMHUNT  out of memory"); g_huntDone = TRUE; return;
         }
     }
     g_candN = 0;
@@ -859,7 +879,7 @@ static void CollectChanged(void)
         }
     }
     g_haveCands = TRUE;
-    Log("CAMHUNT  interval %d (MOVING): %d floats changed plausibly", g_intervals, g_candN);
+    LogD("CAMHUNT  interval %d (MOVING): %d floats changed plausibly", g_intervals, g_candN);
 }
 
 // v6: SCORE candidates, do not eliminate them.
@@ -938,15 +958,15 @@ static void PlayerDump(const char* why)
     int idx = -1, i;
     if (!b) return;
     SafeReadInt(b + (0x48DDD8 - 0x400000), &idx);
-    Log("PLAYER %s  index=%d", why, idx);
+    LogD("PLAYER %s  index=%d", why, idx);
     if (idx >= 0 && idx < 0x18) {
         const UINT_PTR base = b + (0x48DF00 - 0x400000) + (UINT_PTR)idx * 0x50;
-        Log("PLAYER base=0x%08IX (IDA 0x%08IX)",
+        LogD("PLAYER base=0x%08IX (IDA 0x%08IX)",
             base, (UINT_PTR)(0x48DF00 + idx * 0x50));
         for (i = 0; i < 0x50; i += 4) {
             int v = 0;
             if (SafeReadInt(base + i, &v))
-                Log("PLAYER +%02X = %d (0x%08X)", i, v, v);
+                LogD("PLAYER +%02X = %d (0x%08X)", i, v, v);
         }
         {
             int healthW = 0, selW = 0, w0W = 0, w1W = 0;
@@ -968,7 +988,7 @@ static void PlayerDump(const char* why)
             res1   = res1W & 0xFF;
             cur0   = cur0W & 0xFF;
             cur1   = cur1W & 0xFF;
-            Log("HUDVALS health=%d state=%s selectedSlot=%d"
+            LogD("HUDVALS health=%d state=%s selectedSlot=%d"
                 " slots=%d,%d  current=%d,%d reserve=%d,%d",
                 health,
                 health >= 0x50 ? "FINE" : health >= 0x28 ? "CAUTION"
@@ -982,9 +1002,9 @@ static void PlayerDump(const char* why)
             continue;
         __try {
             const char* s = (const char*)((UINT_PTR)ptr - 0x400000 + b);
-            Log("WEAPON %2d ptr=0x%08IX '%.64s'", i, ptr, s);
+            LogD("WEAPON %2d ptr=0x%08IX '%.64s'", i, ptr, s);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
-            Log("WEAPON %2d ptr=0x%08IX <unreadable>", i, ptr);
+            LogD("WEAPON %2d ptr=0x%08IX <unreadable>", i, ptr);
         }
     }
 }
@@ -1138,6 +1158,30 @@ static void*   g_whiteTex  = NULL;
 static int     g_handedness = 0;     /* 0 = right, 1 = left */
 static BOOL    g_handFlip   = FALSE; /* 180-degree roll of the hand model */
 
+/* Haptics. The outbound packet carries, per hand, a vibration DURATION in
+   frames - not an amplitude - and the runtime only stores values greater than
+   zero, so sending 0 does not stop a buzz. Keep a per-hand countdown, top it
+   up when the magazine counter drops, send the current count, then decay it:
+   a single shot is a short click, automatic fire stays topped up and reads as
+   up when the magazine counter drops, send the current count, then decay it:
+   a single shot is a short click, and automatic fire tops it up per round for
+   a continuous rumble. The value is deliberately low, matching SHOGO MAD WXR:
+   2 frames is felt as a short kick, not a limp. */
+#define HAPTIC_MAX_ROUNDS 8      /* a bigger drop is a reload/pickup, not fire */
+#define HAPTIC_MAX_FRAMES 5      /* cap, so nothing can leave the motors on */
+static BOOL  g_haptics      = TRUE;
+static int   g_hapticHand   = 0;     /* 0 dominant, 1 both, 2 left, 3 right */
+static int   g_hapticFrames = 2;     /* buzz length per shot, in frames */
+static int   g_hapticL      = 0;     /* frames left to vibrate, per hand */
+static int   g_hapticR      = 0;
+static int   g_hapPrevCur0  = -1;    /* magazine counters, previous frame */
+static int   g_hapPrevCur1  = -1;
+static long  g_hapShots     = 0;
+/* Two-handed aim: held while the left grip is down (not a config option).
+   Both hands are on the weapon, so a shot buzzes both controllers; the pose
+   work will hang the off hand off the same state. */
+static BOOL  g_twoHanded    = FALSE;
+
 /* Manual right-hand override for test driving, active only while the "0"
    user-control mode is ON. See ManualHandKeys for the key map.
    Positions/orientations are in XOPS space (+X right, +Y up, +Z forward),
@@ -1190,7 +1234,7 @@ static void LogDrawSource(const void* ra, const char* path,
                           UINT count, UINT stride)
 {
     if (!g_3dAttach || g_cloneValid || g_3dIdx != g_3dSel) return;
-    Log("HIDE     draw %d source: %s caller IDA 0x%08IX count=%u stride=%u",
+    LogD("HIDE     draw %d source: %s caller IDA 0x%08IX count=%u stride=%u",
         g_3dSel, path, ToIda((void*)ra), count, stride);
 }
 
@@ -1203,7 +1247,7 @@ static BOOL HideThisDraw(void)
     if (idx != (int)((GetTickCount() / 3000u) % (DWORD)g_3dPrevN)) return FALSE;
     if (idx != g_3dShown) {
         g_3dShown = idx;
-        Log("HIDE     3D draw %d of %d", idx, g_3dPrevN);
+        LogD("HIDE     3D draw %d of %d", idx, g_3dPrevN);
     }
     return TRUE;
 }
@@ -1898,7 +1942,7 @@ static void ScoreCandidates(BOOL wasMoving)
         if (g_score[i] > best) best = g_score[i];
     }
     for (i = 0; i < g_candN; ++i) if (g_score[i] == best) ++bestN;
-    Log("CAMHUNT  interval %d (%s): %d tracked, best score %d held by %d, "
+    LogD("CAMHUNT  interval %d (%s): %d tracked, best score %d held by %d, "
         "%d vetoed by idle",
         g_intervals, wasMoving ? "MOVING" : "STILL", g_candN, best, bestN, g_vetoTotal);
 }
@@ -1926,9 +1970,9 @@ static void ReportCandidates(void)
 
     for (i = 0; i < g_candN; ++i) if (g_score[i] > best) best = g_score[i];
     threshold = best - 1;
-    if (best < 3) { Log("    CAMHUNT  best score only %d - keep walking and stopping", best); return; }
+    if (best < 3) { LogD("    CAMHUNT  best score only %d - keep walking and stopping", best); return; }
 
-    Log("    CAMHUNT  top candidates (best score %d of %d intervals):", best, g_intervals);
+    LogD("    CAMHUNT  top candidates (best score %d of %d intervals):", best, g_intervals);
     for (i = 0; i < g_candN && shown < 12; ++i) {
         const float* f;
         int trip;
@@ -1940,12 +1984,12 @@ static void ReportCandidates(void)
         ida[0] = 0;
         if (g_cands[i] >= exe && g_cands[i] < exe + 0x100000)
             _snprintf(ida, sizeof(ida), " IDA 0x%08IX", g_cands[i] - exe + 0x400000);
-        Log("      0x%08IX%s score=%d triple=%d  [% .3f % .3f % .3f % .3f]",
+        LogD("      0x%08IX%s score=%d triple=%d  [% .3f % .3f % .3f % .3f]",
             g_cands[i], ida, g_score[i], trip, f[0], f[1], f[2], f[3]);
         ++shown;
     }
-    Log("      triple=2 means the next two floats score as well -> an x,y,z");
-    Log("      triple, which is what a stored position looks like.");
+    LogD("      triple=2 means the next two floats score as well -> an x,y,z");
+    LogD("      triple, which is what a stored position looks like.");
 }
 
 static void HuntTick(void)
@@ -2080,9 +2124,38 @@ typedef BOOL  (WINAPI *PFN_SetCursorPos)(int, int);
 typedef BOOL  (WINAPI *PFN_ScreenToClient)(HWND, LPPOINT);
 typedef BOOL  (WINAPI *PFN_ClientToScreen)(HWND, LPPOINT);
 
+/* The window's REAL foreground state, asked of the unhooked API: the hooked
+   GetForegroundWindow deliberately lies so the game keeps running while the
+   owner uses another window. That keeps the game alive, but it must not let
+   input cross between windows. */
+static BOOL g_inputMuted = FALSE;   /* set once per GetKeyboardState poll */
+
+static BOOL GameWindowFocused(void)
+{
+    HWND w = g_gameWnd ? g_gameWnd : g_wnd;
+    if (!w || !g_inReal[IN_GETFOREGROUNDWINDOW]) return TRUE;
+    return ((PFN_GetForegroundWindow)g_inReal[IN_GETFOREGROUNDWINDOW])() == w;
+}
+
+/* Keys WinlatorXR injects for the controller, so the physical key must never
+   also reach the game: A/B/X/Y always in VR mode (on any screen), the arrow
+   keys whenever MODE_VR is 1. Manual PC mode (the 0 key) is a desktop keyboard
+   and is deliberately exempt. */
+static BOOL InputKeyBlocked(int vk)
+{
+    if (!g_vrExclusive) return FALSE;
+    if (vk == 'A' || vk == 'B' || vk == 'X' || vk == 'Y') return TRUE;
+    if (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT)
+        return InGameplay() ? TRUE : FALSE;
+    return FALSE;
+}
+
 static SHORT WINAPI hkGetAsyncKeyState(int vk)
-{ ++g_inCalls[IN_GETASYNCKEYSTATE]; ++g_inFrame[IN_GETASYNCKEYSTATE];
-  return ((PFN_GetAsyncKeyState)g_inReal[IN_GETASYNCKEYSTATE])(vk); }
+{
+    ++g_inCalls[IN_GETASYNCKEYSTATE]; ++g_inFrame[IN_GETASYNCKEYSTATE];
+    if (!GameWindowFocused() || InputKeyBlocked(vk)) return 0;
+    return ((PFN_GetAsyncKeyState)g_inReal[IN_GETASYNCKEYSTATE])(vk);
+}
 
 static BOOL WINAPI hkGetKeyboardState(PBYTE p)
 {
@@ -2090,6 +2163,26 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
     ++g_inCalls[IN_GETKEYBOARDSTATE]; ++g_inFrame[IN_GETKEYBOARDSTATE];
     r = ((PFN_GetKeyboardState)g_inReal[IN_GETKEYBOARDSTATE])(p);
     if (r && p) {
+        /* Focus is the input boundary. While another window owns the desktop
+           the game keeps running (g_noPause), but it must receive nothing:
+           no keyboard, mouse, stick or debug key, and no synthetic VR input.
+           Otherwise typing in chat would walk, shoot and toggle probe modes. */
+        g_inputMuted = !GameWindowFocused();
+        if (g_inputMuted) ZeroMemory(p, 256);
+
+        /* WinlatorXR sends A/B/X/Y for the controller buttons, so the physical
+           keys must never also reach the game - on any screen. The arrow keys
+           are its extra controls and are blocked whenever MODE_VR is 1.
+           Manual PC mode (the 0 key) is a real desktop keyboard and is
+           deliberately exempt, so A/B/X/Y/arrows work there. */
+        if (g_vrExclusive) {
+            p['A'] = 0; p['B'] = 0; p['X'] = 0; p['Y'] = 0;
+            if (InGameplay()) {
+                p[VK_UP] = 0; p[VK_DOWN] = 0;
+                p[VK_LEFT] = 0; p[VK_RIGHT] = 0;
+            }
+        }
+
         /* Which keys are down decides whether this interval counts as moving
            or still for the camera hunt. */
         static const int kMove[8] = { 'W', 'A', 'S', 'D', VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT };
@@ -2104,7 +2197,7 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
         VrExclusiveKeys(p);    /* then the game loses the desktop keyboard */
         StickKeys(p);          /* left stick -> movement */
         ManualHandKeys(p);     /* numpad right hand, 0 mode only */
-        VrInputKeys(p);        /* buttons, walk, shoot, zoom, edges */
+        VrInputKeys(p);        /* buttons, two-hand grip, shoot, zoom, edges */
         /* Fire state for the muzzle flash, and the hand-aim shot. In VR the
            trigger sets LButton above; in user mode it is the real mouse. */
         g_fireHeld = (p[VK_LBUTTON] & 0x80) ? TRUE : FALSE;
@@ -2128,7 +2221,7 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
             for (j = 0; j < g_keysSeenN; ++j) if (g_keysSeen[j] == (DWORD)vk) seen = TRUE;
             if (!seen && g_keysSeenN < 12) {
                 g_keysSeen[g_keysSeenN++] = (DWORD)vk;
-                Log("KEYS      vk 0x%02X ('%c') pressed at frame %ld", vk,
+                LogD("KEYS      vk 0x%02X ('%c') pressed at frame %ld", vk,
                     (vk >= 32 && vk < 127) ? (char)vk : '?', g_frame);
             }
         }
@@ -2137,8 +2230,11 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
 }
 
 static SHORT WINAPI hkGetKeyState(int vk)
-{ ++g_inCalls[IN_GETKEYSTATE]; ++g_inFrame[IN_GETKEYSTATE];
-  return ((PFN_GetKeyState)g_inReal[IN_GETKEYSTATE])(vk); }
+{
+  ++g_inCalls[IN_GETKEYSTATE]; ++g_inFrame[IN_GETKEYSTATE];
+  if (!GameWindowFocused() || InputKeyBlocked(vk)) return 0;
+  return ((PFN_GetKeyState)g_inReal[IN_GETKEYSTATE])(vk);
+}
 
 static BOOL WINAPI hkGetCursorPos(LPPOINT p)
 {
@@ -2173,14 +2269,11 @@ static BOOL WINAPI hkGetCursorPos(LPPOINT p)
               while unfocused" actually usable rather than just not-paused. */
         const BOOL vrOwnsInput = g_vrExclusive && InGameplay();
         const BOOL steeringNow = g_steer && g_vrExclusive && InGameplay();
-        const BOOL reallyFocused =
-            !g_gameWnd || !g_inReal[IN_GETFOREGROUNDWINDOW] ||
-            ((PFN_GetForegroundWindow)g_inReal[IN_GETFOREGROUNDWINDOW])() == g_gameWnd;
+        const BOOL reallyFocused = GameWindowFocused();
         /* In menus/title/briefing/death/victory MODE_VR is 0 and the runtime
-           owns the mouse again, so never suppress it there. The unfocused
-           guard is also gameplay-only for the same reason. */
-        if (steeringNow || vrOwnsInput ||
-            (g_vrExclusive && InGameplay() && !reallyFocused))
+           owns the mouse again, so never suppress it there. When the window
+           is unfocused, suppress it on every screen: no mouse input at all. */
+        if (!reallyFocused || steeringNow || vrOwnsInput)
             *p = g_lastCursor;
     }
 
@@ -2216,7 +2309,6 @@ static BOOL WINAPI hkSetCursorPos(int x, int y)
     if (g_inReal[IN_GETFOREGROUNDWINDOW])
         fg = ((PFN_GetForegroundWindow)g_inReal[IN_GETFOREGROUNDWINDOW])();
     if (g_gameWnd && fg != g_gameWnd) return TRUE;
-
     return ((PFN_SetCursorPos)g_inReal[IN_SETCURSORPOS])(x, y);
 }
 
@@ -2265,7 +2357,7 @@ static void DumpImports(void)
     DWORD rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
     if (!rva) return;
 
-    Log("IMPORTS of the host EXE");
+    LogD("IMPORTS of the host EXE");
     for (IMAGE_IMPORT_DESCRIPTOR* imp = (IMAGE_IMPORT_DESCRIPTOR*)(base + rva);
          imp->Name; ++imp)
     {
@@ -2275,7 +2367,7 @@ static void DumpImports(void)
         if (_stricmp(mod, "dinput8.dll") == 0) note = "   <- DirectInput 8: proxy it and return our own device state";
         if (_stricmp(mod, "d3d8.dll")    == 0) note = "   <- us";
         if (_stricmp(mod, "xinput1_3.dll") == 0) note = "   <- XInput";
-        Log("  %-24s%s", mod, note);
+        LogD("  %-24s%s", mod, note);
 
         // For the input modules, list the functions too - the specific entry
         // points are what a proxy has to implement.
@@ -2284,14 +2376,14 @@ static void DumpImports(void)
             (imp->OriginalFirstThunk ? imp->OriginalFirstThunk : imp->FirstThunk));
         for (; orig->u1.AddressOfData; ++orig) {
             if (orig->u1.Ordinal & IMAGE_ORDINAL_FLAG) {
-                Log("      ordinal %lu", (DWORD)(orig->u1.Ordinal & 0xFFFF));
+                LogD("      ordinal %lu", (DWORD)(orig->u1.Ordinal & 0xFFFF));
             } else {
                 IMAGE_IMPORT_BY_NAME* nm = (IMAGE_IMPORT_BY_NAME*)(base + orig->u1.AddressOfData);
-                Log("      %s", (const char*)nm->Name);
+                LogD("      %s", (const char*)nm->Name);
             }
         }
     }
-    Log("");
+    LogD("");
 }
 
 // ---------------------------------------------------------------------------
@@ -2316,7 +2408,7 @@ static int     g_fontLogN = 0;
 static void LogFontRequest(const LOGFONTA* lf)
 {
     if (!lf || !g_log) return;
-    Log("FONT  h=%ld w=%ld weight=%ld italic=%d charset=%d face='%s'",
+    LogD("FONT  h=%ld w=%ld weight=%ld italic=%d charset=%d face='%s'",
         lf->lfHeight, lf->lfWidth, lf->lfWeight, lf->lfItalic,
         lf->lfCharSet, lf->lfFaceName);
 }
@@ -2333,7 +2425,7 @@ static HFONT WINAPI hkCreateFontIndirectA(const LOGFONTA* lf)
             const LONG oldH = copy.lfHeight;
             copy.lfHeight = (LONG)(copy.lfHeight * g_fontScale);
             if (copy.lfWidth) copy.lfWidth = (LONG)(copy.lfWidth * g_fontScale);
-            Log("FONT  scale %.2f: h %ld -> %ld", g_fontScale, oldH, copy.lfHeight);
+            LogD("FONT  scale %.2f: h %ld -> %ld", g_fontScale, oldH, copy.lfHeight);
             lf = &copy;
         }
     }
@@ -2364,7 +2456,7 @@ static void LogTextCall(const char* which, HDC hdc, const char* a,
             strncpy(face, lf.lfFaceName, sizeof(face) - 1);
         }
         if (w)
-            Log("TEXT %s rc=%ld,%ld,%ld,%ld fmt=0x%X h=%ld face='%s' '%.80ls'",
+            LogD("TEXT %s rc=%ld,%ld,%ld,%ld fmt=0x%X h=%ld face='%s' '%.80ls'",
                 which, rc ? rc->left : 0, rc ? rc->top : 0,
                 rc ? rc->right : 0, rc ? rc->bottom : 0, fmt, fh, face, w);
         else if (a) {
@@ -2372,7 +2464,7 @@ static void LogTextCall(const char* which, HDC hdc, const char* a,
             int n = (count < 0) ? (int)strlen(a) : count;
             if (n > 159) n = 159;
             memcpy(buf, a, (size_t)n); buf[n] = 0;
-            Log("TEXT %s rc=%ld,%ld,%ld,%ld fmt=0x%X h=%ld face='%s' '%s'",
+            LogD("TEXT %s rc=%ld,%ld,%ld,%ld fmt=0x%X h=%ld face='%s' '%s'",
                 which, rc ? rc->left : 0, rc ? rc->top : 0,
                 rc ? rc->right : 0, rc ? rc->bottom : 0, fmt, fh, face, buf);
         }
@@ -2407,17 +2499,17 @@ static void HookInput(void)
         (void*)hkScreenToClient,   (void*)hkClientToScreen
     };
 
-    Log("INPUT  IAT patch results (a patched entry proves we can supply this");
-    Log("       function's answer later, not merely count it):");
-    Log("       GetForegroundWindow is how XOPS detects focus loss and pauses;");
-    Log("       patching it is what keeps the game running while the UDP");
-    Log("       tester has focus. Toggle with the backslash key.");
+    LogD("INPUT  IAT patch results (a patched entry proves we can supply this");
+    LogD("       function's answer later, not merely count it):");
+    LogD("       GetForegroundWindow is how XOPS detects focus loss and pauses;");
+    LogD("       patching it is what keeps the game running while the UDP");
+    LogD("       tester has focus. Toggle with the backslash key.");
     for (int i = 0; i < IN_COUNT; ++i) {
         void* old = PatchIat(hExe, names[i], hooks[i]);
         g_inReal[i] = (FARPROC)old;
-        Log("  %-18s %s", names[i], old ? "imported - PATCHED" : "not imported");
+        LogD("  %-18s %s", names[i], old ? "imported - PATCHED" : "not imported");
     }
-    Log("");
+    LogD("");
 }
 
 
@@ -2545,7 +2637,7 @@ static void BallisticArm(void)
 {
     int i;
     if (!g_haveCands || !g_ballStart) {
-        Log("BALLISTIC  no candidate pool yet - walk and stop a few times first");
+        LogD("BALLISTIC  no candidate pool yet - walk and stop a few times first");
         return;
     }
     for (i = 0; i < g_candN; ++i) {
@@ -2554,11 +2646,11 @@ static void BallisticArm(void)
     }
     g_ballFrames = BALL_FRAMES;
     ++g_ballRuns;
-    Log("");
-    Log("BALLISTIC  window %d open for %d frames (~%ds).", g_ballRuns,
+    LogD("");
+    LogD("BALLISTIC  window %d open for %d frames (~%ds).", g_ballRuns,
         BALL_FRAMES, BALL_FRAMES / 60);
-    Log("BALLISTIC  press the height cheat NOW, then stand still and let");
-    Log("BALLISTIC  gravity bring you down. Do not walk during the window.");
+    LogD("BALLISTIC  press the height cheat NOW, then stand still and let");
+    LogD("BALLISTIC  gravity bring you down. Do not walk during the window.");
 }
 
 static void BallisticSample(void)
@@ -2574,8 +2666,8 @@ static void BallisticSample(void)
 static void BallisticClose(void)
 {
     int i, hits = 0;
-    Log("");
-    Log("BALLISTIC  window closed - scoring rise-then-return");
+    LogD("");
+    LogD("BALLISTIC  window closed - scoring rise-then-return");
     for (i = 0; i < g_candN; ++i) {
         float v, rise;
         if (!SafeRead(g_cands[i], &v)) continue;
@@ -2589,10 +2681,10 @@ static void BallisticClose(void)
         g_candVeto[i] = 0;
         ++hits;
     }
-    Log("BALLISTIC  %d candidates rose >= %.2f and returned to within %.2f",
+    LogD("BALLISTIC  %d candidates rose >= %.2f and returned to within %.2f",
         hits, BALL_RISE, BALL_SETTLE);
     if (hits == 0)
-        Log("BALLISTIC  nothing passed. Was the cheat actually applied, and was"
+        LogD("BALLISTIC  nothing passed. Was the cheat actually applied, and was"
             " the whole fall inside the window?");
     g_ballFrames = 0;
 }
@@ -2673,13 +2765,13 @@ static void BuildProbeList(void)
     for (i = 0; i < g_candN; ++i)
         if (!(g_candMax[i] - g_candMin[i] > 0.0005f)) ++rejRange;
 
-    Log("PROBE    list built: %d candidates", g_probeN);
-    Log("PROBE    rejected %d that never moved, %d no longer addressable,",
+    LogD("PROBE    list built: %d candidates", g_probeN);
+    LogD("PROBE    rejected %d that never moved, %d no longer addressable,",
         rejRange, rejDead);
-    Log("PROBE    and %d that changed while the player was idle (%d idle runs)",
+    LogD("PROBE    and %d that changed while the player was idle (%d idle runs)",
         g_vetoTotal, g_idleRuns);
     if (g_idleRuns == 0)
-        Log("PROBE    WARNING: no idle run was ever observed, so the strongest"
+        LogD("PROBE    WARNING: no idle run was ever observed, so the strongest"
             " filter never ran. Stand still - no keys, no mouse - for a few seconds.");
     for (i = 0; i < g_probeN && i < 24; ++i) {
         char where[40];
@@ -2687,7 +2779,7 @@ static void BuildProbeList(void)
         if (g_probeList[i] >= g_exeLo && g_probeList[i] < g_exeHi)
             _snprintf(where, sizeof(where), " IDA 0x%08IX",
                       g_probeList[i] - g_exeLo + 0x400000);
-        Log("PROBE      [%2d] 0x%08IX%s score=%d moves=%d range % .3f..% .3f  %s",
+        LogD("PROBE      [%2d] 0x%08IX%s score=%d moves=%d range % .3f..% .3f  %s",
             i + 1, g_probeList[i], where, g_probeScore[i], g_probeMoves[i],
             g_probeMinV[i], g_probeMaxV[i],
             g_probeBall[i]  ? "<<<<< PASSED THE BALLISTIC TEST" :
@@ -2703,12 +2795,12 @@ static void BuildProbeList(void)
         if (!SafeRead(g_probeList[i] - 4, &x)) continue;
         if (!SafeRead(g_probeList[i],     &y)) continue;
         if (!SafeRead(g_probeList[i] + 4, &z)) continue;
-        Log("PROBE      [%2d] if this is Y, the position triple at 0x%08IX reads"
+        LogD("PROBE      [%2d] if this is Y, the position triple at 0x%08IX reads"
             " X=% .3f  Y=% .3f  Z=% .3f", i + 1, g_probeList[i] - 4, x, y, z);
     }
     for (i = 0; i < g_probeN && i < 24; ++i)
         if (g_probeShape[i] && !g_probeBall[i])
-            Log("PROBE      [%2d] its constant neighbour holds % .4f - that is the"
+            LogD("PROBE      [%2d] its constant neighbour holds % .4f - that is the"
                 " player height if this is the position", i + 1, g_probeHeight[i]);
 }
 
@@ -2768,18 +2860,18 @@ static UINT_PTR WatchAddr(int i)
 static void StructDump(UINT_PTR base, int count, const char* name)
 {
     int i;
-    Log("STRUCT   %s at 0x%08IX, %d floats:", name, base, count);
+    LogD("STRUCT   %s at 0x%08IX, %d floats:", name, base, count);
     for (i = 0; i < count; ++i) {
         float v;
         const UINT_PTR a = base + (UINT_PTR)i * 4;
         char note[64];
-        if (!SafeRead(a, &v)) { Log("STRUCT     +%02X  unreadable", i * 4); continue; }
+        if (!SafeRead(a, &v)) { LogD("STRUCT     +%02X  unreadable", i * 4); continue; }
         note[0] = 0;
         if (v == 0.0f)
             _snprintf(note, sizeof(note), "  <- exactly zero (nothing writes it)");
         else if (v > -6.3f && v < 6.3f)
             _snprintf(note, sizeof(note), "  (%.2f deg if an angle)", v * 57.2957795f);
-        Log("STRUCT     +%02X  % 12.4f%s", i * 4, v, note);
+        LogD("STRUCT     +%02X  % 12.4f%s", i * 4, v, note);
     }
 }
 
@@ -2789,15 +2881,15 @@ static void StructDump(UINT_PTR base, int count, const char* name)
 static void WatchDump(const char* why)
 {
     int i;
-    Log("WATCH    %s  [write phase: %s]", why, PhaseName(g_probePhase));
+    LogD("WATCH    %s  [write phase: %s]", why, PhaseName(g_probePhase));
     for (i = 0; i < WATCH_N; ++i) {
         float v;
         char deg[32];
-        if (!SafeRead(WatchAddr(i), &v)) { Log("WATCH      0x%08IX  unreadable", g_watch[i].va); continue; }
+        if (!SafeRead(WatchAddr(i), &v)) { LogD("WATCH      0x%08IX  unreadable", g_watch[i].va); continue; }
         deg[0] = 0;
         if (g_watch[i].angle)
             _snprintf(deg, sizeof(deg), "  = %7.2f deg", v * 57.2957795f);
-        Log("WATCH      0x%08IX % 11.4f%-20s  %s", g_watch[i].va, v, deg, g_watch[i].what);
+        LogD("WATCH      0x%08IX % 11.4f%-20s  %s", g_watch[i].va, v, deg, g_watch[i].what);
     }
     /* Read the two clusters out as positions, so they can be checked against
        something measured independently - the view matrix eye, or simply where
@@ -2806,9 +2898,9 @@ static void WatchDump(const char* why)
         float ax, ay, az, bx, bz;
         if (SafeRead(WatchAddr(1), &ax) && SafeRead(WatchAddr(0), &ay)
             && SafeRead(WatchAddr(2), &az))
-            Log("WATCH      cluster A as a position:  X=% .3f  Y=% .3f  Z=% .3f", ax, ay, az);
+            LogD("WATCH      cluster A as a position:  X=% .3f  Y=% .3f  Z=% .3f", ax, ay, az);
         if (SafeRead(WatchAddr(6), &bx) && SafeRead(WatchAddr(5), &bz))
-            Log("WATCH      cluster B as a position:  X=% .3f  Z=% .3f", bx, bz);
+            LogD("WATCH      cluster B as a position:  X=% .3f  Z=% .3f", bx, bz);
     }
 }
 
@@ -2824,7 +2916,7 @@ static void BuildWatchList(void)
         float v;
         const UINT_PTR a = WatchAddr(i);
         if (!AddrWritable(a) || !SafeRead(a, &v)) {
-            Log("PROBE    watch entry 0x%08IX is not readable - skipped", g_watch[i].va);
+            LogD("PROBE    watch entry 0x%08IX is not readable - skipped", g_watch[i].va);
             continue;
         }
         g_probeList[g_probeN]  = a;
@@ -2838,9 +2930,9 @@ static void BuildWatchList(void)
         g_probeWhat[g_probeN]  = g_watch[i].what;
         ++g_probeN;
     }
-    Log("PROBE    watch list loaded: %d confirmed addresses, fixed order.", g_probeN);
-    Log("PROBE    8 steps through them. The order does not change, so [3] is");
-    Log("PROBE    always the same address - tag it with 0 and tell me the number.");
+    LogD("PROBE    watch list loaded: %d confirmed addresses, fixed order.", g_probeN);
+    LogD("PROBE    8 steps through them. The order does not change, so [3] is");
+    LogD("PROBE    always the same address - tag it with 0 and tell me the number.");
     WatchDump("values as the list was loaded");
 }
 
@@ -2883,9 +2975,9 @@ static const char* PhaseName(int p)
 static void ProbeCyclePhase(void)
 {
     g_probePhase = (g_probePhase + 1) % 3;
-    Log("PROBE    write phase -> %s", PhaseName(g_probePhase));
+    LogD("PROBE    write phase -> %s", PhaseName(g_probePhase));
     if (g_probePhase == PHASE_INPUT)
-        Log("PROBE    if yaw/pitch start working now, they are read during the"
+        LogD("PROBE    if yaw/pitch start working now, they are read during the"
             " update and must be written early.");
 }
 
@@ -3333,6 +3425,7 @@ static void ManualHandKeys(PBYTE p)
     const BOOL k9 = (p[VK_NUMPAD9] & 0x80) ? TRUE : FALSE;
     static long logCount = 0;
 
+    if (g_inputMuted) return;
     if (!g_manualRight && !adj) return;
 
     /* Block the numpads so the game never sees them while user control is
@@ -3351,7 +3444,7 @@ static void ManualHandKeys(PBYTE p)
         if (k9) g_handAdj[2] += r;
         if (k7) g_handAdj[2] -= r;
         if ((++logCount % 30) == 0)
-            Log("HAND     adj % .3f % .3f % .3f  (Q+numpad, T saves)",
+            LogD("HAND     adj % .3f % .3f % .3f  (Q+numpad, T saves)",
                 g_handAdj[0], g_handAdj[1], g_handAdj[2]);
         return;
     }
@@ -3390,7 +3483,7 @@ static void ManualHandKeys(PBYTE p)
 
     ManualHandApply();
     if ((++logCount % 60) == 0)
-        Log("HAND     manual R pos % .3f % .3f % .3f"
+        LogD("HAND     manual R pos % .3f % .3f % .3f"
             "  yaw % .3f pitch % .3f roll % .3f",
             g_manualPos[0], g_manualPos[1], g_manualPos[2],
             g_manualYaw, g_manualPitch, g_manualRoll);
@@ -3399,6 +3492,7 @@ static void ManualHandKeys(PBYTE p)
 static void SteerAimWrite(void)
 {
     float vp[3], vf[3], vu[3], vr[3];
+    float ovp[3], ovf[3], ovu[3], ovr[3];
     float dir[3], len;
     float yawBaseA, yawBaseB, pitchBase, yawOff, pitchOff;
     BOOL domRight;
@@ -3415,6 +3509,18 @@ static void SteerAimWrite(void)
     else
         HandViewPose(g_pose.lP, g_pose.lF, g_pose.lU, FALSE, g_handFlip,
                      vp, vf, vu, vr);
+
+    /* Two-handed aim: the shot follows the gun, which points from the
+       dominant hand at the off hand (same basis the draw pass uses). */
+    if (g_twoHanded) {
+        if (domRight)
+            HandViewPose(g_pose.lP, g_pose.lF, g_pose.lU, FALSE, FALSE,
+                         ovp, ovf, ovu, ovr);
+        else
+            HandViewPose(g_pose.rP, g_pose.rF, g_pose.rU, TRUE, FALSE,
+                         ovp, ovf, ovu, ovr);
+        HandTwoHandedAim(ovp, vp, vf, vu, vr);
+    }
 
     /* The laser runs 30 m along the hand's forward; aim at that endpoint,
        measured from the eyes at the view-space origin. */
@@ -3466,7 +3572,7 @@ static void SteerAimWrite(void)
     }
     ++g_aimWrites;
     if (g_aimWrites <= 3 || (g_aimWrites % 60) == 0)
-        Log("AIM      shot -> hand laser: yaw %+ .4f rad (%+ .1f deg)"
+        LogD("AIM      shot -> hand laser: yaw %+ .4f rad (%+ .1f deg)"
             "  pitch %+ .4f (%+ .1f deg)  [writes %ld]",
             yawOff, yawOff * 57.2957795f,
             pitchOff, pitchOff * 57.2957795f, g_aimWrites);
@@ -3574,12 +3680,100 @@ static BOOL InGameplay(void)
     return g_lastXforms == 0 && g_lastIndexed >= GAMEPLAY_MIN_INDEXED;
 }
 
+/* Haptics are driven by the magazine counter falling. Both slots are watched
+   because the player can switch weapons, but only the firing slot's count can
+   drop during play. Counts and the game state are re-read every frame, not
+   just when the custom HUD redraws, so a disabled HUD still buzzes.
+
+   The pulse is decayed BEFORE it is sent, which is the SHOGO MAD WXR order: a
+   shot sets 2, that frame sends 1 and the next sends 0 (which the runtime
+   ignores). One frame of vibration per shot, not a string of them. */
+static void HapticTick(BOOL inGameplay, float* outL, float* outR)
+{
+    HudVals v;
+    int fires = 0, dur;
+
+    if (!outL || !outR) return;
+    *outL = 0.0f;
+    *outR = 0.0f;
+
+    if (!g_haptics) {
+        g_hapticL = g_hapticR = 0;
+        g_hapPrevCur0 = g_hapPrevCur1 = -1;
+        return;
+    }
+
+    /* On any screen that is not gameplay, forget the counters. A level change,
+       respawn or the death screen can reset a magazine, and that must not read
+       as a burst of fire on the first gameplay frame. A buzz already running
+       is allowed to finish its short countdown. */
+    if (!inGameplay || !ReadHudVals(&v)) {
+        g_hapPrevCur0 = g_hapPrevCur1 = -1;
+        if (g_hapticL > 0) --g_hapticL;
+        if (g_hapticR > 0) --g_hapticR;
+        *outL = (float)g_hapticL;
+        *outR = (float)g_hapticR;
+        return;
+    }
+
+    if (g_hapPrevCur0 >= 0 && g_hapPrevCur1 >= 0) {
+        const int d0 = g_hapPrevCur0 - v.cur0;
+        const int d1 = g_hapPrevCur1 - v.cur1;
+        fires = d0 > d1 ? d0 : d1;
+        if (fires < 0) fires = 0;
+        /* A reload, pickup or a drop can move a count backwards by more than a
+           magazine. That is bookkeeping, not fire. */
+        if (fires > HAPTIC_MAX_ROUNDS) {
+            LogD("HAPTIC   ignored ammo drop of %d (reload/pickup/respawn)", fires);
+            fires = 0;
+        }
+    }
+    g_hapPrevCur0 = v.cur0;
+    g_hapPrevCur1 = v.cur1;
+
+    if (fires > 0) {
+        BOOL buzzL = FALSE, buzzR = FALSE;
+
+        /* One pulse per shot, matching SHOGO MAD WXR: the duration is fixed
+           and small (2 frames is a short kick). Automatic fire feels stronger
+           because the pulses come faster, not because each one is longer. */
+        dur = g_hapticFrames;
+        if (dur < 1) dur = 1;
+        if (dur > HAPTIC_MAX_FRAMES) dur = HAPTIC_MAX_FRAMES;
+
+        switch (g_twoHanded ? 1 : g_hapticHand) {
+        case 1:  buzzL = buzzR = TRUE; break;             /* both */
+        case 2:  buzzL = TRUE; break;                     /* left */
+        case 3:  buzzR = TRUE; break;                     /* right */
+        default: if (g_leftHanded) buzzL = TRUE;          /* dominant */
+                 else             buzzR = TRUE;
+                 break;
+        }
+        if (buzzL) g_hapticL = dur;
+        if (buzzR) g_hapticR = dur;
+
+        ++g_hapShots;
+        LogD("HAPTIC   fires=%d dur=%d frames  hand=%s  slot %d weapon %d  ammo %d/%d"
+            "  (shots %ld)",
+            fires, dur, buzzL && buzzR ? "both" : buzzL ? "left" : "right",
+            v.sel, v.sel ? v.w1 : v.w0, v.cur0, v.cur1, g_hapShots);
+    }
+
+    if (g_hapticL > 0) --g_hapticL;
+    if (g_hapticR > 0) --g_hapticR;
+    *outL = (float)g_hapticL;
+    *outR = (float)g_hapticR;
+}
+
 /* Called from the GetKeyboardState hook AFTER our own control keys have been
    read out, and BEFORE the stick supplies movement - so the owner keeps his
    probe keys, the game loses everything, and VR input is then added back. */
 static void VrExclusiveKeys(PBYTE p)
 {
     int vk;
+    /* Unfocused: input is already muted, and synthetic keys must not appear
+       either. */
+    if (g_inputMuted) return;
     /* Only gameplay is VR-exclusive. MODE_VR is 0 on the title, objective,
        menus, death and victory screens, and desktop input must always pass
        through there. */
@@ -3593,6 +3787,14 @@ static void VrExclusiveKeys(PBYTE p)
 static void StickKeys(PBYTE p)
 {
     int pressed = 0;
+
+    /* Unfocused: no stick input, but keep the edge state in step so a button
+       held across the focus change does not recentre on return. */
+    if (g_inputMuted) {
+        g_prevRecentreBtn = (g_posed && g_pose.valid &&
+                             XrButton(&g_pose, XRB_R_STICK)) ? TRUE : FALSE;
+        return;
+    }
 
     if (!g_stickMove || !g_posed || !g_pose.valid) return;
     if (!InGameplay()) return;      /* never move the player in a menu/screen */
@@ -3637,16 +3839,32 @@ static BOOL VrEdge(int idx)
     return now && !was;
 }
 
-/* The owner's mapping. Held: left stick move, right stick turn, left grip
-   walk, shoot trigger, Y zoom. Edge: fire-mode trigger, right grip jump,
-   B reload, A switch, X drop. */
+/* The owner's mapping (6 Nov). Held: left stick move, right stick turn, left
+   grip two-handed aim. Edge: left trigger fire mode, right trigger shoot,
+   right grip jump, B reload, A switch, X drop, Y zoom. */
 static void VrInputKeys(PBYTE p)
 {
     int vk;
+    g_twoHanded = FALSE;
+    /* Unfocused: no trigger, stick or button may fire. Sync the edge table so
+       nothing that was pressed in the background counts as a new press when
+       focus returns, and drop any queued key pulses. */
+    if (g_inputMuted) {
+        int i;
+        for (i = 0; i < 256; ++i) g_pulseVk[i] = 0;
+        if (g_posed && g_pose.valid)
+            for (i = 0; i < 24; ++i)
+                g_prevVrBtn[i] = XrButton(&g_pose, i) ? 1 : 0;
+        return;
+    }
     if (!g_posed || !g_pose.valid || !InGameplay()) return;
     if (!g_vrExclusive) return;     /* desktop test mode: no synthetic input */
 
-    if (XrButton(&g_pose, XRB_L_GRIP)) p[VK_TAB] |= 0x80;    /* walk */
+    /* Left grip held = two-handed aim: the off hand supports the weapon, so
+       the weapon's kick is felt in both controllers and the off-hand pose can
+       follow the dominant hand. */
+    g_twoHanded = XrButton(&g_pose, XRB_L_GRIP) ? TRUE : FALSE;
+
     if (VrEdge(XRB_Y)) {
         g_zoomOn = !g_zoomOn;
         VrPulse(VK_SHIFT);                                  /* zoom toggle */
@@ -3679,44 +3897,44 @@ static void VrInputKeys(PBYTE p)
 
 static void SteerLog(void)
 {
-    Log("XR       packets=%ld  steering=%s  dof=%s", XrPackets(),
+    LogD("XR       packets=%ld  steering=%s  dof=%s", XrPackets(),
         g_steer ? "ON" : "off", DofName(g_dofMode));
-    Log("XR       cluster=%s", ClusterName(g_cluster));
+    LogD("XR       cluster=%s", ClusterName(g_cluster));
     if (!XrRunning()) {
         Log("XR       NOT RUNNING: %s", XrLastError()[0] ? XrLastError() : "(no error)");
         return;
     }
-    Log("XR       handshake dir %s   hmd %s %s", XrDir(), XrMake(), XrModel());
+    LogD("XR       handshake dir %s   hmd %s %s", XrDir(), XrMake(), XrModel());
     if (XrPackets() == 0) {
-        Log("XR       no packets yet. Start the XrAPI UDP Tester and point it");
-        Log("XR       at 127.0.0.1:7872. Nothing else here can work until then.");
+        LogD("XR       no packets yet. Start the XrAPI UDP Tester and point it");
+        LogD("XR       at 127.0.0.1:7872. Nothing else here can work until then.");
         return;
     }
-    Log("XR       raw: %s", XrRawPacket());
+    LogD("XR       raw: %s", XrRawPacket());
     if (g_pose.valid) {
-        Log("XR       head yaw % .4f rad (% .1f deg)  pitch % .4f (% .1f deg)"
+        LogD("XR       head yaw % .4f rad (% .1f deg)  pitch % .4f (% .1f deg)"
             "  sync %.1f",
             g_pose.headYaw, g_pose.headYaw * 57.2957795f,
             g_pose.headPitch, g_pose.headPitch * 57.2957795f, g_pose.sync);
-        Log("XR       head pos  % .3f % .3f % .3f m   ipd %.3f  fov %.1f x %.1f",
+        LogD("XR       head pos  % .3f % .3f % .3f m   ipd %.3f  fov %.1f x %.1f",
             g_pose.headP[0], g_pose.headP[1], g_pose.headP[2],
             g_pose.ipd, g_pose.fovx, g_pose.fovy);
-        Log("HAND     raw L % .3f % .3f % .3f   R % .3f % .3f % .3f",
+        LogD("HAND     raw L % .3f % .3f % .3f   R % .3f % .3f % .3f",
             g_pose.lP[0], g_pose.lP[1], g_pose.lP[2],
             g_pose.rP[0], g_pose.rP[1], g_pose.rP[2]);
-        Log("XR       signs: yaw %+.0f  pitch %+.0f    writes so far %ld",
+        LogD("XR       signs: yaw %+.0f  pitch %+.0f    writes so far %ld",
             g_yawSign, g_pitchSign, g_steerWrites);
-        Log("XR       sticks: move % .2f,% .2f  turn % .2f,% .2f   bools %s",
+        LogD("XR       sticks: move % .2f,% .2f  turn % .2f,% .2f   bools %s",
             g_pose.moveX, g_pose.moveY, g_pose.turnX, g_pose.turnY,
             g_pose.bools[0] ? g_pose.bools : "(none)");
-        Log("XR       stick->WASD %s, supplied keys on %ld frames",
+        LogD("XR       stick->WASD %s, supplied keys on %ld frames",
             g_stickMove ? "on" : "OFF", g_stickFrames);
-        Log("INPUT    hand=%s turn=%.0f deg/s  Lgrip=walk Ltrig=%s"
+        LogD("INPUT    hand=%s turn=%.0f deg/s  Lgrip=two-hand Ltrig=%s"
             " Rtrig=%s Rgrip=jump B=reload A=switch X=drop Y=zoom",
             g_leftHanded ? "left" : "right", g_turnSpeed,
             g_leftHanded ? "shoot" : "fire mode",
             g_leftHanded ? "fire mode" : "shoot");
-        Log("INPUT    %s; last frame %s"
+        LogD("INPUT    %s; last frame %s"
             " (%ld SetTransforms, %ld indexed, %ld UP draws)",
             g_vrExclusive ? "VR input only (0 for desktop)"
                           : "desktop input enabled",
@@ -3728,20 +3946,20 @@ static void SteerLog(void)
         if (g_dofMode >= DOF_HEIGHT
             && g_pose.headP[0] == 0.0f && g_pose.headP[1] == 0.0f
             && g_pose.headP[2] == 0.0f)
-            Log("XR       NOTE: head position is exactly 0,0,0 - the sender is"
+            LogD("XR       NOTE: head position is exactly 0,0,0 - the sender is"
                 " not varying it, so positional DOF cannot be seen from here.");
         /* Run 12's symptom: position arriving every frame, DOF left at
            yaw+pitch, and so nothing moving. Silence there reads as a bug in
            the camera work, which it is not. */
         if (g_yClamped > 20)
-            Log("XR       NOTE: height writes are being undone - %d frames in a"
+            LogD("XR       NOTE: height writes are being undone - %d frames in a"
                 " row. XOPS re-clamps the player to the ground, so crouching"
                 " cannot be driven by writing Y. Horizontal 6DOF is"
                 " unaffected.", g_yClamped);
         if (g_dofMode == DOF_LOOK
             && (g_pose.headP[0] != 0.0f || g_pose.headP[1] != 0.0f
                 || g_pose.headP[2] != 0.0f))
-            Log("XR       NOTE: head POSITION is arriving but the DOF mode is"
+            LogD("XR       NOTE: head POSITION is arriving but the DOF mode is"
                 " yaw+pitch only, so it is being ignored. Press ' to include"
                 " height and then full 6DOF.");
     }
@@ -3761,7 +3979,7 @@ static void ProbeSelect(int idx)
     int tried = 0;
 
     ProbeRestore();
-    if (g_probeN == 0) { Log("PROBE    no candidates - run the walk/stop scan first"); return; }
+    if (g_probeN == 0) { LogD("PROBE    no candidates - run the walk/stop scan first"); return; }
 
     /* Skip anything that has died since the list was built, rather than
        faulting on it. */
@@ -3770,10 +3988,10 @@ static void ProbeSelect(int idx)
         idx %= g_probeN;
         if (AddrWritable(g_probeList[idx]) &&
             SafeRead(g_probeList[idx], &g_probeOrig)) break;
-        Log("PROBE    [%d/%d] 0x%08IX is gone - skipping", idx + 1, g_probeN, g_probeList[idx]);
+        LogD("PROBE    [%d/%d] 0x%08IX is gone - skipping", idx + 1, g_probeN, g_probeList[idx]);
         ++idx; ++tried;
     }
-    if (tried >= g_probeN) { Log("PROBE    no addressable candidates left"); g_probeAddr = 0; return; }
+    if (tried >= g_probeN) { LogD("PROBE    no addressable candidates left"); g_probeAddr = 0; return; }
 
     g_probeIdx  = idx;
     g_probeAddr = g_probeList[idx];
@@ -3789,11 +4007,11 @@ static void ProbeSelect(int idx)
     if (g_probeAddr >= exe && g_probeAddr < exe + 0x100000)
         _snprintf(ida, sizeof(ida), " IDA 0x%08IX", g_probeAddr - exe + 0x400000);
     if (g_probeShape[idx])
-        Log("PROBE    this one has the XYZ shape (%s) - a strong candidate",
+        LogD("PROBE    this one has the XYZ shape (%s) - a strong candidate",
             g_probeShape[idx] == 2 ? "X, constant Y at +4" : "Z, constant Y at -4");
     if (g_probeWhat[idx])
-        Log("PROBE    >>> %s", g_probeWhat[idx]);
-    Log("PROBE    [%d/%d] 0x%08IX%s score=%d moves=%d orig=% .4f range % .4f..% .4f swing=%.4f x%.2f",
+        LogD("PROBE    >>> %s", g_probeWhat[idx]);
+    LogD("PROBE    [%d/%d] 0x%08IX%s score=%d moves=%d orig=% .4f range % .4f..% .4f swing=%.4f x%.2f",
         idx + 1, g_probeN, g_probeAddr, ida, g_probeScore[idx], g_probeMoves[idx],
         g_probeOrig, g_probeMinV[idx], g_probeMaxV[idx], g_probeSwing, g_probeAmp);
 }
@@ -3822,9 +4040,9 @@ static void ProbeTick(void)
     if (!(v == v)) return;
 
     if (!SafeWrite(g_probeAddr, v)) {
-        Log("PROBE    write faulted at 0x%08IX - dropping it", g_probeAddr);
+        LogD("PROBE    write faulted at 0x%08IX - dropping it", g_probeAddr);
         g_probeAddr = 0;
-        if (++faults > 8) { g_probeMode = FALSE; Log("PROBE    too many faults - mode OFF"); }
+        if (++faults > 8) { g_probeMode = FALSE; LogD("PROBE    too many faults - mode OFF"); }
     }
 }
 
@@ -3837,18 +4055,18 @@ static void ProbeTag(void)
     ida[0] = 0;
     if (g_probeAddr >= exe && g_probeAddr < exe + 0x100000)
         _snprintf(ida, sizeof(ida), " IDA 0x%08IX", g_probeAddr - exe + 0x400000);
-    Log("");
-    Log("TAG #%d   index [%d] of %d   0x%08IX%s",
+    LogD("");
+    LogD("TAG #%d   index [%d] of %d   0x%08IX%s",
         g_tagCount, g_probeIdx + 1, g_probeN, g_probeAddr, ida);
-    Log("         %s", g_probeWhat[g_probeIdx] ? g_probeWhat[g_probeIdx] : "(unlabelled)");
+    LogD("         %s", g_probeWhat[g_probeIdx] ? g_probeWhat[g_probeIdx] : "(unlabelled)");
     if (g_probeShape[g_probeIdx])
-        Log("         shape=%d  constant neighbour=% .4f",
+        LogD("         shape=%d  constant neighbour=% .4f",
             g_probeShape[g_probeIdx], g_probeHeight[g_probeIdx]);
-    Log("         write phase %s", PhaseName(g_probePhase));
-    Log("         orig=% .4f  observed range % .4f .. % .4f  swing=%.4f x%.2f",
+    LogD("         write phase %s", PhaseName(g_probePhase));
+    LogD("         orig=% .4f  observed range % .4f .. % .4f  swing=%.4f x%.2f",
         g_probeOrig, g_probeMinV[g_probeIdx], g_probeMaxV[g_probeIdx],
         g_probeSwing, g_probeAmp);
-    Log("");
+    LogD("");
 }
 
 
@@ -3873,7 +4091,7 @@ static void ProbeClassify(char kind)
     BOOL haveYaw;
 
     if (!g_probeAddr || g_probeIdx < 0) {
-        Log("PROBE    nothing selected - press 9 then 8 to step to a variable");
+        LogD("PROBE    nothing selected - press 9 then 8 to step to a variable");
         return;
     }
     g_probeClass[g_probeIdx] = kind;
@@ -3883,11 +4101,11 @@ static void ProbeClassify(char kind)
     if (g_probeAddr >= exe && g_probeAddr < exe + 0x100000)
         _snprintf(ida, sizeof(ida), " IDA 0x%08IX", g_probeAddr - exe + 0x400000);
 
-    Log("");
-    Log("TAG #%d   %s", g_tagCount, ClassName(kind));
-    Log("         index [%d] of %d   0x%08IX%s", g_probeIdx + 1, g_probeN, g_probeAddr, ida);
-    Log("         %s", g_probeWhat[g_probeIdx] ? g_probeWhat[g_probeIdx] : "(unlabelled)");
-    Log("         orig=% .4f  swing=%.4f x%.2f  written at %s",
+    LogD("");
+    LogD("TAG #%d   %s", g_tagCount, ClassName(kind));
+    LogD("         index [%d] of %d   0x%08IX%s", g_probeIdx + 1, g_probeN, g_probeAddr, ida);
+    LogD("         %s", g_probeWhat[g_probeIdx] ? g_probeWhat[g_probeIdx] : "(unlabelled)");
+    LogD("         orig=% .4f  swing=%.4f x%.2f  written at %s",
         g_probeOrig, g_probeSwing, g_probeAmp, PhaseName(g_probePhase));
 
     /* For a translation the owner can only report what he saw relative to
@@ -3896,9 +4114,9 @@ static void ProbeClassify(char kind)
        and this is what lets us resolve which. */
     haveYaw = SafeRead(WatchAddr(3), &yaw);
     if ((kind == 'O' || kind == 'P') && haveYaw)
-        Log("         player yaw at this moment % .4f rad = %.1f deg"
+        LogD("         player yaw at this moment % .4f rad = %.1f deg"
             "  (needed to resolve which world axis)", yaw, yaw * 57.2957795f);
-    Log("");
+    LogD("");
 }
 
 static void ProbeKeys(PBYTE p)
@@ -3916,6 +4134,16 @@ static void ProbeKeys(PBYTE p)
     const int watchN = (int)(sizeof(watch) / sizeof(watch[0]));
     BYTE now[256];
     int i;
+
+    /* Debug keys only belong to the game while it owns the input. When the
+       window is unfocused hkGetKeyboardState has already emptied p; keep the
+       edge table in step so a key held across the focus change is not a new
+       press when focus returns. */
+    if (g_inputMuted) {
+        for (i = 0; i < watchN; ++i)
+            prev[watch[i]] = (BYTE)(p[watch[i]] & 0x80);
+        return;
+    }
 
     for (i = 0; i < watchN; ++i) {
         vk = watch[i];
@@ -3937,7 +4165,7 @@ static void ProbeKeys(PBYTE p)
                 ProbeRestore();
                 BuildProbeList();
                 if (g_probeN == 0 && had > 0) {
-                    Log("PROBE    rescan found nothing - keeping the watch list.");
+                    LogD("PROBE    rescan found nothing - keeping the watch list.");
                     BuildWatchList();
                 }
                 ProbeSelect(0);
@@ -3984,7 +4212,7 @@ static void ProbeKeys(PBYTE p)
                 SteerSave();
             } else if (vk == 'V') {
                 g_dumpDraws = 300;
-                Log("DRAWDump armed: next 300 draws, with the first UP vertices");
+                LogD("DRAWDump armed: next 300 draws, with the first UP vertices");
                 PlayerDump("V");
             } else if (vk == 'T') {
                 /* Save the current hand-vs-gun offset for this weapon. */
@@ -4097,16 +4325,16 @@ static void ProbeKeys(PBYTE p)
                     if (g_probeN == 0) BuildWatchList();
                     g_huntDone = TRUE;            /* freeze the scanner */
                     Log("PROBE    MODE ON   numpad 1-9 picks that variable directly");
-                    Log("PROBE    (NumLock on). 8=next  7=prev  0=tag  -/+=swing  9=off");
-                    Log("PROBE    2=change WHEN we write (phase)");
-                    Log("PROBE    5=dump the watch list   4=rescan for new candidates");
-                    Log("PROBE    while a sine wave runs, say what you SEE it do:");
-                    Log("PROBE      U=TILTED my view up/down (horizon rotated)");
-                    Log("PROBE      K=LIFTED me up/down (vertical, horizon level)");
-                    Log("PROBE      L=turned me left/right");
-                    Log("PROBE      O=slid me front/back   P=slid me left/right");
-                    Log("PROBE    6=arm the ballistic window (height cheat + gravity)");
-                    Log("PROBE    (W/A/S/D and the mouse still work normally)");
+                    LogD("PROBE    (NumLock on). 8=next  7=prev  0=tag  -/+=swing  9=off");
+                    LogD("PROBE    2=change WHEN we write (phase)");
+                    LogD("PROBE    5=dump the watch list   4=rescan for new candidates");
+                    LogD("PROBE    while a sine wave runs, say what you SEE it do:");
+                    LogD("PROBE      U=TILTED my view up/down (horizon rotated)");
+                    LogD("PROBE      K=LIFTED me up/down (vertical, horizon level)");
+                    LogD("PROBE      L=turned me left/right");
+                    LogD("PROBE      O=slid me front/back   P=slid me left/right");
+                    LogD("PROBE    6=arm the ballistic window (height cheat + gravity)");
+                    LogD("PROBE    (W/A/S/D and the mouse still work normally)");
                     /* Resume where we left off rather than jumping to [1]. */
                     ProbeSelect(g_probeIdx < 0 ? 1 : g_probeIdx);
                 } else {
@@ -4126,8 +4354,8 @@ static void ProbeKeys(PBYTE p)
                 else if (vk == 'U' || vk == 'K' || vk == 'L'
                          || vk == 'O' || vk == 'P')
                     ProbeClassify((char)vk);
-                else if (vk == VK_OEM_MINUS) { g_probeAmp *= 0.5f; Log("PROBE    swing x%.4f", g_probeAmp); }
-                else if (vk == VK_OEM_PLUS)  { g_probeAmp *= 2.0f; Log("PROBE    swing x%.4f", g_probeAmp); }
+                else if (vk == VK_OEM_MINUS) { g_probeAmp *= 0.5f; LogD("PROBE    swing x%.4f", g_probeAmp); }
+                else if (vk == VK_OEM_PLUS)  { g_probeAmp *= 2.0f; LogD("PROBE    swing x%.4f", g_probeAmp); }
             }
         }
         prev[vk] = now[vk];
@@ -4272,6 +4500,15 @@ static void HandLoadConfig(void)
                   " - 180-degree roll of the hand/gun\n", f);
             fputs("handedness = right\n", f);
             fputs("hand_flip = false\n", f);
+            fputs("# haptics: buzz on firing, from the magazine counter\n", f);
+            fputs("# haptics_hand: dominant (default), both, left or right\n", f);
+            fputs("# haptic_frames: buzz length per shot, in frames (1..5, 2 is a short kick)\n", f);
+            fputs("haptics = true\n", f);
+            fputs("haptics_hand = dominant\n", f);
+            fputs("haptic_frames = 2\n", f);
+            fputs("# verbose_debug: true writes diagnostic detail (probes, dumps,\n", f);
+            fputs("# raw packets). false (default) keeps errors and state changes only.\n", f);
+            fputs("verbose_debug = false\n", f);
             fclose(f);
             Log("HAND     created %s with defaults", path);
         } else {
@@ -4280,6 +4517,11 @@ static void HandLoadConfig(void)
         g_handedness = 0;
         g_handFlip = FALSE;
         g_leftHanded = 0;
+        g_haptics = TRUE;
+        g_hapticHand = 0;
+        g_hapticFrames = 2;
+        g_twoHanded = FALSE;
+        g_verboseDebug = FALSE;
         return;
     }
 
@@ -4302,6 +4544,22 @@ static void HandLoadConfig(void)
         } else if (!_stricmp(key, "hand_flip")) {
             g_handFlip = (!_stricmp(val, "true") || !_stricmp(val, "yes") ||
                           !strcmp(val, "1")) ? TRUE : FALSE;
+        } else if (!_stricmp(key, "haptics")) {
+            g_haptics = (!_stricmp(val, "true") || !_stricmp(val, "yes") ||
+                         !strcmp(val, "1")) ? TRUE : FALSE;
+        } else if (!_stricmp(key, "haptics_hand")) {
+            if (!_stricmp(val, "both") || !strcmp(val, "1"))      g_hapticHand = 1;
+            else if (!_stricmp(val, "left") || !strcmp(val, "2"))  g_hapticHand = 2;
+            else if (!_stricmp(val, "right") || !strcmp(val, "3")) g_hapticHand = 3;
+            else                                                   g_hapticHand = 0;
+        } else if (!_stricmp(key, "haptic_frames")) {
+            g_hapticFrames = atoi(val);
+            if (g_hapticFrames < 1)  g_hapticFrames = 1;
+            if (g_hapticFrames > HAPTIC_MAX_FRAMES)
+                g_hapticFrames = HAPTIC_MAX_FRAMES;
+        } else if (!_stricmp(key, "verbose_debug")) {
+            g_verboseDebug = (!_stricmp(val, "true") || !_stricmp(val, "yes") ||
+                              !strcmp(val, "1")) ? TRUE : FALSE;
         }
     }
     fclose(f);
@@ -4311,6 +4569,10 @@ static void HandLoadConfig(void)
     g_leftHanded = (g_handedness == 1) ? 1 : 0;
     Log("HAND     config %s  handedness=%s  hand_flip=%s", path,
         g_handedness ? "left" : "right", g_handFlip ? "true" : "false");
+    Log("HAPTIC   %s  hand=%s  frames=%d", g_haptics ? "on" : "off",
+        g_hapticHand == 1 ? "both" : g_hapticHand == 2 ? "left" :
+        g_hapticHand == 3 ? "right" : "dominant", g_hapticFrames);
+    Log("LOG      verbose_debug=%s", g_verboseDebug ? "true" : "false");
 }
 
 static void EnsureInit(void)
@@ -4336,6 +4598,9 @@ static void EnsureInit(void)
     Log("XOPS-WXR d3d8 probe  %s", kBuildStamp);      // line 1 is the stamp
     Log("host           %s", exe);
     Log("exe base       0x%08IX   (IDA addresses below assume 0x400000)", g_exeBase);
+    /* Loaded before the diagnostic startup block so verbose_debug is known
+       before anything is written through LogD(). */
+    HandLoadConfig();
     Log("FONT  CreateFontIndirectA IAT patched: %s",
         g_realCreateFontIndirectA ? "yes" : "no");
     for (int fi = 0; fi < g_fontLogN; ++fi) LogFontRequest(&g_fontLog[fi]);
@@ -4357,37 +4622,36 @@ static void EnsureInit(void)
         return;
     }
     g_realCreate8 = (PFN_Direct3DCreate8)GetProcAddress(g_hRealD3D8, "Direct3DCreate8");
-    Log("real d3d8      %s  Direct3DCreate8=%p", real, g_realCreate8);
+    LogD("real d3d8      %s  Direct3DCreate8=%p", real, g_realCreate8);
     Log("");
 
     ResolveForwards();
     DumpImports();
     if (XrStart()) {
         Log("XR       client started. in 127.0.0.1:%d  out 127.0.0.1:%d", 7872, 7278);
-        Log("XR       handshake dir %s   hmd %s %s", XrDir(), XrMake(), XrModel());
-        Log("XR       the game is set to keep running while unfocused, so the");
-        Log("XR       tester can hold focus. Backslash toggles that.");
-        Log("XR       steering is ON by default; 3 toggles it for debugging,");
-        Log("XR       ; recentres, [ ] flip the signs, ' cycles DOF, ` cluster,");
-        Log("XR       1 toggles left stick W/A/S/D, N toggles handedness.");
-        Log("XR       0 enables desktop keyboard/mouse for manual tests;");
-        Log("XR       MODE_VR 0 screens (title/objective/menu/death/victory)");
-        Log("XR       always keep desktop input regardless of that toggle.");
-        Log("WINDOW   borderless full-display fit is ON - F toggles it.");
-        Log("SYNC     the red square is drawn last in the frame once a packet");
-        Log("SYNC     has arrived; its value is HMD_SYNC echoed verbatim.");
-        Log("CAMHUNT  differential scanner is OFF (camera already confirmed).");
-        Log("CAMHUNT  This removes the raw memory copy that crashed on 5 Nov.");
-        Log("RESOLUTION target-resolution composite is ON: the device asks for");
-        Log("RESOLUTION %dx%d and the 640x480 game frame is stretched to fill it.",
+        LogD("XR       handshake dir %s   hmd %s %s", XrDir(), XrMake(), XrModel());
+        LogD("XR       the game is set to keep running while unfocused, so the");
+        LogD("XR       tester can hold focus. Backslash toggles that.");
+        LogD("XR       steering is ON by default; 3 toggles it for debugging,");
+        LogD("XR       ; recentres, [ ] flip the signs, ' cycles DOF, ` cluster,");
+        LogD("XR       1 toggles left stick W/A/S/D, N toggles handedness.");
+        LogD("XR       0 enables desktop keyboard/mouse for manual tests;");
+        LogD("XR       MODE_VR 0 screens (title/objective/menu/death/victory)");
+        LogD("XR       always keep desktop input regardless of that toggle.");
+        LogD("WINDOW   borderless full-display fit is ON - F toggles it.");
+        LogD("SYNC     the red square is drawn last in the frame once a packet");
+        LogD("SYNC     has arrived; its value is HMD_SYNC echoed verbatim.");
+        LogD("CAMHUNT  differential scanner is OFF (camera already confirmed).");
+        LogD("CAMHUNT  This removes the raw memory copy that crashed on 5 Nov.");
+        LogD("RESOLUTION target-resolution composite is ON: the device asks for");
+        LogD("RESOLUTION %dx%d and the 640x480 game frame is stretched to fill it.",
             g_desktopW, g_desktopH);
-        Log("RESOLUTION M toggles it; the replacement HUD is drawn as a D3D");
-        Log("RESOLUTION texture in the centre square. J saves a back-buffer BMP.");
+        LogD("RESOLUTION M toggles it; the replacement HUD is drawn as a D3D");
+        LogD("RESOLUTION texture in the centre square. J saves a back-buffer BMP.");
     } else {
         Log("XR       client FAILED to start: %s", XrLastError());
     }
     SteerLoad();
-    HandLoadConfig();
     if (g_patchAspect) PatchProjectionAspect();
     else Log("PROJECTION aspect patch disabled by xops_wxr_steer.ini");
     HookInput();
@@ -4420,7 +4684,7 @@ static void NoteCallSite(DWORD type, void* ret)
         g_sites[g_siteCount].type = type;
         g_sites[g_siteCount].ida  = ida;
         ++g_siteCount;
-        Log("CALLSITE  SetTransform(%s)  returns to IDA 0x%08IX  (frame %ld)",
+        LogD("CALLSITE  SetTransform(%s)  returns to IDA 0x%08IX  (frame %ld)",
             XformName(type), ida, g_frame);
     }
 }
@@ -4512,7 +4776,8 @@ static void ApplyTargetRes(D3DPRESENT_PARAMETERS8* pp)
 
 static BOOL Verbose(void)
 {
-    return (g_frame < VERBOSE_FRAMES) || (g_frame % VERBOSE_EVERY == 0);
+    return g_verboseDebug &&
+           ((g_frame < VERBOSE_FRAMES) || (g_frame % VERBOSE_EVERY == 0));
 }
 
 static HRESULT __stdcall hkSetTransform(void* dev, DWORD type, const D3DMATRIX8* m)
@@ -4525,7 +4790,7 @@ static HRESULT __stdcall hkSetTransform(void* dev, DWORD type, const D3DMATRIX8*
     else                               ++g_xfOther;
 
     if (Verbose() && (type == D3DTS_VIEW || type == D3DTS_PROJECTION)) {
-        Log("[f%ld] SetTransform(%s) from IDA 0x%08IX",
+        LogD("[f%ld] SetTransform(%s) from IDA 0x%08IX",
             g_frame, XformName(type), ToIda(_ReturnAddress()));
         LogMatrix(XformName(type), m);
         if (type == D3DTS_VIEW)       LogViewDecomposed(m);
@@ -4544,7 +4809,7 @@ static HRESULT __stdcall hkSetVertexShader(void* dev, DWORD handle)
         for (int i = 0; i < g_fvfCount; ++i) if (g_fvfSeen[i] == handle) { seen = TRUE; break; }
         if (!seen && g_fvfCount < 32) {
             g_fvfSeen[g_fvfCount++] = handle;
-            Log("FVF       0x%04lX%s  (first seen frame %ld, from IDA 0x%08IX)",
+            LogD("FVF       0x%04lX%s  (first seen frame %ld, from IDA 0x%08IX)",
                 handle, (handle & D3DFVF_XYZRHW) ? "  XYZRHW -> 2D/HUD" : "",
                 g_frame, ToIda(_ReturnAddress()));
         }
@@ -4597,19 +4862,19 @@ static HRESULT __stdcall hkDrawPrimitiveUP(void* dev, DWORD prim, UINT count,
         return 0;
     }
     if (g_frame < VERBOSE_FRAMES && g_drawsThisFrame <= 4)
-        Log("[f%ld] DrawPrimitiveUP  type=%lu count=%u stride=%u  from IDA 0x%08IX",
+        LogD("[f%ld] DrawPrimitiveUP  type=%lu count=%u stride=%u  from IDA 0x%08IX",
             g_frame, prim, count, stride, ToIda(_ReturnAddress()));
     if (g_dumpDraws > 0) {
         const float* v = (const float*)data;
         if (v && count > 0)
-            Log("DRAWDump UP   fvf=0x%04lX stride=%u count=%u prim=%lu"
+            LogD("DRAWDump UP   fvf=0x%04lX stride=%u count=%u prim=%lu"
                 " v0=%.1f,%.1f,%.1f,%.1f v1=%.1f,%.1f",
                 g_curFvf, stride, count, prim,
                 v[0], v[1], v[2], v[3],
                 (count > 1 && stride >= 8) ? v[stride/4] : 0.0f,
                 (count > 1 && stride >= 8) ? v[stride/4 + 1] : 0.0f);
         else
-            Log("DRAWDump UP   fvf=0x%04lX stride=%u count=%u prim=%lu (no data)",
+            LogD("DRAWDump UP   fvf=0x%04lX stride=%u count=%u prim=%lu (no data)",
                 g_curFvf, stride, count, prim);
         --g_dumpDraws;
     }
@@ -4642,7 +4907,7 @@ static HRESULT __stdcall hkDrawPrimitiveUP(void* dev, DWORD prim, UINT count,
             {
                 static long hudDraws = 0;
                 if (hudDraws++ == 0)
-                    Log("HUD      visual %.2f -> game scale %.3f,%.3f"
+                    LogD("HUD      visual %.2f -> game scale %.3f,%.3f"
                         " (prim %lu, %u verts)", g_hudVisualScale,
                         sx, sy, prim, verts);
             }
@@ -4718,7 +4983,7 @@ static void DumpVBBounds(void* dev, UINT start, UINT count)
             _snprintf(wtxt, sizeof(wtxt), "  world %.2f %.2f %.2f",
                       wm.m[3][0], wm.m[3][1], wm.m[3][2]);
         if (o_GetTexture) o_GetTexture(dev, 0, &tex);
-        Log("DRAWDump DIR  bounds x %.0f..%.0f  y %.0f..%.0f  stride=%u"
+        LogD("DRAWDump DIR  bounds x %.0f..%.0f  y %.0f..%.0f  stride=%u"
             "  tex=%p%s", mnx, mxx, mny, mxy, stride, tex, wtxt);
         if (tex) ReleaseIUnknown(tex);
     }
@@ -4756,7 +5021,7 @@ static HRESULT __stdcall hkDrawPrimitive(void* dev, DWORD prim, UINT start, UINT
         CaptureHudBatch(dev, start, count);
     }
     if (g_dumpDraws > 0) {
-        Log("DRAWDump DIR  fvf=0x%04lX count=%u prim=%lu", g_curFvf, count, prim);
+        LogD("DRAWDump DIR  fvf=0x%04lX count=%u prim=%lu", g_curFvf, count, prim);
         DumpVBBounds(dev, start, count);
         --g_dumpDraws;
     }
@@ -4783,7 +5048,7 @@ static void DumpWorldZ(void* dev, UINT minIdx, UINT numV)
     unlock = (PFN_VBUnlock)(*(void***)vb)[12];
     if (lock(vb, minIdx * stride, numV * stride, &data, 0x10) != S_OK || !data) {
         if (lock(vb, 0, 0, &data, 0x10) != S_OK || !data) {
-            Log("WORLDZ  vertex buffer not readable (stride %u)", stride);
+            LogD("WORLDZ  vertex buffer not readable (stride %u)", stride);
             ReleaseIUnknown(vb);
             return;
         }
@@ -4796,11 +5061,11 @@ static void DumpWorldZ(void* dev, UINT minIdx, UINT numV)
         if (z > zmax) zmax = z;
         if (i < 4) sample[i] = z;
     }
-    Log("WORLDZ  stride=%u minIdx=%u numV=%u  z %.4f..%.4f  first %.3f %.3f %.3f %.3f",
+    LogD("WORLDZ  stride=%u minIdx=%u numV=%u  z %.4f..%.4f  first %.3f %.3f %.3f %.3f",
         stride, minIdx, numV, zmin, zmax, sample[0], sample[1], sample[2], sample[3]);
     for (i = 0; i < 3 && i < numV; ++i) {
         const float* f = (const float*)(data + (SIZE_T)i * stride);
-        Log("WORLDZ  v%u  % .4f % .4f % .4f % .4f % .4f",
+        LogD("WORLDZ  v%u  % .4f % .4f % .4f % .4f % .4f",
             i, f[0], f[1], f[2], f[3], f[4]);
     }
     unlock(vb);
@@ -5086,7 +5351,7 @@ static void CaptureGunModel(void* dev, UINT minIdx, UINT numV,
     {
         static int fmtLogs = 0;
         if (fmtLogs < 30) {
-            Log("HIDE     model fmt: stride=%u fvf=0x%04lX"
+            LogD("HIDE     model fmt: stride=%u fvf=0x%04lX"
                 "  uv0 % .3f,% .3f  uv1 % .3f,% .3f  tex=%p",
                 stride, g_curFvf, v[0][3], v[0][4], v[1][3], v[1][4], tex);
             ++fmtLogs;
@@ -5112,7 +5377,7 @@ static void CaptureGunModel(void* dev, UINT minIdx, UINT numV,
             if (o_GetTransform && o_GetTransform(dev, D3DTS_WORLD, &wm) == S_OK)
                 _snprintf(wtxt, sizeof(wtxt), "  world %.3f %.3f %.3f",
                           wm.m[3][0], wm.m[3][1], wm.m[3][2]);
-            Log("HAND     model cand %d: %u v %u i  ext %.3f/%.3f/%.3f"
+            LogD("HAND     model cand %d: %u v %u i  ext %.3f/%.3f/%.3f"
                 " score %.1f  tex=%p%s",
                 logs, numV, idxN, ext[0], ext[1], ext[2], score, tex, wtxt);
             ++logs;
@@ -5220,7 +5485,7 @@ static void CloneFromBatch(const HudBatch* b)
     g_clone = *b;
     if (g_clone.tex) AddRefIUnknown(g_clone.tex);
     g_cloneValid = TRUE;
-    Log("HIDE     clone captured: n=%u tex=%p", b->n, b->tex);
+    LogD("HIDE     clone captured: n=%u tex=%p", b->n, b->tex);
 }
 
 /* Called at BeginScene: drop the set from two frames ago, then swap the
@@ -5293,7 +5558,7 @@ static void CaptureHudBatch(void* dev, UINT start, UINT count)
     {
         static int logs = 0;
         if (logs < 30) {
-            Log("HUD      batch %d: n=%u ext %.1f/%.1f/%.1f tex=%p",
+            LogD("HUD      batch %d: n=%u ext %.1f/%.1f/%.1f tex=%p",
                 g_hbCurN - 1, b->n, ext[0], ext[1], ext[2], b->tex);
             ++logs;
         }
@@ -5333,7 +5598,7 @@ static void CaptureHudBatchUP(void* dev, const void* data, UINT count)
     {
         static int logs = 0;
         if (logs < 30) {
-            Log("HUD      UP batch %d: n=%u ext %.1f/%.1f/%.1f tex=%p",
+            LogD("HUD      UP batch %d: n=%u ext %.1f/%.1f/%.1f tex=%p",
                 g_hbCurN - 1, b->n, ext[0], ext[1], ext[2], b->tex);
             ++logs;
         }
@@ -5351,7 +5616,7 @@ static void HandDrawHudBatchRow(void* dev)
        taken inside one window show the same batch at different times. */
     idx = (GetTickCount() / 5000u) % (DWORD)g_hbPrevN;
     if (idx != lastIdx) {
-        Log("HUD      showing batch %lu of %d", idx, g_hbPrevN);
+        LogD("HUD      showing batch %lu of %d", idx, g_hbPrevN);
         lastIdx = idx;
     }
     o_SetRenderState(dev, D3DRS_ZENABLE, 0);
@@ -5449,7 +5714,7 @@ static HRESULT __stdcall hkDrawIndexedPrim(void* dev, DWORD prim, UINT minIdx,
                 p->scale = g_gunScale;
                 p->valid = TRUE;
                 ++g_partN;
-                Log("HIDE     part %d: %u v %u i tex=%p",
+                LogD("HIDE     part %d: %u v %u i tex=%p",
                     g_partN - 1, p->nV, p->nI, p->tex);
             }
         }
@@ -5473,7 +5738,7 @@ static HRESULT __stdcall hkDrawIndexedPrim(void* dev, DWORD prim, UINT minIdx,
     ++g_drawsThisFrame; ++g_drawsIDX;
     NoteDraw(g_curFvf, 0);
     if (g_dumpDraws > 0) {
-        Log("DRAWDump IDX  fvf=0x%04lX primCount=%u numV=%u",
+        LogD("DRAWDump IDX  fvf=0x%04lX primCount=%u numV=%u",
             g_curFvf, primCount, numV);
         if (g_curFvf == 0x0144 && numV >= 20 && primCount >= 20)
             DumpWorldZ(dev, minIdx, numV);
@@ -5676,6 +5941,39 @@ static void HandNorm(float a[3])
     else           { a[0] = 0.0f; a[1] = 0.0f; a[2] = 1.0f; }
 }
 
+/* Two-handed aim (left grip held): the gun stays at the dominant hand but its
+   forward points at the off hand, keeping the gun hand's roll. Mirrors SHOGO
+   MAD WXR's UpdateTwoHanded - remove the forward component from the hand's up
+   vector, renormalise it, then rebuild right = up x forward. A degenerate
+   hand vector leaves the pose alone. */
+static void HandTwoHandedAim(const float offP[3], const float vp[3],
+                             float vf[3], float vu[3], float vr[3])
+{
+    float dir[3], len, d, ul;
+
+    dir[0] = offP[0] - vp[0];
+    dir[1] = offP[1] - vp[1];
+    dir[2] = offP[2] - vp[2];
+    len = sqrtf(dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]);
+    if (len < 0.001f) return;
+    dir[0] /= len; dir[1] /= len; dir[2] /= len;
+
+    d = dir[0]*vu[0] + dir[1]*vu[1] + dir[2]*vu[2];
+    vu[0] -= dir[0]*d; vu[1] -= dir[1]*d; vu[2] -= dir[2]*d;
+    ul = sqrtf(vu[0]*vu[0] + vu[1]*vu[1] + vu[2]*vu[2]);
+    if (ul > 0.001f) {
+        vu[0] /= ul; vu[1] /= ul; vu[2] /= ul;
+    } else {
+        vu[0] = 0.0f; vu[1] = 1.0f; vu[2] = 0.0f;
+    }
+    HandCross(vu, dir, vr);
+    HandNorm(vr);
+
+    vf[0] = dir[0];
+    vf[1] = dir[1];
+    vf[2] = dir[2];
+}
+
 /* Project a view-space point into the game's 640x480 image. The game view is
    +Z forward, +Y up, +X right. */
 static BOOL HandProject(const float v[3], float* sx, float* sy)
@@ -5828,7 +6126,7 @@ static void HandViewPose(const float* hp, const float* hf, const float* hu,
         vp[2] = 0.45f;
         if (!g_handLogged) {
             g_handLogged = TRUE;
-            Log("HAND     no controller hand position; using fallback offsets");
+            LogD("HAND     no controller hand position; using fallback offsets");
         }
     } else {
         rel[0] = hp[0] - g_pose.headP[0];
@@ -6010,11 +6308,29 @@ static void DrawHandAndLaserWorld(void* dev)
         HandViewPose(g_pose.rP, g_pose.rF, g_pose.rU, TRUE, FALSE,
                      ovp, ovf, ovu, ovr);
 
+    /* Left grip held: mount the gun at the dominant hand and point it at the
+       off hand. The dominant hand box turns with the gun (it is the gripping
+       hand), while the off-hand box keeps its own controller pose. */
+    {
+        static BOOL wasTwoHanded = FALSE;
+        if (g_twoHanded) {
+            HandTwoHandedAim(ovp, dvp, dvf, dvu, dvr);
+            if (!wasTwoHanded)
+                Log("HAND     two-handed aim ON: dom %.3f %.3f %.3f  off %.3f %.3f %.3f"
+                    "  aim %+.3f %+.3f %+.3f",
+                    dvp[0], dvp[1], dvp[2], ovp[0], ovp[1], ovp[2],
+                    dvf[0], dvf[1], dvf[2]);
+        } else if (wasTwoHanded) {
+            Log("HAND     two-handed aim off");
+        }
+        wasTwoHanded = g_twoHanded;
+    }
+
     if ((g_frame % 120) == 0) {
         float dsx = 0, dsy = 0, osx = 0, osy = 0;
         BOOL dok = HandProject(dvp, &dsx, &dsy);
         BOOL ook = HandProject(ovp, &osx, &osy);
-        Log("HAND screen dom %s %.0f,%.0f  off %s %.0f,%.0f  (640x480)",
+        LogD("HAND screen dom %s %.0f,%.0f  off %s %.0f,%.0f  (640x480)",
             dok ? "ok" : "BEHIND", dsx, dsy, ook ? "ok" : "BEHIND", osx, osy);
     }
 
@@ -6060,7 +6376,7 @@ static void DrawHandAndLaserWorld(void* dev)
             void* ds = NULL;
             if (o_GetRenderTarget) o_GetRenderTarget(dev, &rt);
             if (o_GetDepthStencilSurface) o_GetDepthStencilSurface(dev, &ds);
-            Log("HAND     3D draw #%d frame %ld: draw %ld idx %ld begin %ld end %ld"
+            LogD("HAND     3D draw #%d frame %ld: draw %ld idx %ld begin %ld end %ld"
                 "  target=%p gameRT=%p  depth=%p gameDepth=%p",
                 matLog, g_frame, g_drawsThisFrame, g_drawsIDX,
                 g_beginThisFrame, g_endThisFrame, rt, g_gameRTSurf, ds, g_gameDepth);
@@ -6068,7 +6384,7 @@ static void DrawHandAndLaserWorld(void* dev)
             if (ds) ReleaseIUnknown(ds);
             ++matLog;
             if (matLog == 1) {
-                Log("HAND     3D draw: game view %s, projection %s",
+                LogD("HAND     3D draw: game view %s, projection %s",
                     haveView ? "read" : "unavailable",
                     g_haveProj ? "captured" : "built");
                 if (haveView) LogMatrix("HAND view", &saveView);
@@ -6272,7 +6588,7 @@ static void CompositeFrame(void* dev)
     {
         static int vpLogs = 0;
         if (vpLogs++ == 0 && st.haveVp)
-            Log("COMPOSITE game viewport %ux%u at %u,%u (game RT 640x480)",
+            LogD("COMPOSITE game viewport %ux%u at %u,%u (game RT 640x480)",
                 st.vp.Width, st.vp.Height, st.vp.X, st.vp.Y);
     }
     if (o_BeginScene(dev) != S_OK) {
@@ -6378,28 +6694,28 @@ static void DumpBackBuffer(void* dev)
     if (!o_GetBackBuffer || !o_CreateImageSurface || !o_CopyRects) return;
 
     if (g_bbFormat != D3DFMT_A8R8G8B8 && g_bbFormat != D3DFMT_X8R8G8B8) {
-        Log("DUMP     unsupported back-buffer format %lu", g_bbFormat);
+        LogD("DUMP     unsupported back-buffer format %lu", g_bbFormat);
         return;
     }
     if (o_GetBackBuffer(dev, 0, 0, &bb) != S_OK || !bb) {
-        Log("DUMP     GetBackBuffer failed");
+        LogD("DUMP     GetBackBuffer failed");
         return;
     }
     if (o_CreateImageSurface(dev, g_bbW, g_bbH, g_bbFormat, &sys) != S_OK ||
         !sys) {
-        Log("DUMP     CreateImageSurface failed");
+        LogD("DUMP     CreateImageSurface failed");
         ReleaseIUnknown(bb);
         return;
     }
     r.left = 0; r.top = 0; r.right = (LONG)g_bbW; r.bottom = (LONG)g_bbH;
     pt.x = 0; pt.y = 0;
     if (o_CopyRects(dev, bb, &r, 1, sys, &pt) != S_OK) {
-        Log("DUMP     CopyRects(back buffer -> system surface) failed");
+        LogD("DUMP     CopyRects(back buffer -> system surface) failed");
         ReleaseIUnknown(sys); ReleaseIUnknown(bb);
         return;
     }
     if (SurfLock(sys, &lr, NULL, 0) != S_OK || !lr.pBits) {
-        Log("DUMP     LockRect(system surface) failed");
+        LogD("DUMP     LockRect(system surface) failed");
         ReleaseIUnknown(sys); ReleaseIUnknown(bb);
         return;
     }
@@ -6428,9 +6744,9 @@ static void DumpBackBuffer(void* dev)
         for (y = 0; y < (int)g_bbH; ++y)
             fwrite((BYTE*)lr.pBits + (SIZE_T)y * lr.Pitch, 1, rowBytes, f);
         fclose(f);
-        Log("DUMP     wrote %s (%ux%u)", path, g_bbW, g_bbH);
+        LogD("DUMP     wrote %s (%ux%u)", path, g_bbW, g_bbH);
     } else {
-        Log("DUMP     could not open %s", path);
+        LogD("DUMP     could not open %s", path);
     }
 
     SurfUnlock(sys);
@@ -6450,7 +6766,7 @@ static HRESULT __stdcall hkSetViewport(void* dev, const D3DVIEWPORT8* vp)
             {
                 static int n = 0;
                 if (n++ < 6)
-                    Log("VIEWPORT game %ux%u at %u,%u -> %ux%u at %u,%u",
+                    LogD("VIEWPORT game %ux%u at %u,%u -> %ux%u at %u,%u",
                         vp->Width, vp->Height, vp->X, vp->Y,
                         v.Width, v.Height, v.X, v.Y);
             }
@@ -6480,7 +6796,7 @@ static HRESULT __stdcall hkClear(void* dev, DWORD count, const D3DRECT8* rects,
         if (n++ < 12) {
             void* rt = NULL;
             if (o_GetRenderTarget) o_GetRenderTarget(dev, &rt);
-            Log("CLEAR    after hand draw frame %ld: flags=0x%08lX"
+            LogD("CLEAR    after hand draw frame %ld: flags=0x%08lX"
                 " color=0x%08lX z=%.3f target=%p gameRT=%p"
                 "  draws=%ld idx=%ld begin=%ld end=%ld",
                 g_frame, flags, color, z, rt, g_gameRTSurf,
@@ -6612,10 +6928,10 @@ static HRESULT __stdcall hkEndScene(void* dev)
     if (g_tailDump) {
         int n = g_tailHead < 12 ? g_tailHead : 12;
         int i;
-        Log("TAIL     last %d indexed draws (of %d):", n, g_tailHead);
+        LogD("TAIL     last %d indexed draws (of %d):", n, g_tailHead);
         for (i = 0; i < n; ++i) {
             TailDraw* t = &g_tail[(g_tailHead - n + i) & 15];
-            Log("TAIL     idx %d  vb=%p  numV=%u prim=%u tex=%p",
+            LogD("TAIL     idx %d  vb=%p  numV=%u prim=%u tex=%p",
                 t->idx, t->vb, t->numV, t->prim, t->tex);
         }
         g_tailDump = FALSE;
@@ -6623,10 +6939,10 @@ static HRESULT __stdcall hkEndScene(void* dev)
     if (g_needParts) {
         if (!g_weaponVB && g_tailHead > 0) {
             g_weaponVB = g_tail[(g_tailHead - 1) & 15].vb;
-            Log("HIDE     weapon VB %p; capturing parts next frame", g_weaponVB);
+            LogD("HIDE     weapon VB %p; capturing parts next frame", g_weaponVB);
         } else if (g_weaponVB && g_partN > 0) {
             g_needParts = FALSE;
-            Log("HIDE     assembled %d part(s) for '%s'",
+            LogD("HIDE     assembled %d part(s) for '%s'",
                 g_partN, ActiveWeaponName());
         }
     }
@@ -6651,7 +6967,7 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
     if (!g_dumpArmed && g_frame >= 600) {
         g_dumpArmed = TRUE;
         g_dumpDraws = 300;
-        Log("DRAWDump auto-armed at frame %ld", g_frame);
+        LogD("DRAWDump auto-armed at frame %ld", g_frame);
         PlayerDump("auto");
     }
 
@@ -6699,16 +7015,16 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
     // Per-frame summary. The Begin/End counts answer "is EndScene once per
     // presented frame?", which decides where the sync square goes.
     if (Verbose()) {
-        Log("[f%ld] PRESENT  BeginScene=%ld EndScene=%ld DrawPrimitiveUP=%ld SetTransform=%ld"
+        LogD("[f%ld] PRESENT  BeginScene=%ld EndScene=%ld DrawPrimitiveUP=%ld SetTransform=%ld"
             "  (view=%ld proj=%ld world=%ld other=%ld)",
             g_frame, g_beginThisFrame, g_endThisFrame, g_drawsThisFrame, g_xformThisFrame,
             g_xfView, g_xfProj, g_xfWorld, g_xfOther);
-        Log("[f%ld] DRAWPATH UP=%ld  DrawPrimitive=%ld  DrawIndexedPrimitive=%ld",
+        LogD("[f%ld] DRAWPATH UP=%ld  DrawPrimitive=%ld  DrawIndexedPrimitive=%ld",
             g_frame, g_drawsUP, g_drawsVB, g_drawsIDX);
 
         // What the frame's geometry actually was.
         for (int i = 0; i < g_drawKinds; ++i)
-            Log("[f%ld] DRAWS    FVF 0x%04lX stride=%u  x%ld   %s",
+            LogD("[f%ld] DRAWS    FVF 0x%04lX stride=%u  x%ld   %s",
                 g_frame, g_draws[i].fvf, g_draws[i].stride, g_draws[i].count,
                 FvfKind(g_draws[i].fvf));
 
@@ -6716,12 +7032,12 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
         // if that matrix was set many frames ago. A frozen eye position while
         // the player is moving is the proof that the camera lives elsewhere.
         if (g_haveView) {
-            Log("[f%ld] CAMERA   last VIEW set at frame %ld%s",
+            LogD("[f%ld] CAMERA   last VIEW set at frame %ld%s",
                 g_frame, g_lastViewAt,
                 (g_lastViewAt < g_frame - 1) ? "   <- STALE: not set this frame" : "");
             LogViewDecomposed(&g_lastView);
         } else {
-            Log("[f%ld] CAMERA   no VIEW matrix has ever been set", g_frame);
+            LogD("[f%ld] CAMERA   no VIEW matrix has ever been set", g_frame);
         }
         ReportCandidates();
 
@@ -6735,7 +7051,7 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
             _snprintf(one, sizeof(one), "%s=%ld ", kInputNames[i], g_inFrame[i]);
             strncat(ib, one, sizeof(ib) - strlen(ib) - 1);
         }
-        if (ib[0]) Log("[f%ld] INPUT    %s", g_frame, ib);
+        if (ib[0]) LogD("[f%ld] INPUT    %s", g_frame, ib);
     }
 
     LogWindowIfChanged(c ? c : g_wnd);
@@ -6743,6 +7059,7 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
        be turned back on - the mode is only ever re-read from a packet we
        send. Mono first, per the settled decisions. */
     if (XrRunning()) {
+        float hapL = 0.0f, hapR = 0.0f;
         /* MODE_VR 0 on the title, briefing/objective, menus and death screens:
            the runtime stops the pose stream, restores its own mouse control
            and presents flat. MODE_VR 1 only when the previous frame had the
@@ -6760,7 +7077,10 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
             StateLog("MODE_VR");
             lastModeVr = modeVr;
         }
-        XrSendFrame(0.0f, 0.0f, modeVr, XR_3D_MONO, g_outFovX, g_outFovY);
+        /* Haptics ride in the first two fields: a duration in frames, per
+           hand. Updated from the magazine counter, gameplay only. */
+        HapticTick(modeVr == XR_VR_ON, &hapL, &hapR);
+        XrSendFrame(hapL, hapR, modeVr, XR_3D_MONO, g_outFovX, g_outFovY);
     }
 
     if ((g_frame % 120) == 0 && g_frame > 60) { WatchDump("periodic"); SteerLog(); }
@@ -6920,23 +7240,23 @@ static HRESULT __stdcall hkCreateDevice(void* self, UINT adapter, DWORD devType,
                                         D3DPRESENT_PARAMETERS8* pp, void** outDev)
 {
     Log("");
-    Log("CREATEDEVICE  called from IDA 0x%08IX", ToIda(_ReturnAddress()));
+    LogD("CREATEDEVICE  called from IDA 0x%08IX", ToIda(_ReturnAddress()));
     if (pp) {
         g_deviceWindowed = pp->Windowed ? TRUE : FALSE;
-        Log("  backbuffer    %ux%u  count=%u  format=%lu",
+        LogD("  backbuffer    %ux%u  count=%u  format=%lu",
             pp->BackBufferWidth, pp->BackBufferHeight, pp->BackBufferCount, pp->BackBufferFormat);
-        Log("  windowed      %ld        swapeffect=%lu  multisample=%lu",
+        LogD("  windowed      %ld        swapeffect=%lu  multisample=%lu",
             pp->Windowed, pp->SwapEffect, pp->MultiSampleType);
-        Log("  hDeviceWindow %p  hFocusWindow=%p", pp->hDeviceWindow, hFocus);
+        LogD("  hDeviceWindow %p  hFocusWindow=%p", pp->hDeviceWindow, hFocus);
         /* Whichever of the two is set is the window the game considers its
            own, and so the handle GetForegroundWindow must hand back. */
         if (!g_gameWnd) g_gameWnd = pp->hDeviceWindow ? pp->hDeviceWindow : hFocus;
-        Log("  autodepth     %ld  fmt=%lu", pp->EnableAutoDepthStencil, pp->AutoDepthStencilFormat);
-        Log("  flags         0x%08lX%s", pp->Flags,
+        LogD("  autodepth     %ld  fmt=%lu", pp->EnableAutoDepthStencil, pp->AutoDepthStencilFormat);
+        LogD("  flags         0x%08lX%s", pp->Flags,
             (pp->Flags & 1) ? "  LOCKABLE_BACKBUFFER" : "  (back buffer NOT lockable)");
-        Log("  refresh       %u Hz  presentinterval=0x%08X",
+        LogD("  refresh       %u Hz  presentinterval=0x%08X",
             pp->FullScreen_RefreshRateInHz, pp->FullScreen_PresentationInterval);
-        Log("  behaviour     0x%08lX  devtype=%lu  adapter=%u", behaviour, devType, adapter);
+        LogD("  behaviour     0x%08lX  devtype=%lu  adapter=%u", behaviour, devType, adapter);
     }
 
     HRESULT hr;
@@ -6993,7 +7313,7 @@ extern "C" void* __stdcall Direct3DCreate8(UINT sdkVersion)
     if (!g_realCreate8) return NULL;
 
     void* d3d = g_realCreate8(sdkVersion);
-    Log("Direct3DCreate8(SDKVersion=%u = 0x%X)  ->  %p  [0xDC = 220 = D3D8.1]",
+    LogD("Direct3DCreate8(SDKVersion=%u = 0x%X)  ->  %p  [0xDC = 220 = D3D8.1]",
         sdkVersion, sdkVersion, d3d);
 
     if (d3d) {
@@ -7058,30 +7378,30 @@ BOOL APIENTRY DllMain(HMODULE hMod, DWORD reason, LPVOID)
             Log("SHUTDOWN  after %ld frames, %d distinct SetTransform call sites",
                 g_frame, g_siteCount);
             for (int i = 0; i < g_siteCount; ++i)
-                Log("  %-10s  IDA 0x%08IX", XformName(g_sites[i].type), g_sites[i].ida);
-            Log("");
+                LogD("  %-10s  IDA 0x%08IX", XformName(g_sites[i].type), g_sites[i].ida);
+            LogD("");
             {
                 int i, n = 0;
                 for (i = 0; i < g_probeN; ++i) if (g_probeClass[i]) ++n;
                 if (n) {
-                    Log("WHAT THE OWNER SAW  (%d of %d variables classified):", n, g_probeN);
+                    LogD("WHAT THE OWNER SAW  (%d of %d variables classified):", n, g_probeN);
                     for (i = 0; i < g_probeN; ++i) {
                         if (!g_probeClass[i]) continue;
-                        Log("  0x%08IX  %-38s  %s",
+                        LogD("  0x%08IX  %-38s  %s",
                             g_probeList[i], ClassName(g_probeClass[i]),
                             g_probeWhat[i] ? g_probeWhat[i] : "");
                     }
-                    Log("This is the map. Each line is an address whose effect was");
-                    Log("watched on screen and named - not inferred from a correlation.");
-                    Log("");
+                    LogD("This is the map. Each line is an address whose effect was");
+                    LogD("watched on screen and named - not inferred from a correlation.");
+                    LogD("");
                 }
             }
-            Log("INPUT totals over the session:");
+            LogD("INPUT totals over the session:");
             for (int i = 0; i < IN_COUNT; ++i)
-                Log("  %-18s %ld calls%s", kInputNames[i], g_inCalls[i],
+                LogD("  %-18s %ld calls%s", kInputNames[i], g_inCalls[i],
                     g_inCalls[i] ? "   <- a live input path" : "");
-            Log("A per-frame call count means that function is the live input");
-            Log("path and we can answer it ourselves - no synthetic events.");
+            LogD("A per-frame call count means that function is the live input");
+            LogD("path and we can answer it ourselves - no synthetic events.");
             fclose(g_log);
             g_log = NULL;
         }
