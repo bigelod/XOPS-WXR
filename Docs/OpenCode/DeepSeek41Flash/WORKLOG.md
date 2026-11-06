@@ -950,6 +950,12 @@ and the `/` toggle, same camera and hands:
   the counter-rotation is exact. The game's own bottom-right weapon-slot
   models are inside the sprite and do roll with the world, which is what made
   it look as if the hands were moving.
+- HUD: the white HUD text is **pixel-identical** in both roll states (336
+  bright pixels, centroid 696.8,597.0 exactly), confirming it is drawn after
+  the sprite and stays fixed.
+- A mirrored **-25 degree** head roll produces the symmetric sprite angle
+  (+25 with the default `roll_sign = -1`) and the same fixed hand/laser axis,
+  so the sign is consistent.
 
 Build `built Nov  6 2026 07:13:13`, SHA-256
 `037e219d977ff1b556ae256e1d567e46bb3367f19b209797b1547f707d083f11`.
