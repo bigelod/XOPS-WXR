@@ -4713,6 +4713,11 @@ static void EnsureInit(void)
             g_desktopW, g_desktopH);
         LogD("RESOLUTION M toggles it; the replacement HUD is drawn as a D3D");
         LogD("RESOLUTION texture in the centre square. J saves a back-buffer BMP.");
+        /* IMVR sends a first frame with zero haptics and MODE_VR=0 to awaken
+           the runtime. The mode is only learned from an outbound packet, and
+           the first Present can be a frame or more away. */
+        XrSendFrame(0.0f, 0.0f, XR_VR_OFF, XR_3D_MONO,
+                    g_outFovX, g_outFovY);
     } else {
         Log("XR       client FAILED to start: %s", XrLastError());
     }
@@ -7670,9 +7675,10 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
     }
 
     LogWindowIfChanged(c ? c : g_wnd);
-    /* Keep sending every frame even when MODE_VR is 0, or the stream cannot
-       be turned back on - the mode is only ever re-read from a packet we
-       send. Mono first, per the settled decisions. */
+    /* Every frame, menus included. Haptics are 0 when nothing is buzzing;
+       MODE_VR is only re-read from a packet, so skipping frames stalls the
+       switch. This is before o_Present, so the runtime has the mode for the
+       frame it is about to receive. */
     if (XrRunning()) {
         float hapL = 0.0f, hapR = 0.0f;
         /* MODE_VR 0 on the title, briefing/objective, menus and death screens:

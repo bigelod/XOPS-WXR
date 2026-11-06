@@ -1166,3 +1166,61 @@ Build: `built Nov  6 2026 12:58:01`, SHA-256
 Launcher `XOPSVR.exe`: 187,392 bytes, SHA-256
 `5ba78f8743e5e8f01410d68e010185133ab227abe3f79fb645d5fbe5f5159861`
 (build artifact, not committed).
+
+## 2026-11-06 - device bring-up, DXVK export fix, dev/release split, HUD scale
+
+### Crash on device
+
+The first device runs exited before the first frame. The probe log showed the
+device created and the D3D8 hooks installed, but zero `HOOK` calls. The Wine
+log said `Ask to run at NULL, will segfault` (address 0), then address 1 after a
+`DebugSetMute` wrapper. The game has the string `DebugSetMute` and looked it up
+dynamically; DXVK 1.10.1's `d3d8.dll` does not export it. The proxy was
+re-exporting it as a naked jump (address 0) and then a typed wrapper (address
+1, wrong call/return stack shape).
+
+Fix: **export only `Direct3DCreate8`**. The game sees the same NULL for the
+optional debug helpers it sees with DXVK alone. Device run then reached
+gameplay: `MODE_VR 1`, thousands of packets, hands/gun/HUD and roll working.
+
+### Outbound UDP every frame
+
+`XrSendFrame` is called from `Present` **every frame**, before `o_Present`,
+including menus when `MODE_VR` is 0. `HapticTick` returns 0 for both hands
+when nothing is buzzing; the runtime ignores 0 for the haptic fields and uses
+the decayed duration. Added a **first frame at startup** (`0 0 MODE_VR=0 ...`)
+to awaken the runtime, matching IMVR's `SendFirstFrame`. `MODE_VR` and
+`MODE_3D` are only re-read from an outbound packet, so there is no idle-frame
+gap.
+
+### Device input finding
+
+The log showed `move 0.00, 0.00` for the left stick almost every interval
+while the right stick `turn` worked. The owner saw up/down on the left
+controller triggering weapon swaps. That means WinlatorXR is mapping the left
+stick to **keyboard arrow keys**, not the XrApi left-stick analog. The mod's
+`move` path never sees it. The fix is in the WinlatorXR controller layout:
+map the left stick to the left thumbstick (analog/XrApi) or to W/A/S/D, and
+remove the arrow-key mapping.
+
+### Dev/release split
+
+`XOPS_DEV_BUILD` (default 1) now selects diagnostics at compile time:
+
+- `build\build-dev.bat` - probe keys, `HOOKS`/`HOOK` trace, verbose log, draw
+  dumps, frame grabs; output `out\dev\d3d8.dll`.
+- `build\build-release.bat` - no probe log, no debug keys, no draw/grab;
+  builds the launcher and assembles `Release\` with a clean config/INSTALL.
+- `build\build-probe.bat` remains the dev alias.
+
+### HUD scale
+
+The replacement HUD was only adjustable through the dev `H` key and
+`xops_wxr_steer.ini`. Added `hud_scale` to `config.txt` (0.5..2.0, 1.0 native,
+1.1 default; config overrides the INI) and a **HUD scale** field to the
+launcher Options. The release package ships `hud_scale = 1.0`.
+
+Current dev build: `built Nov  6 2026 14:28:55`, SHA-256
+`7e024792ae45de869c5b24b911a5276b8c7d486f27daa7243ba93dbb31804308`.
+Release build: 264,704 bytes, SHA-256
+`c5f112b564a96e40eb1db19365558527ecdf47bce918b544a86a12d4f6af4215`.

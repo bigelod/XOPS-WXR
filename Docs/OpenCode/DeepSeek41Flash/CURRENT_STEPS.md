@@ -5,8 +5,8 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 12:58:01`, SHA-256
-`8b9d428afd56e13bfcfd382fddcea470ce97592374ad8773edbad001d59d9c8c`,
+**Current build:** `built Nov  6 2026 14:28:55`, SHA-256
+`7e024792ae45de869c5b24b911a5276b8c7d486f27daa7243ba93dbb31804308`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---
@@ -102,7 +102,9 @@ native frame fills it with no bars or crop.
   `MODE_VR = 1`; manual PC mode (`0`) is exempt.
 - **Haptics:** outbound fields 1-2 are a per-hand duration in frames; a shot
   sends a 2-frame pulse, decayed before sending. Both hands while two-handed
-  aim is held.
+  aim is held. The 7278 packet is sent every frame (0 haptics when idle) so
+  `MODE_VR`/`MODE_3D` transitions are always communicated, plus a first frame
+  at startup.
 - **Logging:** `Log()` is always on for errors/state; `LogD()` is gated by
   `verbose_debug` (default false, true on this test PC).
 

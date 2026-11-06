@@ -503,8 +503,8 @@ deployed copy with SHA-256 (`match=True`). The DLL is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 12:58:01`, SHA-256
-`8b9d428afd56e13bfcfd382fddcea470ce97592374ad8773edbad001d59d9c8c`,
+Current handover build: `built Nov  6 2026 14:28:55`, SHA-256
+`7e024792ae45de869c5b24b911a5276b8c7d486f27daa7243ba93dbb31804308`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---

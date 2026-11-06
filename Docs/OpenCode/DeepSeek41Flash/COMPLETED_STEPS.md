@@ -4,8 +4,8 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 12:58:01`, SHA-256
-`8b9d428afd56e13bfcfd382fddcea470ce97592374ad8773edbad001d59d9c8c`.
+**Last build covered:** `built Nov  6 2026 14:28:55`, SHA-256
+`7e024792ae45de869c5b24b911a5276b8c7d486f27daa7243ba93dbb31804308`.
 
 ---
 
@@ -150,6 +150,10 @@ pass; `BUG_FIXES.md` will be created from that run.
 - Driven by magazine-counter drops; a drop over 8 rounds is treated as a
   reload/pickup/respawn and ignored.
 - Dominant hand by default; **both hands while two-handed aim is held**.
+- **Outbound 7278 is sent every frame** (menus included), with **0 haptic
+  durations when nothing is buzzing**, and a first frame at startup. `MODE_VR`
+  and `MODE_3D` are only re-read from an outbound packet, so skipping idle
+  frames stalls a mode switch. The packet is sent before `Present`.
 - Config: `haptics`, `haptics_hand` (dominant/both/left/right),
   `haptic_frames` (1..5).
 - Desktop-verified with UDP capture (`0.0 1.0 ...` per shot, both hands with
