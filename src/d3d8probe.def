@@ -1,13 +1,12 @@
 ; XOPS-WXR d3d8 probe - export table
 ;
-; Names must match the real d3d8.dll exactly, undecorated. The probe implements
-; Direct3DCreate8 itself and forwards the rest with a naked jmp, so the real
-; function's own calling convention and stack cleanup are preserved whatever
-; they are.
+; Only export what the game actually uses. The game imports Direct3DCreate8
+; and looks up DebugSetMute dynamically. Exporting the other debug helpers as
+; naked jumps was a trap on Wine/DXVK: GetProcAddress returned a valid export,
+; but the forward pointer was NULL and the game jumped to address 0.
+;
+; DebugSetMute is a safe wrapper in d3d8probe.cpp, not a naked jump.
 LIBRARY d3d8
 EXPORTS
     Direct3DCreate8                             @1
-    ValidateVertexShader                        @2
-    ValidatePixelShader                         @3
     DebugSetMute                                @4
-    Direct3D8EnableMaximizedWindowedModeShim    @5

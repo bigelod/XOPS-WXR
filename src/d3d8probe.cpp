@@ -7926,29 +7926,25 @@ extern "C" void* __stdcall Direct3DCreate8(UINT sdkVersion)
     return d3d;
 }
 
-// The other d3d8 exports, forwarded without knowing their signatures. A naked
-// jmp preserves whatever calling convention and stack cleanup the real function
-// uses, which a typed wrapper could not do safely.
-#define FORWARD(name)                                                       \
-    static FARPROC g_fp_##name = NULL;                                      \
-    extern "C" __declspec(naked) void __stdcall name(void)                  \
-    {                                                                       \
-        __asm { jmp dword ptr [g_fp_##name] }                               \
-    }
+// DXVK 1.10.1 provides d3d8.dll on the device. It does NOT export the
+// optional Microsoft debug helpers (DebugSetMute, ValidateVertexShader,
+// ValidatePixelShader, Direct3D8EnableMaximizedWindowedModeShim). Exporting
+// them as naked jumps made GetProcAddress return a valid pointer whose real
+// target was NULL, so the game jumped to address 0. The .def now exports only
+// Direct3DCreate8 and DebugSetMute; DebugSetMute is a typed no-op wrapper.
+typedef void (WINAPI *PFN_DebugSetMute)(BOOL);
+static PFN_DebugSetMute g_realDebugSetMute = NULL;
 
-FORWARD(ValidateVertexShader)
-FORWARD(ValidatePixelShader)
-FORWARD(DebugSetMute)
-FORWARD(Direct3D8EnableMaximizedWindowedModeShim)
+extern "C" void WINAPI DebugSetMute(BOOL mute)
+{
+    if (g_realDebugSetMute) g_realDebugSetMute(mute);
+}
 
 static void ResolveForwards(void)
 {
     if (!g_hRealD3D8) return;
-    g_fp_ValidateVertexShader = GetProcAddress(g_hRealD3D8, "ValidateVertexShader");
-    g_fp_ValidatePixelShader  = GetProcAddress(g_hRealD3D8, "ValidatePixelShader");
-    g_fp_DebugSetMute         = GetProcAddress(g_hRealD3D8, "DebugSetMute");
-    g_fp_Direct3D8EnableMaximizedWindowedModeShim =
-        GetProcAddress(g_hRealD3D8, "Direct3D8EnableMaximizedWindowedModeShim");
+    g_realDebugSetMute = (PFN_DebugSetMute)GetProcAddress(g_hRealD3D8,
+                                                          "DebugSetMute");
 }
 
 // ---------------------------------------------------------------------------

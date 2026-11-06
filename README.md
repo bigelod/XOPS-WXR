@@ -51,7 +51,7 @@ Left-handed mode (`handedness = left`) swaps only **Shoot** and **Fire mode**.
 
 - X Operations, the **`xops096.exe`** build (game files are not included).
 - [WinlatorXR](https://github.com/WinlatorXR/WinlatorXR) on a standalone headset.
-- Container resolution **1280×960** (native 4:3). DXVK + Turnip recommended.
+- Container resolution **1280×960** (native 4:3). **DXVK 1.10.1** for D3D8+ (the last DXVK with `d3d8.dll`); Turnip recommended.
 - XOPS set to **Windowed** mode. The mod turns the window borderless and full-display; the game's own fullscreen mode is not used.
 
 **Install**
@@ -140,7 +140,7 @@ This produces `launcher-xr\XOPSVR.exe`. It is a build artifact and is not commit
 
 ## How it works
 
-**Injection.** `d3d8.dll` sits next to `xops096.exe` and forwards every call to the system `d3d8.dll`. At device creation it hooks the `IDirect3DDevice8` vtable and the few import-table entry points it needs (`Present`, `EndScene`, transforms, draw calls, texture/state changes). No external injector is required.
+**Injection.** `d3d8.dll` sits next to `xops096.exe` and forwards every call to the system `d3d8.dll` (DXVK 1.10.1's `d3d8.dll` on the device). At device creation it hooks the `IDirect3DDevice8` vtable and the few import-table entry points it needs (`Present`, `EndScene`, transforms, draw calls, texture/state changes). No external injector is required. The proxy exports only `Direct3DCreate8` and a safe `DebugSetMute` wrapper: DXVK 1.10.1 does not export the optional Microsoft debug helpers, and re-exporting them as naked jumps made `GetProcAddress` return a pointer to NULL.
 
 **Presentation.** The game renders into a dedicated **640×480** render target, keeping its native FOV. `Present` binds the real back buffer, draws that target as a 4:3 sprite (rotated as a 2D quad by head roll), then draws the replacement HUD and the sync pixel on top.
 
