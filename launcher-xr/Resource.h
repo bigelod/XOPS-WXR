@@ -25,3 +25,6 @@
 #define IDC_POSSCALE_LABEL          1116
 #define IDC_POSSCALE                1117
 #define IDC_POSSCALE_HINT           1118
+#define IDC_HUDSCALE_LABEL          1119
+#define IDC_HUDSCALE                1120
+#define IDC_HUDSCALE_HINT           1121

@@ -156,6 +156,7 @@ roll = true                 # rotate the world sprite with head tilt
 roll_sign = -1              # default; +1 if the device horizon tilts the wrong way
 eye_height = 0.0            # manual render-side vertical offset, metres, +/-5
 pos_scale = 1.0             # gain on tracked HMD translation, 0..2 (1.0 = 1:1)
+hud_scale = 1.1             # HUD visual scale, 0.5..2.0 (1.0 = native)
 ```
 
 `xops_wxr_steer.ini` still carries the settled steering facts (`yawSign`,

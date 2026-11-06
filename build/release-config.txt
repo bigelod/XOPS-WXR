@@ -11,3 +11,4 @@ roll = true
 roll_sign = -1              # +1 if the horizon tilts the wrong way
 eye_height = 0.0            # manual render offset, metres, +/-5
 pos_scale = 1.0             # HMD translation gain, 0..2 (1.0 = 1:1)
+hud_scale = 1.0             # HUD visual scale, 0.5..2.0 (1.0 = native; 1.1 default)

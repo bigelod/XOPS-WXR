@@ -22,7 +22,7 @@ The rest of the README below has been created with the help of AI:
 - **Haptics.** A short pulse per shot, driven by the magazine counter. Both controllers buzz while two-handed aim is held.
 - **Head roll.** The presented 640×480 game sprite rotates with head tilt; the HUD, sync pixel and hands stay fixed. Black sprite corners are accepted and hidden by the lenses. `roll = true`, `roll_sign = -1` by default.
 - **Automatic 2D/VR switching.** `MODE_VR = 0` on title/menu/death/victory, `MODE_VR = 1` in gameplay, so flat menus remain usable.
-- **Launcher.** Play, Options (including HMD position gain) and an update check. Config lives in the game folder, next to `xops096.exe`.
+- **Launcher.** Play, Options (including HMD position gain and HUD scale) and an update check. Config lives in the game folder, next to `xops096.exe`.
 - **Experimental AER stereo.** `stereo = aer` opts in; `mono` is the shipping default until the device pass confirms the eye sign.
 - **Debug keys are locked behind `0`.** WinlatorXR does not map `0`, so a device session cannot trigger probe/HUD/dump keys by accident.
 
@@ -43,7 +43,7 @@ The rest of the README below has been created with the help of AI:
 | Zoom (toggle) | Y |
 | Manual PC / debug mode | `0` (desktop keyboard; unlocks the debug keys) |
 
-Left-handed mode (`handedness = left`) swaps only **Shoot** and **Fire mode**.
+Left-handed mode (`handedness = left`) swaps only **Shoot** and **Fire mode** (and the position of the gun to left hand).
 
 ## Setup - Release
 
@@ -83,9 +83,10 @@ roll = true
 roll_sign = -1              # +1 if the horizon tilts the wrong way
 eye_height = 0.0            # manual render offset, metres, +/-5
 pos_scale = 1.0             # HMD translation gain, 0..2 (1.0 = 1:1)
+hud_scale = 1.1             # HUD visual scale, 0.5..2.0 (1.0 = native)
 ```
 
-The launcher's **Options** dialog edits the same file, including **HMD position gain** (`pos_scale`).
+The launcher's **Options** dialog edits the same file, including **HMD position gain** (`pos_scale`) and **HUD scale** (`hud_scale`).
 
 **Quick checks**
 

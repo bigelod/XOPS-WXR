@@ -34,6 +34,8 @@ Tuning in config.txt
 --------------------
 pos_scale   HMD translation gain, 1.0 = 1:1; lower it or set 0 if the view
             moves too far.
+hud_scale   HUD visual scale, 0.5..2.0; 1.0 = native, 1.1 default. Lower it
+            if the on-screen HUD looks too big.
 eye_height  Manual vertical render offset in metres (default 0, +/-5).
 roll_sign   -1 default; set +1 if the horizon tilts the wrong way.
 hand_flip   false for Quest 3; true for the old/other-device hand roll.

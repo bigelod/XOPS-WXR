@@ -411,6 +411,7 @@ static DWORD g_curFvf = 0;
    the final client. The game-space X/Y scales are derived from this and the
    display stretch, so the HUD is not squeezed by a non-uniform Present. */
 static float  g_hudVisualScale = 1.1f;
+static BOOL   g_hudScaleFromConfig = FALSE;   /* config.txt overrides the INI */
 static float  g_hudOffsetX = 0.0f;
 static float  g_hudOffsetY = 0.0f;
 static BYTE*  g_hudBuf     = NULL;
@@ -3192,7 +3193,7 @@ static void SteerLoad(void)
         if      (!strcmp(key, "yawSign"))   g_yawSign   = v < 0 ? -1.0f : 1.0f;
         else if (!strcmp(key, "pitchSign")) g_pitchSign = v < 0 ? -1.0f : 1.0f;
         else if (!strcmp(key, "cluster"))   g_cluster   = ((int)v) % 3;
-        else if (!strcmp(key, "hudVisualScale")) g_hudVisualScale = v;
+        else if (!strcmp(key, "hudVisualScale") && !g_hudScaleFromConfig) g_hudVisualScale = v;
         else if (!strcmp(key, "leftHanded")) g_leftHanded = v != 0;
         else if (!strcmp(key, "turnSpeed"))  g_turnSpeed  = v;
         else if (!strcmp(key, "patchAspect")) g_patchAspect = v != 0;
@@ -4525,6 +4526,8 @@ static void HandLoadConfig(void)
             fputs("# 1.0 = 1:1; 0 disables translation. Lower it if the render\n", f);
             fputs("# shifts too far.\n", f);
             fputs("pos_scale = 1.0\n", f);
+            fputs("# hud_scale: replacement HUD visual scale (0.5..2.0, 1.0 = native).\n", f);
+            fputs("hud_scale = 1.10\n", f);
             fclose(f);
             Log("HAND     created %s with defaults", path);
         } else {
@@ -4543,6 +4546,8 @@ static void HandLoadConfig(void)
         g_rollSign = -1.0f;
         g_eyeHeight = 0.0f;
         g_posScale = 1.0f;
+        g_hudVisualScale = 1.1f;
+        g_hudScaleFromConfig = FALSE;
         return;
     }
 
@@ -4604,6 +4609,11 @@ static void HandLoadConfig(void)
             g_posScale = (float)atof(val);
             if (g_posScale < 0.0f) g_posScale = 0.0f;
             if (g_posScale > 2.0f) g_posScale = 2.0f;
+        } else if (!_stricmp(key, "hud_scale")) {
+            g_hudVisualScale = (float)atof(val);
+            if (g_hudVisualScale < 0.5f) g_hudVisualScale = 0.5f;
+            if (g_hudVisualScale > 2.0f) g_hudVisualScale = 2.0f;
+            g_hudScaleFromConfig = TRUE;
         }
     }
     fclose(f);
@@ -4625,6 +4635,7 @@ static void HandLoadConfig(void)
     Log("ROLL     %s  sign %+.0f", g_roll ? "on" : "off", g_rollSign);
     Log("EYE      height %+.2f (manual render offset)  pos_scale %.2f",
         g_eyeHeight, g_posScale);
+    Log("HUD      scale %.2f", g_hudVisualScale);
 }
 
 static void EnsureInit(void)

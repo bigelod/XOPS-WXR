@@ -58,6 +58,7 @@ struct Config
     bool roll = true;
     int rollSign = -1;
     double posScale = 1.0;          // HMD translation gain, 0..2
+    double hudScale = 1.1;          // replacement HUD visual scale, 0.5..2.0
 };
 
 Config g_cfg;
@@ -380,6 +381,11 @@ void LoadConfig()
             if (v < 0.0) v = 0.0;
             if (v > 2.0) v = 2.0;
             g_cfg.posScale = v;
+        } else if (name == L"hud_scale") {
+            double v = _wtof(val.c_str());
+            if (v < 0.5) v = 0.5;
+            if (v > 2.0) v = 2.0;
+            g_cfg.hudScale = v;
         }
     }
 
@@ -423,6 +429,7 @@ void SaveConfig()
         { L"roll",          BoolStr(g_cfg.roll), false },
         { L"roll_sign",     std::to_wstring(g_cfg.rollSign), false },
         { L"pos_scale",     FloatStr(g_cfg.posScale), false },
+        { L"hud_scale",     FloatStr(g_cfg.hudScale), false },
     };
 
     for (std::wstring& line : lines) {
@@ -532,6 +539,7 @@ INT_PTR CALLBACK OptionsProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         CheckDlgButton(h, IDC_VERBOSE,  g_cfg.verbose  ? BST_CHECKED : BST_UNCHECKED);
 
         SetDlgItemTextW(h, IDC_POSSCALE, FloatStr(g_cfg.posScale).c_str());
+        SetDlgItemTextW(h, IDC_HUDSCALE, FloatStr(g_cfg.hudScale).c_str());
 
         PrepareDialog(h);
         return TRUE;
@@ -561,6 +569,16 @@ INT_PTR CALLBACK OptionsProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                     if (v < 0.0) v = 0.0;
                     if (v > 2.0) v = 2.0;
                     g_cfg.posScale = v;
+                }
+            }
+            {
+                wchar_t scale[32] = {};
+                GetDlgItemTextW(h, IDC_HUDSCALE, scale, 32);
+                if (scale[0]) {
+                    double v = _wtof(scale);
+                    if (v < 0.5) v = 0.5;
+                    if (v > 2.0) v = 2.0;
+                    g_cfg.hudScale = v;
                 }
             }
 
