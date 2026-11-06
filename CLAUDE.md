@@ -13,6 +13,8 @@ Then read, in order:
 2. `Docs/ClaudeCode/PROJECT_PLAN.md` - the plan, the intake interview, the risks
 3. `Docs/ClaudeCode/CURRENT_STATUS.md` - what actually runs. State, not intent
 4. `Docs/ClaudeCode/BUG_FIXES.md` - known defects, each with a fix and a test
+5. `Docs/OpenCode/DeepSeek41Flash/README.md` - the 5 Nov pass: window, sync
+   pixel and FOV implemented and desktop-verified, and the fullscreen finding
 
 `Docs/MetaAI/` is the **first attempt**. Its reverse-engineering findings are
 worth keeping; its code does not compile and its protocol is not XrApi. Read it

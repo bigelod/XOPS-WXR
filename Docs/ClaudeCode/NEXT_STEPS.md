@@ -8,6 +8,15 @@ to do next, and why, in order". Same rules apply: every claim carries its
 evidence tag, and **nothing is complete until the owner has confirmed it on
 hardware**.
 
+> **5 Nov 2026 update - item 1 below is solved for the states that matter.**
+> The game's own globals replace the draw-count heuristic: `0x490A44` mission
+> index (`64` = title), `0x490A48` result (`0` playing, `1` victory, `2`
+> death/failure), `0x48DDD8` player index (`-1` = menus/briefing). `MODE_VR`
+> is 1 only in gameplay and 0 on title/objective/menu/death/victory; two
+> deaths and one victory were verified on the desktop. This also fixes
+> DUEL_EXT, whose 39 indexed draws fell below the old 60 threshold. See
+> `Docs/OpenCode/DeepSeek41Flash/README.md` and `WORKLOG.md`.
+
 ---
 
 ## Where we actually are

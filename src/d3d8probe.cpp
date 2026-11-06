@@ -1,8 +1,13 @@
 // XOPS-WXR - d3d8 diagnostic probe
 //
 // A drop-in d3d8.dll proxy that logs everything we need to know about how XOPS
-// drives Direct3D, then forwards every call to the real d3d8.dll unchanged.
-// It changes nothing about the game. Desktop use, for now.
+// drives Direct3D, then forwards every call to the real d3d8.dll.
+//
+// As of the 2026-11-05 pass it is no longer read-only: it performs the first
+// two mod steps on the critical path - a borderless full-display window
+// (stage 3) and the red sync pixel (stage 5). Both are observable on the
+// desktop before any headset work. F toggles the window fit; the sync square
+// appears only once a packet has arrived, because it echoes HMD_SYNC.
 //
 // Build:   build\build-probe.bat     (VS 2022 Developer Command Prompt, x86)
 // Install: copy the built d3d8.dll next to XOPS.exe
@@ -57,9 +62,10 @@ static void BuildWatchList(void);
 static void StructDump(UINT_PTR base, int count, const char* name);
 static void SteerTick(void);
 static void StickKeys(PBYTE p);
+static void VrInputKeys(PBYTE p);
 static void VrExclusiveKeys(PBYTE p);
 static BOOL InGameplay(void);
-static BOOL g_steer = FALSE;   /* defined here; used by the input hook above */
+static BOOL g_steer = TRUE;    /* always-on by default; 3 is a debug toggle */
 
 static void SteerRecentre(void);
 static void SteerSave(void);
@@ -68,6 +74,8 @@ static const char* ClusterName(int c);
 static const char* DofName(int m);
 
 static void SteerLog(void);
+static void FitWindow(HWND h);
+static UINT PrimVertexCount(DWORD prim, UINT primCount);
 static BOOL SafeWrite(UINT_PTR a, float v);
 static UINT_PTR WatchAddr(int i);
 static const char* PhaseName(int p);
@@ -81,6 +89,40 @@ static void HookInput(void);
 // ---------------------------------------------------------------------------
 
 typedef struct { float m[4][4]; } D3DMATRIX8;
+typedef struct { LONG x1, y1, x2, y2; } D3DRECT8;
+typedef struct { int Pitch; void* pBits; } D3DLOCKED_RECT8;
+typedef struct { UINT X, Y, Width, Height; float MinZ, MaxZ; } D3DVIEWPORT8;
+
+typedef HRESULT (__stdcall *PFN_GetBackBuffer)(void*, UINT, DWORD, void**);
+typedef HRESULT (__stdcall *PFN_CreateTexture)(void*, UINT, UINT, UINT, DWORD,
+                                               DWORD, DWORD, void**);
+typedef HRESULT (__stdcall *PFN_CreateDepthStencilSurface)(void*, UINT, UINT,
+                                                           DWORD, DWORD, void**);
+typedef HRESULT (__stdcall *PFN_CreateImageSurface)(void*, UINT, UINT, DWORD, void**);
+typedef HRESULT (__stdcall *PFN_CopyRects)(void*, void*, const RECT*, UINT,
+                                           void*, const POINT*);
+typedef HRESULT (__stdcall *PFN_SetRenderTarget)(void*, void*, void*);
+typedef HRESULT (__stdcall *PFN_GetRenderTarget)(void*, void**);
+typedef HRESULT (__stdcall *PFN_GetDepthStencilSurface)(void*, void**);
+typedef HRESULT (__stdcall *PFN_SetViewport)(void*, const D3DVIEWPORT8*);
+typedef HRESULT (__stdcall *PFN_GetViewport)(void*, D3DVIEWPORT8*);
+typedef HRESULT (__stdcall *PFN_SetRenderState)(void*, DWORD, DWORD);
+typedef HRESULT (__stdcall *PFN_GetRenderState)(void*, DWORD, DWORD*);
+typedef HRESULT (__stdcall *PFN_SetTexture)(void*, DWORD, void*);
+typedef HRESULT (__stdcall *PFN_SetTextureStageState)(void*, DWORD, DWORD, DWORD);
+typedef HRESULT (__stdcall *PFN_GetTextureStageState)(void*, DWORD, DWORD, DWORD*);
+typedef HRESULT (__stdcall *PFN_CreateStateBlock)(void*, DWORD, DWORD*);
+typedef HRESULT (__stdcall *PFN_ApplyStateBlock)(void*, DWORD);
+typedef HRESULT (__stdcall *PFN_DeleteStateBlock)(void*, DWORD);
+
+typedef HRESULT (__stdcall *PFN_TexGetSurfaceLevel)(void*, UINT, void**);
+typedef HRESULT (__stdcall *PFN_TexLockRect)(void*, UINT, D3DLOCKED_RECT8*,
+                                             const RECT*, DWORD);
+typedef HRESULT (__stdcall *PFN_TexUnlockRect)(void*, UINT);
+typedef HRESULT (__stdcall *PFN_SurfLockRect)(void*, D3DLOCKED_RECT8*,
+                                              const RECT*, DWORD);
+typedef HRESULT (__stdcall *PFN_SurfUnlockRect)(void*);
+typedef ULONG   (__stdcall *PFN_Release)(void*);
 
 typedef struct {
     UINT  BackBufferWidth;
@@ -106,18 +148,123 @@ enum {
 
     VT_DEV_RESET              = 14,   // 0x38
     VT_DEV_PRESENT            = 15,   // 0x3C
+    VT_DEV_GETBACKBUFFER      = 16,   // 0x40
+    VT_DEV_CREATETEXTURE      = 20,   // 0x50
+    VT_DEV_CREATEDEPTHSTENCIL = 26,   // 0x68
+    VT_DEV_CREATEIMAGESURFACE = 27,   // 0x6C
+    VT_DEV_COPYRECTS          = 28,   // 0x70
+    VT_DEV_SETRENDERTARGET    = 31,   // 0x7C
+    VT_DEV_GETRENDERTARGET    = 32,   // 0x80
+    VT_DEV_GETDEPTHSTENCIL    = 33,   // 0x84
     VT_DEV_BEGINSCENE         = 34,   // 0x88
     VT_DEV_ENDSCENE           = 35,   // 0x8C
+    VT_DEV_CLEAR              = 36,   // 0x90  <- sync pixel, no lock needed
     VT_DEV_SETTRANSFORM       = 37,   // 0x94  <- confirmed in XOPS.exe
+    VT_DEV_SETVIEWPORT        = 40,   // 0xA0
+    VT_DEV_GETVIEWPORT        = 41,   // 0xA4
+    VT_DEV_SETRENDERSTATE     = 50,   // 0xC8  <- confirmed in XOPS.exe
+    VT_DEV_GETRENDERSTATE     = 51,   // 0xCC
+    VT_DEV_APPLYSTATEBLOCK    = 54,   // 0xD8
+    VT_DEV_DELETESTATEBLOCK   = 56,   // 0xE0
+    VT_DEV_CREATESTATEBLOCK   = 57,   // 0xE4
+    VT_DEV_SETTEXTURE         = 61,   // 0xF4
+    VT_DEV_GETTEXTURESTAGESTATE = 62, // 0xF8
+    VT_DEV_SETTEXTURESTAGESTATE = 63, // 0xFC
     VT_DEV_DRAWPRIMITIVE      = 70,   // 0x118
     VT_DEV_DRAWINDEXEDPRIM    = 71,   // 0x11C
     VT_DEV_DRAWPRIMITIVEUP    = 72,   // 0x120 <- the loc_401396 draw call
     VT_DEV_SETVERTEXSHADER    = 76    // 0x130
 };
 
+/* Texture / surface vtable slots. For these we only read the slots, never
+   patch them; the composite is drawn with the originals. */
+enum {
+    VT_TEX_GETSURFACELEVEL = 15,
+    VT_TEX_LOCKRECT        = 16,
+    VT_TEX_UNLOCKRECT      = 17,
+    VT_SURF_LOCKRECT       = 9,
+    VT_SURF_UNLOCKRECT     = 10,
+    VT_IUNKNOWN_RELEASE    = 2
+};
+
+#define D3DFMT_A8R8G8B8        21
+#define D3DFMT_X8R8G8B8        22
+#define D3DPOOL_DEFAULT        0
+#define D3DPOOL_MANAGED        1
+#define D3DPOOL_SYSTEMMEM      2
+#define D3DUSAGE_DYNAMIC       0x00000200
+#define D3DUSAGE_RENDERTARGET  0x00000001
+#define D3DFMT_D16             80
+#define D3DCLEAR_ZBUFFER       0x00000002
+#define D3DPT_TRIANGLESTRIP     5
+#define D3DCULL_NONE            1
+#define D3DBLEND_SRCALPHA       5
+#define D3DBLEND_INVSRCALPHA    6
+#define D3DBLENDOP_ADD          1
+#define D3DSHADE_GOURAUD        2
+#define D3DFILL_SOLID           3
+#define D3DTOP_DISABLE          1
+#define D3DTOP_MODULATE         4
+#define D3DTA_DIFFUSE           0
+#define D3DTA_TEXTURE           2
+#define D3DTSS_COLOROP          1
+#define D3DTSS_COLORARG1        2
+#define D3DTSS_COLORARG2        3
+#define D3DTSS_ALPHAOP          4
+#define D3DTSS_ALPHAARG1        5
+#define D3DTSS_ALPHAARG2        6
+#define D3DTSS_TEXCOORDINDEX    11
+#define D3DTSS_ADDRESSU         13
+#define D3DTSS_ADDRESSV         14
+#define D3DTSS_MAGFILTER        16
+#define D3DTSS_MINFILTER        17
+#define D3DTSS_MIPFILTER        18
+#define D3DTSS_TEXTURETRANSFORMFLAGS 24
+#define D3DTEXF_NONE            0
+#define D3DTEXF_POINT           1
+#define D3DTADDRESS_CLAMP       3
+#define D3DRS_FILLMODE          8
+#define D3DRS_SHADEMODE         9
+#define D3DRS_ZENABLE           7
+#define D3DRS_ZWRITEENABLE      14
+#define D3DRS_ALPHATESTENABLE   15
+#define D3DRS_SRCBLEND          19
+#define D3DRS_DESTBLEND         20
+#define D3DRS_CULLMODE          22
+#define D3DRS_ALPHABLENDENABLE  27
+#define D3DRS_FOGENABLE         28
+#define D3DRS_STENCILENABLE     52
+#define D3DRS_LIGHTING          137
+#define D3DRS_COLORVERTEX       141
+#define D3DRS_CLIPPING          146
+#define D3DRS_CLIPPLANEENABLE   151
+#define D3DRS_COLORWRITEENABLE  168
+#define D3DRS_BLENDOP           171
+#define D3DRS_SCISSORTESTENABLE 174
+#define D3DRS_WRAP0             128
+
 #define D3DTS_VIEW        2
 #define D3DTS_PROJECTION  3
 #define D3DFVF_XYZRHW     0x004
+#define D3DCLEAR_TARGET   0x00000001
+#define D3DCOLOR_XRGB(r,g,b) ((DWORD)(((DWORD)(r) << 16) | \
+                                      ((DWORD)(g) <<  8) |  \
+                                       (DWORD)(b)))
+
+/* XOPS's real projection, recovered from the matrix on device [device, run 1]:
+   fovY 65.0 deg, fovX 80.7 deg, aspect 4:3. The outbound XrApi FOV fields are
+   DEGREES and are applied only if > 1. Sending the old 104.5 pair asked the
+   runtime to warp for a lens the game does not render. */
+#define XOPS_FOV_X        80.7f
+#define XOPS_FOV_Y        65.0f
+
+/* The outbound FOV must describe the image the runtime actually receives. The
+   projection-aspect patch below widens the horizontal FOV to match the
+   window/container, so these start at the native 4:3 values and are recomputed
+   when the patch is applied. */
+static float g_outFovX = XOPS_FOV_X;
+static float g_outFovY = XOPS_FOV_Y;
+static BOOL  g_projPatched = FALSE;
 
 typedef void* (__stdcall *PFN_Direct3DCreate8)(UINT);
 
@@ -127,6 +274,8 @@ typedef HRESULT (__stdcall *PFN_Reset)(void*, D3DPRESENT_PARAMETERS8*);
 typedef HRESULT (__stdcall *PFN_Present)(void*, const RECT*, const RECT*, HWND, void*);
 typedef HRESULT (__stdcall *PFN_BeginScene)(void*);
 typedef HRESULT (__stdcall *PFN_EndScene)(void*);
+typedef HRESULT (__stdcall *PFN_Clear)(void*, DWORD, const D3DRECT8*, DWORD,
+                                       DWORD, float, DWORD);
 typedef HRESULT (__stdcall *PFN_SetTransform)(void*, DWORD, const D3DMATRIX8*);
 typedef HRESULT (__stdcall *PFN_DrawPrimitiveUP)(void*, DWORD, UINT, const void*, UINT);
 typedef HRESULT (__stdcall *PFN_DrawPrimitive)(void*, DWORD, UINT, UINT);
@@ -153,12 +302,30 @@ static PFN_Reset            o_Reset            = NULL;
 static PFN_Present          o_Present          = NULL;
 static PFN_BeginScene       o_BeginScene       = NULL;
 static PFN_EndScene         o_EndScene         = NULL;
+static PFN_Clear            o_Clear            = NULL;
 static PFN_SetTransform     o_SetTransform     = NULL;
 static PFN_DrawPrimitiveUP  o_DrawPrimitiveUP  = NULL;
 static PFN_DrawPrimitive    o_DrawPrimitive    = NULL;
 static PFN_DrawIndexedPrim  o_DrawIndexedPrim  = NULL;
 static long g_drawsUP = 0, g_drawsVB = 0, g_drawsIDX = 0;
 static PFN_SetVertexShader  o_SetVertexShader  = NULL;
+
+/* Target-resolution composite (read-only slots, captured in HookDevice). */
+static PFN_GetBackBuffer       o_GetBackBuffer       = NULL;
+static PFN_CreateTexture       o_CreateTexture       = NULL;
+static PFN_CreateDepthStencilSurface o_CreateDepthStencilSurface = NULL;
+static PFN_CreateImageSurface  o_CreateImageSurface  = NULL;
+static PFN_CopyRects           o_CopyRects           = NULL;
+static PFN_SetRenderTarget     o_SetRenderTarget     = NULL;
+static PFN_GetRenderTarget     o_GetRenderTarget     = NULL;
+static PFN_GetDepthStencilSurface o_GetDepthStencilSurface = NULL;
+static PFN_SetViewport         o_SetViewport         = NULL;
+static PFN_GetViewport         o_GetViewport         = NULL;
+static PFN_SetRenderState      o_SetRenderState      = NULL;
+static PFN_GetRenderState      o_GetRenderState      = NULL;
+static PFN_SetTexture          o_SetTexture          = NULL;
+static PFN_SetTextureStageState o_SetTextureStageState = NULL;
+static PFN_GetTextureStageState o_GetTextureStageState = NULL;
 
 static long g_frame         = 0;
 static long g_beginThisFrame = 0;
@@ -184,6 +351,51 @@ static long       g_lastViewAt = -1;
 // therefore on the matrices we can hook.
 static DWORD g_curFvf = 0;
 #define MAX_DRAWKINDS 16
+
+/* HUD transform (stage 10 / comfort). The HUD is drawn as FVF 0x0144
+   (XYZRHW|DIFFUSE|TEX1), stride 28, in the native 640x480 coordinate space.
+   Scale it about the frame centre so the edge HUD lands in the middle square
+   of the eye, independent of the world. H cycles the scale; 1.0 disables it. */
+/* OFF until the HUD draws are unambiguously identified: stride 28 turned out
+   to include world geometry, and scaling it tore the scene apart. H cycles it
+   for experiments; V dumps the next 120 draws with their vertices. */
+/* Visual scale of the HUD relative to its native 640x480 layout, as seen in
+   the final client. The game-space X/Y scales are derived from this and the
+   display stretch, so the HUD is not squeezed by a non-uniform Present. */
+static float  g_hudVisualScale = 1.1f;
+static float  g_hudOffsetX = 0.0f;
+static float  g_hudOffsetY = 0.0f;
+static BYTE*  g_hudBuf     = NULL;
+static SIZE_T g_hudCap     = 0;
+/* The replacement text HUD is drawn as a D3D texture (the old GDI-over-the-
+   window prototype did not composite in a captured image). */
+static BOOL   g_customHud = TRUE;
+
+/* Target-resolution composite. When the device's back buffer is the desktop
+   size, the game still draws its 640x480 frame in the top-left. We copy that
+   frame into a texture, clear the target, draw it full-window, then overlay a
+   resolution-independent HUD texture. */
+static BOOL   g_compositeActive = FALSE;
+static UINT   g_bbW = 640, g_bbH = 480;
+static DWORD  g_bbFormat = D3DFMT_X8R8G8B8;
+static void*  g_frameTex   = NULL;   /* 640x480 copy of the game frame */
+static void*  g_frameSurf  = NULL;   /* its level-0 surface */
+/* Off-screen 640x480 game render target. The game must keep its native
+   viewport/projection or the FOV and the 3D HUD models drift. We bind this
+   before the game's BeginScene, then composite it to the real back buffer. */
+static void*  g_gameRT      = NULL;
+static void*  g_gameRTSurf  = NULL;
+static void*  g_gameDepth   = NULL;
+static BOOL   g_gameRTActive = FALSE;
+static BOOL   g_gameRTFirstScene = TRUE;
+static void*  g_savedRT     = NULL;
+static void*  g_savedDepth  = NULL;
+static int    g_grabFrames = 0;      /* J: save the next composited frame */
+static char   g_baseDir[MAX_PATH] = "";
+static int    g_dumpDraws  = 0;
+static BOOL   g_dumpArmed  = FALSE;
+#define HUD_CX 320.0f
+#define HUD_CY 240.0f
 static struct { DWORD fvf; UINT stride; long count; } g_draws[MAX_DRAWKINDS];
 static int g_drawKinds = 0;
 
@@ -212,6 +424,28 @@ static const char* FvfKind(DWORD f)
 static HWND  g_wnd          = NULL;
 static LONG  g_lastStyle    = 0;
 static RECT  g_lastRect     = {0,0,0,0};
+
+/* Learned from CreateDevice's hFocusWindow. Declared here because the custom
+   HUD helper (defined earlier than the input block) needs it. */
+static HWND  g_gameWnd      = NULL;
+
+/* Borderless full-display window (stage 3). Declared here because the probe's
+   key handler, far above FitWindow's definition, toggles it with F. */
+static BOOL  g_fitWindow    = TRUE;
+/* FALSE when the game created a FULLSCREEN device. In that mode the game owns
+   the window and the display mode: resizing it or passing a Present dest rect
+   fights its Reset and produces D3DERR_DEVICELOST (0x88760868). Confirmed on
+   5 Nov when a title->level Reset failed and XOPS showed its "Reset" error. */
+static BOOL  g_deviceWindowed = TRUE;
+
+/* Target-resolution experiment, now the composite path. The game's config
+   creates a 640x480 device; it still projects and draws its 640x480 frame in
+   the top-left of a larger back buffer (confirmed 5 Nov). Asking for the
+   desktop size gives us the surface on which the composite and the high-res
+   HUD can exist. M toggles it; a change takes effect at the next Reset. */
+static BOOL  g_maxRes   = TRUE;
+static int   g_desktopW = 0;
+static int   g_desktopH = 0;
 
 // Call sites we have already reported, so each is logged once and the log stays
 // readable. (type, IDA address) pairs.
@@ -431,7 +665,13 @@ static BOOL      g_haveCands = FALSE;
 static UINT_PTR  g_exeLo = 0, g_exeHi = 0;   /* host image, for IDA addresses */
 static unsigned g_exeRgnKB = 0;      /* KB of host .data/.bss in the snapshot */
 static int  g_intervals = 0;
-static BOOL g_huntDone  = FALSE;
+/* The camera is solved [device, runs 8-13], so the differential hunt is no
+   longer needed - and it is the one thing in this DLL that copies arbitrary
+   game memory. On 5 Nov it crashed twice inside the CRT memcpy at RVA 0x985e:
+   BuildSnapshot() raced a region the game freed between VirtualQuery and the
+   copy. Default it OFF; the confirmed watch table is independent of it. The
+   copy is also ReadProcessMemory now, so an explicit re-enable cannot fault. */
+static BOOL g_huntDone  = TRUE;
 
 /* Run 4 found the camera three times over and every hit was the probe's own
    memory, so v5 excluded all images and our stack. That was the wrong cut: an
@@ -495,12 +735,25 @@ static void BuildSnapshot(void)
         if (want && !IsOurs(mbi.BaseAddress) &&
             g_rgnCount < 1024 && g_snapUsed + mbi.RegionSize <= MAX_SNAP_BYTES)
         {
-            g_rgn[g_rgnCount].base    = (BYTE*)mbi.BaseAddress;
-            g_rgn[g_rgnCount].size    = mbi.RegionSize;
-            g_rgn[g_rgnCount].snapOff = g_snapUsed;
-            memcpy(g_snap + g_snapUsed, mbi.BaseAddress, mbi.RegionSize);
-            g_snapUsed += mbi.RegionSize;
-            ++g_rgnCount;
+            /* ReadProcessMemory, not memcpy. VirtualQuery and the copy are
+               not atomic: the game can free or reprotect a region in between,
+               and a raw memcpy then faults inside the CRT (observed 5 Nov,
+               RVA 0x985e). ReadProcessMemory reports the bad page instead. */
+            SIZE_T got = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(), mbi.BaseAddress,
+                                   g_snap + g_snapUsed, mbi.RegionSize, &got)
+                || got != mbi.RegionSize) {
+                Log("CAMHUNT  skipped unreadable region %p (%u KB, got %u)",
+                    mbi.BaseAddress, (unsigned)(mbi.RegionSize / 1024),
+                    (unsigned)(got / 1024));
+                /* Fall through to p = next; do not spin on this region. */
+            } else {
+                g_rgn[g_rgnCount].base    = (BYTE*)mbi.BaseAddress;
+                g_rgn[g_rgnCount].size    = mbi.RegionSize;
+                g_rgn[g_rgnCount].snapOff = g_snapUsed;
+                g_snapUsed += mbi.RegionSize;
+                ++g_rgnCount;
+            }
         }
         if (next <= p) break;
         p = next;
@@ -622,6 +875,767 @@ static BOOL SafeWrite(UINT_PTR a, float v)
     __try { *(float*)a = v; }
     __except (EXCEPTION_EXECUTE_HANDLER) { return FALSE; }
     return TRUE;
+}
+
+static BOOL SafeReadInt(UINT_PTR a, int* out)
+{
+    __try { *out = *(const int*)a; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return FALSE; }
+    return TRUE;
+}
+
+/* State candidates found by following the EXE's own UI strings:
+     0x490A44  selected mission index (0x40 = title, -1 = none)
+     0x490A48  mission result (set to 1 or 2 by the result screen)
+     0x490CD0  in-game / menu mode flag
+     0x490CC8  screen/mode companion
+     0x48CB08  pause/menu candidate
+     0x48DE3C  toggled mode flag (not the screen state)
+     0x48DDD8  local player index (0..0x17)
+     0x491A6C  state counter
+   The T key logs these so one tagged run maps them to title/briefing/
+   gameplay/death/victory. */
+/* Dump the active player struct and the weapon-name table. The HUD values
+   (health/armor, current/remaining ammo, slot contents) live in these fields;
+   this maps them against the screenshot. */
+static void PlayerDump(const char* why)
+{
+    const UINT_PTR b = g_exeBase;
+    int idx = -1, i;
+    if (!b) return;
+    SafeReadInt(b + (0x48DDD8 - 0x400000), &idx);
+    Log("PLAYER %s  index=%d", why, idx);
+    if (idx >= 0 && idx < 0x18) {
+        const UINT_PTR base = b + (0x48DF00 - 0x400000) + (UINT_PTR)idx * 0x50;
+        Log("PLAYER base=0x%08IX (IDA 0x%08IX)",
+            base, (UINT_PTR)(0x48DF00 + idx * 0x50));
+        for (i = 0; i < 0x50; i += 4) {
+            int v = 0;
+            if (SafeReadInt(base + i, &v))
+                Log("PLAYER +%02X = %d (0x%08X)", i, v, v);
+        }
+        {
+            int healthW = 0, selW = 0, w0W = 0, w1W = 0;
+            int res0W = 0, res1W = 0, cur0W = 0, cur1W = 0;
+            int health, sel, w0, w1, res0, res1, cur0, cur1;
+            SafeReadInt(base + 0x04, &healthW);
+            SafeReadInt(base + 0x06, &selW);
+            SafeReadInt(base + 0x0A, &w0W);
+            SafeReadInt(base + 0x0B, &w1W);
+            SafeReadInt(base + 0x0C, &cur0W);
+            SafeReadInt(base + 0x0D, &cur1W);
+            SafeReadInt(base + 0x0E, &res0W);
+            SafeReadInt(base + 0x0F, &res1W);
+            health = healthW & 0xFFFF;
+            sel    = selW & 0xFF;
+            w0     = w0W & 0xFF;
+            w1     = w1W & 0xFF;
+            res0   = res0W & 0xFF;
+            res1   = res1W & 0xFF;
+            cur0   = cur0W & 0xFF;
+            cur1   = cur1W & 0xFF;
+            Log("HUDVALS health=%d state=%s selectedSlot=%d"
+                " slots=%d,%d  current=%d,%d reserve=%d,%d",
+                health,
+                health >= 0x50 ? "FINE" : health >= 0x28 ? "CAUTION"
+                               : health > 0 ? "DANGER" : "DEAD",
+                sel, w0, w1, cur0, cur1, res0, res1);
+        }
+    }
+    for (i = 0; i < 32; ++i) {
+        int ptr = 0;
+        if (!SafeReadInt(b + (0x465DA0 - 0x400000) + i * 4, &ptr) || !ptr)
+            continue;
+        __try {
+            const char* s = (const char*)((UINT_PTR)ptr - 0x400000 + b);
+            Log("WEAPON %2d ptr=0x%08IX '%.64s'", i, ptr, s);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            Log("WEAPON %2d ptr=0x%08IX <unreadable>", i, ptr);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Custom HUD (target-resolution GDI overlay)
+//
+// XrApi is one image, so this is drawn over the same game window after
+// Present, not an OpenVR/OpenXR overlay layer. The game's 2D HUD is suppressed
+// in gameplay (its 3D weapon-slot models stay); this draws the text and panels
+// at the window's real resolution with a normal font.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    int health, sel, w0, w1, cur0, cur1, res0, res1;
+    int dead;      /* mission result == 2: force the STATE readout to DEAD */
+    int reload;    /* player action byte: 3 = RELOADING, 5 = CHANGING */
+} HudVals;
+
+static BOOL ReadHudVals(HudVals* v)
+{
+    const UINT_PTR b = g_exeBase;
+    int idx = -1, baseW[8];
+    UINT_PTR base;
+    if (!v || !b) return FALSE;
+    if (!SafeReadInt(b + (0x48DDD8 - 0x400000), &idx)) return FALSE;
+    if (idx < 0 || idx >= 0x18) return FALSE;
+    base = b + (0x48DF00 - 0x400000) + (UINT_PTR)idx * 0x50;
+    if (!SafeReadInt(base + 0x04, &baseW[0]) ||
+        !SafeReadInt(base + 0x06, &baseW[1]) ||
+        !SafeReadInt(base + 0x0A, &baseW[2]) ||
+        !SafeReadInt(base + 0x0B, &baseW[3]) ||
+        !SafeReadInt(base + 0x0C, &baseW[4]) ||
+        !SafeReadInt(base + 0x0D, &baseW[5]) ||
+        !SafeReadInt(base + 0x0E, &baseW[6]) ||
+        !SafeReadInt(base + 0x0F, &baseW[7]))
+        return FALSE;
+    v->health = baseW[0] & 0xFFFF;
+    v->sel    = baseW[1] & 0xFF;
+    v->w0     = baseW[2] & 0xFF;
+    v->w1     = baseW[3] & 0xFF;
+    /* The two low bytes at +0C/+0D are the loaded magazine; +0E/+0F are the
+       reserve. Confirmed against the game's own HUD: slot 1 read "30 | 60"
+       while +0D=30 and +0F=60. */
+    v->cur0   = baseW[4] & 0xFF;
+    v->cur1   = baseW[5] & 0xFF;
+    v->res0   = baseW[6] & 0xFF;
+    v->res1   = baseW[7] & 0xFF;
+    {
+        int resultW = 0, actionW = 0;
+        if (SafeReadInt(b + (0x490A48 - 0x400000), &resultW))
+            v->dead = (resultW == 2) ? 1 : 0;
+        else
+            v->dead = 0;
+        /* The byte just before the player struct selects the HUD status:
+           3 = RELOADING, 5 = CHANGING (push 4655A4h / 465598h at 0x405346 /
+           0x405392). */
+        if (SafeReadInt(base - 1, &actionW))
+            v->reload = actionW & 0xFF;
+        else
+            v->reload = 0;
+    }
+    return TRUE;
+}
+
+static const char* WeaponNameShort(int id, char* out, size_t n)
+{
+    int ptr = 0;
+    const char* s;
+    if (!out || n == 0) return "?";
+    strcpy(out, "?");
+    if (id < 0 || id >= 32) return out;
+    if (!SafeReadInt(g_exeBase + (0x465DA0 - 0x400000) + id * 4, &ptr) || !ptr)
+        return out;
+    s = (const char*)((UINT_PTR)ptr - 0x400000 + g_exeBase);
+    __try {
+        strncpy(out, s, n - 1);
+        out[n - 1] = 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        strcpy(out, "?");
+        return out;
+    }
+    {
+        size_t len = strlen(out);
+        while (len && out[len - 1] == ' ') out[--len] = 0;
+    }
+    return out;
+}
+
+static const char* StateName(int health)
+{
+    return health >= 0x50 ? "FINE"
+         : health >= 0x28 ? "CAUTION"
+         : health > 0     ? "DANGER"
+                          : "DEAD";
+}
+
+static COLORREF StateColor(int health)
+{
+    if (health >= 0x50)
+        return RGB(0, 220, 0);                       /* FINE: green */
+    if (health >= 0x28) {
+        /* CAUTION: green -> yellow as health falls from 0x50 to 0x28. */
+        const int t = (0x50 - health) * 255 / (0x50 - 0x28);
+        return RGB((t * 230) / 255, 220, 0);
+    }
+    if (health > 0)
+        return RGB(240, 140, 0);                     /* DANGER: orange */
+    return RGB(230, 30, 30);                         /* DEAD: red */
+}
+
+/* ---------------------------------------------------------------------------
+   Custom HUD: GDI renders the text at the target resolution into a 32bpp
+   DIB, which is uploaded to a D3D texture and drawn as a quad inside the
+   centre square of the window. Unlike the old GDI-over-the-window prototype,
+   this is part of the D3D frame, so XrApi's single-image capture sees it.
+   --------------------------------------------------------------------------- */
+
+static void*   g_hudTex   = NULL;
+static void*   g_panelTex = NULL;
+static UINT    g_hudTexW  = 0, g_hudTexH = 0;
+static int     g_hudDrawW = 0, g_hudDrawH = 0;
+static BOOL    g_hudValid = FALSE;
+static HudVals g_hudLast;
+
+static HBITMAP g_hudDib   = NULL;
+static HDC     g_hudDC    = NULL;
+static HGDIOBJ g_hudOld   = NULL;
+static void*   g_hudBits  = NULL;
+static int     g_hudDibW  = 0, g_hudDibH = 0;
+static HBRUSH  g_hudBlack = NULL;
+static HFONT   g_hudBig   = NULL, g_hudSmall = NULL, g_hudStatus = NULL;
+static int     g_hudBigH  = 0, g_hudSmallH = 0, g_hudStatusH = 0;
+static HBRUSH  g_panelShadowBrush = NULL, g_panelFillBrush = NULL;
+static HPEN    g_panelBorderPen   = NULL;
+
+static void ReleaseIUnknown(void* p)
+{
+    if (p) ((PFN_Release)(*(void***)p)[VT_IUNKNOWN_RELEASE])(p);
+}
+
+static HRESULT TexGetSurfaceLevel(void* tex, UINT level, void** out)
+{
+    if (!tex || !out) return E_FAIL;
+    return ((PFN_TexGetSurfaceLevel)(*(void***)tex)[VT_TEX_GETSURFACELEVEL])
+        (tex, level, out);
+}
+
+static HRESULT TexLock(void* tex, UINT level, D3DLOCKED_RECT8* lr,
+                       const RECT* rc, DWORD flags)
+{
+    if (!tex || !lr) return E_FAIL;
+    return ((PFN_TexLockRect)(*(void***)tex)[VT_TEX_LOCKRECT])
+        (tex, level, lr, rc, flags);
+}
+
+static HRESULT TexUnlock(void* tex, UINT level)
+{
+    if (!tex) return E_FAIL;
+    return ((PFN_TexUnlockRect)(*(void***)tex)[VT_TEX_UNLOCKRECT])(tex, level);
+}
+
+static HRESULT SurfLock(void* surf, D3DLOCKED_RECT8* lr,
+                        const RECT* rc, DWORD flags)
+{
+    if (!surf || !lr) return E_FAIL;
+    return ((PFN_SurfLockRect)(*(void***)surf)[VT_SURF_LOCKRECT])
+        (surf, lr, rc, flags);
+}
+
+static HRESULT SurfUnlock(void* surf)
+{
+    if (!surf) return E_FAIL;
+    return ((PFN_SurfUnlockRect)(*(void***)surf)[VT_SURF_UNLOCKRECT])(surf);
+}
+
+static int NextPow2(int v)
+{
+    int p = 1;
+    while (p < v) p <<= 1;
+    return p;
+}
+
+static void HudReleaseDib(void)
+{
+    if (g_hudDC) {
+        if (g_hudOld) SelectObject(g_hudDC, g_hudOld);
+        DeleteDC(g_hudDC);
+        g_hudDC = NULL;
+    }
+    g_hudOld = NULL;
+    if (g_hudDib) {
+        DeleteObject(g_hudDib);
+        g_hudDib = NULL;
+    }
+    g_hudBits = NULL;
+    g_hudDibW = g_hudDibH = 0;
+}
+
+static BOOL HudEnsureDib(int w, int h)
+{
+    BITMAPINFO bmi;
+
+    if (g_hudDib && g_hudDibW == w && g_hudDibH == h && g_hudBits)
+        return TRUE;
+
+    HudReleaseDib();
+    ZeroMemory(&bmi, sizeof(bmi));
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = w;
+    bmi.bmiHeader.biHeight      = -h;       /* top-down, like the texture */
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    g_hudDib = CreateDIBSection(NULL, &bmi, DIB_RGB_COLORS, &g_hudBits,
+                                NULL, 0);
+    if (!g_hudDib || !g_hudBits) {
+        Log("HUD      CreateDIBSection(%dx%d) failed", w, h);
+        HudReleaseDib();
+        return FALSE;
+    }
+    memset(g_hudBits, 0, (SIZE_T)w * h * 4);
+    g_hudDC = CreateCompatibleDC(NULL);
+    if (!g_hudDC) {
+        Log("HUD      CreateCompatibleDC failed");
+        HudReleaseDib();
+        return FALSE;
+    }
+    g_hudOld = SelectObject(g_hudDC, g_hudDib);
+    g_hudDibW = w;
+    g_hudDibH = h;
+    if (!g_hudBlack) g_hudBlack = CreateSolidBrush(RGB(0, 0, 0));
+    return TRUE;
+}
+
+static HFONT HudMakeFont(int h)
+{
+    HFONT f = CreateFontA(-h, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                          DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                          CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+                          DEFAULT_PITCH | FF_SWISS, "Consolas");
+    if (!f)
+        f = CreateFontA(-h, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                        CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+                        DEFAULT_PITCH | FF_SWISS, "Arial");
+    return f;
+}
+
+static BOOL HudEnsureFonts(int h, int* bigHOut, int* smallHOut)
+{
+    int bigH = h / 10;
+    int smallH;
+    int statusH;
+    if (bigH < 18) bigH = 18;
+    smallH = bigH * 2 / 3;
+    if (smallH < 12) smallH = 12;
+    statusH = bigH * 7 / 5;
+    if (statusH < 24) statusH = 24;
+    if (!g_hudBig || g_hudBigH != bigH) {
+        if (g_hudBig) DeleteObject(g_hudBig);
+        g_hudBig = HudMakeFont(bigH);
+        g_hudBigH = bigH;
+    }
+    if (!g_hudSmall || g_hudSmallH != smallH) {
+        if (g_hudSmall) DeleteObject(g_hudSmall);
+        g_hudSmall = HudMakeFont(smallH);
+        g_hudSmallH = smallH;
+    }
+    if (!g_hudStatus || g_hudStatusH != statusH) {
+        if (g_hudStatus) DeleteObject(g_hudStatus);
+        g_hudStatus = HudMakeFont(statusH);
+        g_hudStatusH = statusH;
+    }
+    if (bigHOut) *bigHOut = bigH;
+    if (smallHOut) *smallHOut = smallH;
+    return g_hudBig && g_hudSmall && g_hudStatus;
+}
+
+/* Draw one text run with a blue silhouette underneath. The blue is converted
+   to opaque black during upload, which gives the text a dark outline so it
+   stays readable on the light panels and on bright walls. */
+static void HudDrawText(HFONT font, COLORREF color, int x, int y,
+                        const char* s, int align, int outline)
+{
+    static const int ox[8] = { -1,  0,  1, -1,  1, -1,  0,  1 };
+    static const int oy[8] = { -1, -1, -1,  0,  0,  1,  1,  1 };
+    int i, len;
+
+    if (!g_hudDC || !font || !s) return;
+    len = (int)strlen(s);
+    SelectObject(g_hudDC, font);
+    SetTextAlign(g_hudDC, align);
+    if (outline > 0) {
+        SetTextColor(g_hudDC, RGB(0, 0, 255));
+        for (i = 0; i < 8; ++i)
+            ExtTextOutA(g_hudDC, x + ox[i] * outline, y + oy[i] * outline,
+                        0, NULL, s, (UINT)len, NULL);
+    }
+    SetTextColor(g_hudDC, color);
+    ExtTextOutA(g_hudDC, x, y, 0, NULL, s, (UINT)len, NULL);
+}
+
+typedef struct {
+    RECT left, right;
+    int  radius;
+} HudPanels;
+
+static BOOL HudComputePanels(int w, int h, const HudVals* v, HudPanels* P)
+{
+    int bigH = 0, smallH = 0, margin, leftX, rightX, mainY, stateY;
+    int cur, res, selEmpty, otherEmpty;
+    int gap, leftW, rightW, pad;
+    char curS[32], resS[32], stateS[64], nameA[64], nameB[64];
+    SIZE szCur, szRes, szState, szA, szB;
+
+    if (!P || !v || !g_hudDC) return FALSE;
+    if (!HudEnsureFonts(h, &bigH, &smallH)) return FALSE;
+
+    margin = w / 18;
+    leftX  = margin;
+    rightX = w - margin;
+    mainY  = h * 60 / 100;
+    stateY = h * 78 / 100;
+
+    cur = v->sel ? v->cur1 : v->cur0;
+    res = v->sel ? v->res1 : v->res0;
+    selEmpty   = ((v->sel ? v->w1 : v->w0) == 0);
+    otherEmpty = ((v->sel ? v->w0 : v->w1) == 0);
+
+    _snprintf(curS, sizeof(curS), "%d", cur);
+    _snprintf(resS, sizeof(resS), "/ %d", res);
+    _snprintf(stateS, sizeof(stateS), "STATE %s",
+              StateName(v->dead ? 0 : v->health));
+    WeaponNameShort(v->sel ? v->w1 : v->w0, nameA, sizeof(nameA));
+    if (selEmpty) _snprintf(nameA, sizeof(nameA), "None");
+    WeaponNameShort(v->sel ? v->w0 : v->w1, nameB, sizeof(nameB));
+    if (otherEmpty) _snprintf(nameB, sizeof(nameB), "None");
+
+    SelectObject(g_hudDC, g_hudBig);
+    GetTextExtentPoint32A(g_hudDC, curS, (int)strlen(curS), &szCur);
+    GetTextExtentPoint32A(g_hudDC, nameA, (int)strlen(nameA), &szA);
+    SelectObject(g_hudDC, g_hudSmall);
+    GetTextExtentPoint32A(g_hudDC, resS, (int)strlen(resS), &szRes);
+    GetTextExtentPoint32A(g_hudDC, stateS, (int)strlen(stateS), &szState);
+    GetTextExtentPoint32A(g_hudDC, nameB, (int)strlen(nameB), &szB);
+
+    gap = margin / 2;
+    leftW = szCur.cx + gap + szRes.cx;
+    if (szState.cx > leftW) leftW = szState.cx;
+    rightW = szA.cx > szB.cx ? szA.cx : szB.cx;
+
+    pad = margin / 2;
+    if (pad < 6) pad = 6;
+
+    P->left.left   = leftX - pad;
+    P->left.top    = mainY - pad;
+    P->left.right  = leftX + leftW + pad;
+    P->left.bottom = stateY + smallH + pad;
+
+    P->right.left   = rightX - rightW - pad;
+    P->right.top    = mainY - pad;
+    P->right.right  = rightX + pad;
+    P->right.bottom = mainY + bigH + smallH / 3 + smallH + pad;
+
+    if (P->left.left < 2) P->left.left = 2;
+    if (P->left.top < 2) P->left.top = 2;
+    if (P->left.right > w - 2) P->left.right = w - 2;
+    if (P->left.bottom > h - 2) P->left.bottom = h - 2;
+    if (P->right.left < 2) P->right.left = 2;
+    if (P->right.top < 2) P->right.top = 2;
+    if (P->right.right > w - 2) P->right.right = w - 2;
+    if (P->right.bottom > h - 2) P->right.bottom = h - 2;
+
+    P->radius = bigH / 3;
+    if (P->radius < 6) P->radius = 6;
+    if (P->radius > 28) P->radius = 28;
+    return TRUE;
+}
+
+/* Panels are rendered with solid blue-channel codes so the upload can assign
+   independent alpha values: 30 = soft shadow, 70 = white-ish fill,
+   140 = light border. */
+static void RenderPanelsToDib(int w, int h, const HudVals* v)
+{
+    HudPanels P;
+    RECT all;
+
+    if (!g_hudDC || !g_hudBits || !v) return;
+    all.left = 0; all.top = 0; all.right = w; all.bottom = h;
+    FillRect(g_hudDC, &all, g_hudBlack);
+    if (!HudComputePanels(w, h, v, &P)) return;
+
+    if (!g_panelShadowBrush) g_panelShadowBrush = CreateSolidBrush(RGB(0, 0, 30));
+    if (!g_panelFillBrush)   g_panelFillBrush   = CreateSolidBrush(RGB(0, 0, 70));
+    if (!g_panelBorderPen)   g_panelBorderPen   = CreatePen(PS_SOLID, 2, RGB(0, 0, 140));
+
+    /* Soft drop shadow, then fill, then a 2px light border. The shadow only
+       remains around the bottom/right edge because the fill is drawn over it. */
+    SelectObject(g_hudDC, g_panelShadowBrush);
+    SelectObject(g_hudDC, GetStockObject(NULL_PEN));
+    RoundRect(g_hudDC, P.left.left + 3, P.left.top + 3,
+              P.left.right + 3, P.left.bottom + 3, P.radius, P.radius);
+    RoundRect(g_hudDC, P.right.left + 3, P.right.top + 3,
+              P.right.right + 3, P.right.bottom + 3, P.radius, P.radius);
+
+    SelectObject(g_hudDC, g_panelFillBrush);
+    RoundRect(g_hudDC, P.left.left, P.left.top,
+              P.left.right, P.left.bottom, P.radius, P.radius);
+    RoundRect(g_hudDC, P.right.left, P.right.top,
+              P.right.right, P.right.bottom, P.radius, P.radius);
+
+    SelectObject(g_hudDC, GetStockObject(NULL_BRUSH));
+    SelectObject(g_hudDC, g_panelBorderPen);
+    RoundRect(g_hudDC, P.left.left, P.left.top,
+              P.left.right, P.left.bottom, P.radius, P.radius);
+    RoundRect(g_hudDC, P.right.left, P.right.top,
+              P.right.right, P.right.bottom, P.radius, P.radius);
+}
+
+static void RenderHudToDib(int w, int h, const HudVals* v)
+{
+    RECT all;
+    int bigH = 0, smallH = 0, margin, leftX, rightX, mainY, stateY;
+    int cur, res, selEmpty, otherEmpty, stateHealth;
+    int outlineBig, outlineSmall, outlineStatus, statusH;
+    char curS[32], resS[32], stateS[64], nameA[64], nameB[64];
+    SIZE sz;
+
+    if (!g_hudDC || !g_hudBits || !v) return;
+
+    all.left = 0; all.top = 0; all.right = w; all.bottom = h;
+    FillRect(g_hudDC, &all, g_hudBlack);
+    SetBkMode(g_hudDC, TRANSPARENT);
+    SetTextAlign(g_hudDC, TA_LEFT | TA_TOP);
+    if (!HudEnsureFonts(h, &bigH, &smallH)) return;
+
+    margin = w / 18;
+    leftX  = margin;
+    rightX = w - margin;
+    mainY  = h * 60 / 100;
+    stateY = h * 78 / 100;
+
+    outlineBig = bigH / 20;
+    if (outlineBig < 1) outlineBig = 1;
+    if (outlineBig > 3) outlineBig = 3;
+    outlineSmall = smallH / 24;
+    if (outlineSmall < 1) outlineSmall = 1;
+    if (outlineSmall > 2) outlineSmall = 2;
+    statusH = g_hudStatusH;
+    outlineStatus = statusH / 20;
+    if (outlineStatus < 1) outlineStatus = 1;
+    if (outlineStatus > 3) outlineStatus = 3;
+
+    cur = v->sel ? v->cur1 : v->cur0;
+    res = v->sel ? v->res1 : v->res0;
+    selEmpty   = ((v->sel ? v->w1 : v->w0) == 0);
+    otherEmpty = ((v->sel ? v->w0 : v->w1) == 0);
+    stateHealth = v->dead ? 0 : v->health;
+
+    /* Left: current ammo, remaining ammo to its right, then STATE. */
+    _snprintf(curS, sizeof(curS), "%d", cur);
+    _snprintf(resS, sizeof(resS), "/ %d", res);
+    SelectObject(g_hudDC, g_hudBig);
+    GetTextExtentPoint32A(g_hudDC, curS, (int)strlen(curS), &sz);
+    HudDrawText(g_hudBig, RGB(240, 240, 240), leftX, mainY, curS,
+                TA_LEFT | TA_TOP, outlineBig);
+    HudDrawText(g_hudSmall, RGB(150, 150, 150),
+                leftX + sz.cx + margin / 2, mainY + (bigH - smallH), resS,
+                TA_LEFT | TA_TOP, outlineSmall);
+
+    _snprintf(stateS, sizeof(stateS), "STATE %s", StateName(stateHealth));
+    HudDrawText(g_hudSmall, StateColor(stateHealth), leftX, stateY, stateS,
+                TA_LEFT | TA_TOP, outlineSmall);
+
+    /* Reload/change status, modelled on the game's own large centred text. */
+    if (v->reload == 3 || v->reload == 5) {
+        const char* status = (v->reload == 3) ? "RELOADING" : "CHANGING";
+        HudDrawText(g_hudStatus, RGB(255, 255, 255), w / 2, h * 30 / 100,
+                    status, TA_CENTER | TA_TOP, outlineStatus);
+    }
+
+    /* Right: selected weapon name, other slot name below. */
+    WeaponNameShort(v->sel ? v->w1 : v->w0, nameA, sizeof(nameA));
+    if (selEmpty) _snprintf(nameA, sizeof(nameA), "None");
+    HudDrawText(g_hudBig, selEmpty ? RGB(255, 255, 255) : RGB(200, 200, 200),
+                rightX, mainY, nameA, TA_RIGHT | TA_TOP, outlineBig);
+
+    WeaponNameShort(v->sel ? v->w0 : v->w1, nameB, sizeof(nameB));
+    if (otherEmpty) _snprintf(nameB, sizeof(nameB), "None");
+    HudDrawText(g_hudSmall, otherEmpty ? RGB(255, 255, 255) : RGB(140, 140, 140),
+                rightX, mainY + bigH + smallH / 3, nameB,
+                TA_RIGHT | TA_TOP, outlineSmall);
+    SetTextAlign(g_hudDC, TA_LEFT | TA_TOP);
+}
+
+static BOOL HudEnsureTexture(void* dev, int w, int h)
+{
+    int tw = NextPow2(w), th = NextPow2(h);
+    HRESULT hr;
+
+    if (g_hudTex && g_panelTex &&
+        g_hudTexW == (UINT)tw && g_hudTexH == (UINT)th)
+        return TRUE;
+
+    if (g_hudTex) {
+        ReleaseIUnknown(g_hudTex);
+        g_hudTex = NULL;
+    }
+    if (g_panelTex) {
+        ReleaseIUnknown(g_panelTex);
+        g_panelTex = NULL;
+    }
+    g_hudTexW = g_hudTexH = 0;
+    if (!o_CreateTexture) return FALSE;
+
+    hr = o_CreateTexture(dev, tw, th, 1, 0, D3DFMT_A8R8G8B8,
+                         D3DPOOL_MANAGED, &g_hudTex);
+    if (FAILED(hr)) {
+        hr = o_CreateTexture(dev, tw, th, 1, D3DUSAGE_DYNAMIC,
+                             D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &g_hudTex);
+    }
+    if (FAILED(hr) || !g_hudTex) {
+        Log("HUD      CreateTexture(%dx%d) failed hr=0x%08lX", tw, th, hr);
+        g_hudTex = NULL;
+        return FALSE;
+    }
+    hr = o_CreateTexture(dev, tw, th, 1, 0, D3DFMT_A8R8G8B8,
+                         D3DPOOL_MANAGED, &g_panelTex);
+    if (FAILED(hr)) {
+        hr = o_CreateTexture(dev, tw, th, 1, D3DUSAGE_DYNAMIC,
+                             D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &g_panelTex);
+    }
+    if (FAILED(hr) || !g_panelTex) {
+        Log("HUD      CreateTexture(panel %dx%d) failed hr=0x%08lX",
+            tw, th, hr);
+        ReleaseIUnknown(g_hudTex);
+        g_hudTex = NULL;
+        g_panelTex = NULL;
+        return FALSE;
+    }
+    g_hudTexW = tw;
+    g_hudTexH = th;
+    g_hudValid = FALSE;
+    if (!HudEnsureDib(tw, th)) {
+        ReleaseIUnknown(g_hudTex);
+        ReleaseIUnknown(g_panelTex);
+        g_hudTex = NULL;
+        g_panelTex = NULL;
+        g_hudTexW = g_hudTexH = 0;
+        return FALSE;
+    }
+    Log("HUD      textures %dx%d (text + panels, draw region %dx%d)",
+        tw, th, w, h);
+    return TRUE;
+}
+
+/* Copy the GDI BGR pixels into A8R8G8B8. GDI leaves the alpha byte at zero,
+   so derive coverage from brightness: text drawn on black becomes a clean
+   alpha mask, and the bright text keeps its colour. The pure-blue silhouette
+   from HudDrawText becomes opaque black, i.e. a dark outline. */
+static void HudUpload(void* dev, int w, int h)
+{
+    D3DLOCKED_RECT8 lr;
+    RECT rc;
+    int x, y;
+
+    if (!g_hudTex || !g_hudBits) return;
+    rc.left = 0; rc.top = 0; rc.right = w; rc.bottom = h;
+    if (TexLock(g_hudTex, 0, &lr, &rc, 0) != S_OK || !lr.pBits) return;
+    for (y = 0; y < h; ++y) {
+        const DWORD* src = (const DWORD*)((const BYTE*)g_hudBits +
+                                          (SIZE_T)y * g_hudDibW * 4);
+        DWORD* dst = (DWORD*)((BYTE*)lr.pBits + (SIZE_T)y * lr.Pitch);
+        for (x = 0; x < w; ++x) {
+            const DWORD c = src[x];
+            const DWORD b = c & 0xFF, g = (c >> 8) & 0xFF, r = (c >> 16) & 0xFF;
+            if (r < 16 && g < 16 && b > 0) {
+                /* Blue outline pass -> black with alpha from its coverage. */
+                dst[x] = (b << 24);
+            } else {
+                DWORD a = r;
+                if (g > a) a = g;
+                if (b > a) a = b;
+                if (a) { a = a * 6 / 5; if (a > 255) a = 255; }
+                dst[x] = (a << 24) | (r << 16) | (g << 8) | b;
+            }
+        }
+    }
+    TexUnlock(g_hudTex, 0);
+}
+
+/* Panel texture: the blue channel is the layer code, mapped to independent
+   RGBA values so the fill/border can be translucent even though GDI cannot
+   write alpha directly. */
+static void HudUploadPanels(void* dev, int w, int h)
+{
+    D3DLOCKED_RECT8 lr;
+    RECT rc;
+    int x, y;
+
+    if (!g_panelTex || !g_hudBits) return;
+    rc.left = 0; rc.top = 0; rc.right = w; rc.bottom = h;
+    if (TexLock(g_panelTex, 0, &lr, &rc, 0) != S_OK || !lr.pBits) return;
+    for (y = 0; y < h; ++y) {
+        const DWORD* src = (const DWORD*)((const BYTE*)g_hudBits +
+                                          (SIZE_T)y * g_hudDibW * 4);
+        DWORD* dst = (DWORD*)((BYTE*)lr.pBits + (SIZE_T)y * lr.Pitch);
+        for (x = 0; x < w; ++x) {
+            const DWORD b = src[x] & 0xFF;
+            DWORD out = 0;
+            if (b >= 25 && b <= 35) {
+                out = (50u << 24);                       /* soft shadow */
+            } else if (b >= 65 && b <= 75) {
+                out = (90u << 24) | (220u << 16) | (220u << 8) | 220u;
+            } else if (b >= 135 && b <= 145) {
+                out = (160u << 24) | (255u << 16) | (255u << 8) | 255u;
+            }
+            dst[x] = out;
+        }
+    }
+    TexUnlock(g_panelTex, 0);
+}
+
+static BOOL PlayerDead(void)
+{
+    int result = -999;
+    if (!g_exeBase) return FALSE;
+    if (!SafeReadInt(g_exeBase + (0x490A48 - 0x400000), &result))
+        return FALSE;
+    return result == 2;
+}
+
+/* Gameplay, plus the death screen: keep the new HUD up so its STATE reads
+   DEAD instead of dropping back to the game's own HUD for the final frames. */
+static BOOL HudShouldDraw(void)
+{
+    return InGameplay() || PlayerDead();
+}
+
+static BOOL UpdateHudTexture(void* dev)
+{
+    HudVals v;
+    int w, h;
+
+    if (!o_CreateTexture || !ReadHudVals(&v)) return FALSE;
+    w = (int)g_bbW / 3;
+    h = (int)g_bbH / 3;
+    if (w < 160 || h < 96) return FALSE;
+    if (!HudEnsureTexture(dev, w, h)) return FALSE;
+    if (g_hudValid && g_hudDrawW == w && g_hudDrawH == h &&
+        memcmp(&v, &g_hudLast, sizeof(v)) == 0)
+        return TRUE;
+
+    RenderPanelsToDib(w, h, &v);
+    HudUploadPanels(dev, w, h);
+    RenderHudToDib(w, h, &v);
+    HudUpload(dev, w, h);
+    g_hudLast  = v;
+    g_hudDrawW = w;
+    g_hudDrawH = h;
+    g_hudValid = TRUE;
+    return TRUE;
+}
+
+static void StateLog(const char* tag)
+{
+    const UINT_PTR b = g_exeBase;
+    int a44 = -999, a48 = -999, cd0 = -999, cc8 = -999;
+    int cb08 = -999, de3c = -999, ddd8 = -999, a6c = -999;
+
+#define IDAVA(x) (b + ((UINT_PTR)(x) - 0x400000))
+    SafeReadInt(IDAVA(0x490A44), &a44);
+    SafeReadInt(IDAVA(0x490A48), &a48);
+    SafeReadInt(IDAVA(0x490CD0), &cd0);
+    SafeReadInt(IDAVA(0x490CC8), &cc8);
+    SafeReadInt(IDAVA(0x48CB08), &cb08);
+    SafeReadInt(IDAVA(0x48DE3C), &de3c);
+    SafeReadInt(IDAVA(0x48DDD8), &ddd8);
+    SafeReadInt(IDAVA(0x491A6C), &a6c);
+#undef IDAVA
+
+    Log("STATE %-12s A44=%d A48=%d CD0=%d CC8=%d CB08=%d DE3C=%d DDD8=%d 1A6C=%d",
+        tag, a44, a48, cd0, cc8, cb08, de3c, ddd8, a6c);
 }
 
 /* Watch every candidate's running range. Called a few times a second; the
@@ -862,22 +1876,34 @@ static void HuntTick(void)
 #define IN_GETCURSORPOS      3
 #define IN_SETCURSORPOS      4
 #define IN_GETFOREGROUNDWINDOW 5
-#define IN_COUNT             6
+#define IN_SCREENTOCLIENT    6
+#define IN_CLIENTTOSCREEN    7
+#define IN_COUNT             8
 
 static const char* kInputNames[IN_COUNT] = {
     "GetAsyncKeyState", "GetKeyboardState", "GetKeyState",
-    "GetCursorPos", "SetCursorPos", "GetForegroundWindow"
+    "GetCursorPos", "SetCursorPos", "GetForegroundWindow",
+    "ScreenToClient", "ClientToScreen"
 };
-static long  g_inCalls[IN_COUNT]  = {0,0,0,0,0,0};
-static long  g_inFrame[IN_COUNT]  = {0,0,0,0,0,0};
-static FARPROC g_inReal[IN_COUNT] = {0,0,0,0,0,0};
+static long  g_inCalls[IN_COUNT]  = {0,0,0,0,0,0,0,0};
+static long  g_inFrame[IN_COUNT]  = {0,0,0,0,0,0,0,0};
+static FARPROC g_inReal[IN_COUNT] = {0,0,0,0,0,0,0,0};
 
 /* Keep running when the window is not focused. On by default: the whole point
    of the UDP tester is that something else has focus. */
-static BOOL g_vrExclusive = FALSE;  /* defined here; the gameplay-input block
-                                       below is where it is explained */
+/* TRUE = VR-only input during gameplay (desktop keyboard/mouse suppressed).
+   This is the default now. Key 0 enables desktop keyboard/mouse for manual
+   tests without a headset or fake XrApi data. */
+static BOOL g_vrExclusive = TRUE;
 static BOOL g_noPause  = TRUE;
-static HWND g_gameWnd  = NULL;    /* learned from CreateDevice's hFocusWindow */
+/* g_gameWnd is declared with the window state above. */
+
+/* Display stretch: the game still reasons in 640x480, but the window may be
+   larger and Present stretches the frame to it. Input must be mapped back to
+   640x480, or clicks at a stretched position land outside the game's logical
+   UI. Computed in hkPresent from the client rect. */
+static float g_displayScaleX = 1.0f;
+static float g_displayScaleY = 1.0f;
 
 typedef HWND (WINAPI *PFN_GetForegroundWindow)(void);
 
@@ -925,6 +1951,8 @@ typedef BOOL  (WINAPI *PFN_GetKeyboardState)(PBYTE);
 typedef SHORT (WINAPI *PFN_GetKeyState)(int);
 typedef BOOL  (WINAPI *PFN_GetCursorPos)(LPPOINT);
 typedef BOOL  (WINAPI *PFN_SetCursorPos)(int, int);
+typedef BOOL  (WINAPI *PFN_ScreenToClient)(HWND, LPPOINT);
+typedef BOOL  (WINAPI *PFN_ClientToScreen)(HWND, LPPOINT);
 
 static SHORT WINAPI hkGetAsyncKeyState(int vk)
 { ++g_inCalls[IN_GETASYNCKEYSTATE]; ++g_inFrame[IN_GETASYNCKEYSTATE];
@@ -948,7 +1976,8 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
 
         ProbeKeys(p);          /* our own control keys, read then removed */
         VrExclusiveKeys(p);    /* then the game loses the desktop keyboard */
-        StickKeys(p);          /* then VR input is added back */
+        StickKeys(p);          /* left stick -> movement */
+        VrInputKeys(p);        /* buttons, walk, shoot, zoom, edges */
 
         /* Anything still held after that is real input - including the mouse
            buttons, which live in this same array. */
@@ -1008,10 +2037,16 @@ static BOOL WINAPI hkGetCursorPos(LPPOINT p)
               delta and spin. Suppressing it is what makes "keep running
               while unfocused" actually usable rather than just not-paused. */
         const BOOL vrOwnsInput = g_vrExclusive && InGameplay();
+        const BOOL steeringNow = g_steer && g_vrExclusive && InGameplay();
         const BOOL reallyFocused =
             !g_gameWnd || !g_inReal[IN_GETFOREGROUNDWINDOW] ||
             ((PFN_GetForegroundWindow)g_inReal[IN_GETFOREGROUNDWINDOW])() == g_gameWnd;
-        if (g_steer || vrOwnsInput || !reallyFocused) *p = g_lastCursor;
+        /* In menus/title/briefing/death/victory MODE_VR is 0 and the runtime
+           owns the mouse again, so never suppress it there. The unfocused
+           guard is also gameplay-only for the same reason. */
+        if (steeringNow || vrOwnsInput ||
+            (g_vrExclusive && InGameplay() && !reallyFocused))
+            *p = g_lastCursor;
     }
 
     /* Mid-update: the game has just taken the mouse delta and has not yet
@@ -1036,6 +2071,39 @@ static BOOL WINAPI hkSetCursorPos(int x, int y)
     ++g_inCalls[IN_SETCURSORPOS]; ++g_inFrame[IN_SETCURSORPOS];
     g_lastCursor.x = x; g_lastCursor.y = y; g_cursorKnown = TRUE;
     return ((PFN_SetCursorPos)g_inReal[IN_SETCURSORPOS])(x, y);
+}
+
+/* The game's logical UI is 640x480. When Present stretches the frame to a
+   larger client, ScreenToClient must return 640x480 coordinates, and
+   ClientToScreen must turn the game's 640x480 coordinates back into physical
+   client coordinates. Without both, a stretched menu is unclickable. */
+static BOOL WINAPI hkScreenToClient(HWND h, LPPOINT p)
+{
+    BOOL r;
+    ++g_inCalls[IN_SCREENTOCLIENT]; ++g_inFrame[IN_SCREENTOCLIENT];
+    r = ((PFN_ScreenToClient)g_inReal[IN_SCREENTOCLIENT])(h, p);
+    if (r && p && g_gameWnd && h == g_gameWnd &&
+        g_displayScaleX > 0.0f && g_displayScaleY > 0.0f) {
+        p->x = (LONG)(p->x / g_displayScaleX);
+        p->y = (LONG)(p->y / g_displayScaleY);
+    }
+    return r;
+}
+
+static BOOL WINAPI hkClientToScreen(HWND h, LPPOINT p)
+{
+    POINT q;
+    BOOL r;
+    ++g_inCalls[IN_CLIENTTOSCREEN]; ++g_inFrame[IN_CLIENTTOSCREEN];
+    if (!p) return ((PFN_ClientToScreen)g_inReal[IN_CLIENTTOSCREEN])(h, p);
+    q = *p;
+    if (g_gameWnd && h == g_gameWnd) {
+        q.x = (LONG)(q.x * g_displayScaleX);
+        q.y = (LONG)(q.y * g_displayScaleY);
+    }
+    r = ((PFN_ClientToScreen)g_inReal[IN_CLIENTTOSCREEN])(h, &q);
+    if (r) *p = q;
+    return r;
 }
 
 // Walk the EXE's import table and log every module, flagging the ones that
@@ -1079,17 +2147,117 @@ static void DumpImports(void)
     Log("");
 }
 
+// ---------------------------------------------------------------------------
+// GDI font capture (HUD text clarity experiment)
+//
+// The HUD/text is rasterised at 640x480 and then stretched, so vertex scaling
+// only magnifies the glyphs. The cheap experiment is to enlarge the font at
+// creation so the atlas/DIB has more source pixels. Capture every
+// CreateFontIndirectA first: the HUD font is identified from its height/face,
+// then only that font is scaled.
+//
+// The hook is installed in DllMain (an IAT write, not LoadLibrary) because the
+// game may create fonts before Direct3DCreate8/EnsureInit.
+// ---------------------------------------------------------------------------
+
+typedef HFONT (WINAPI *PFN_CreateFontIndirectA)(const LOGFONTA*);
+static PFN_CreateFontIndirectA g_realCreateFontIndirectA = NULL;
+static float   g_fontScale = 1.0f;      /* 1.25 looked worse; keep original */
+static LOGFONTA g_fontLog[16];
+static int     g_fontLogN = 0;
+
+static void LogFontRequest(const LOGFONTA* lf)
+{
+    if (!lf || !g_log) return;
+    Log("FONT  h=%ld w=%ld weight=%ld italic=%d charset=%d face='%s'",
+        lf->lfHeight, lf->lfWidth, lf->lfWeight, lf->lfItalic,
+        lf->lfCharSet, lf->lfFaceName);
+}
+
+static HFONT WINAPI hkCreateFontIndirectA(const LOGFONTA* lf)
+{
+    LOGFONTA copy;
+    if (lf) {
+        copy = *lf;
+        if (g_fontLogN < (int)(sizeof(g_fontLog)/sizeof(g_fontLog[0])))
+            g_fontLog[g_fontLogN++] = copy;
+        LogFontRequest(&copy);
+        if (g_fontScale != 1.0f) {
+            const LONG oldH = copy.lfHeight;
+            copy.lfHeight = (LONG)(copy.lfHeight * g_fontScale);
+            if (copy.lfWidth) copy.lfWidth = (LONG)(copy.lfWidth * g_fontScale);
+            Log("FONT  scale %.2f: h %ld -> %ld", g_fontScale, oldH, copy.lfHeight);
+            lf = &copy;
+        }
+    }
+    if (!g_realCreateFontIndirectA) return NULL;
+    return g_realCreateFontIndirectA(lf);
+}
+
+// GDI text capture. The HUD text is drawn through DrawTextA/W into a DIB, so
+// this gives the exact strings, rects and font the game uses. That is the map
+// for hiding the default text and redrawing it at a higher resolution inside
+// the single XrApi image.
+typedef int (WINAPI *PFN_DrawTextA)(HDC, LPCSTR, int, LPRECT, UINT);
+typedef int (WINAPI *PFN_DrawTextW)(HDC, LPCWSTR, int, LPRECT, UINT);
+static PFN_DrawTextA g_realDrawTextA = NULL;
+static PFN_DrawTextW g_realDrawTextW = NULL;
+static long g_textLogs = 0;
+
+static void LogTextCall(const char* which, HDC hdc, const char* a,
+                        const wchar_t* w, LPRECT rc, UINT fmt, int count)
+{
+    char face[64] = {0};
+    LONG fh = 0;
+    if (g_log && g_textLogs < 400) {
+        HFONT f = (HFONT)GetCurrentObject(hdc, OBJ_FONT);
+        LOGFONTA lf;
+        if (f && GetObjectA(f, sizeof(lf), &lf)) {
+            fh = lf.lfHeight;
+            strncpy(face, lf.lfFaceName, sizeof(face) - 1);
+        }
+        if (w)
+            Log("TEXT %s rc=%ld,%ld,%ld,%ld fmt=0x%X h=%ld face='%s' '%.80ls'",
+                which, rc ? rc->left : 0, rc ? rc->top : 0,
+                rc ? rc->right : 0, rc ? rc->bottom : 0, fmt, fh, face, w);
+        else if (a) {
+            char buf[160];
+            int n = (count < 0) ? (int)strlen(a) : count;
+            if (n > 159) n = 159;
+            memcpy(buf, a, (size_t)n); buf[n] = 0;
+            Log("TEXT %s rc=%ld,%ld,%ld,%ld fmt=0x%X h=%ld face='%s' '%s'",
+                which, rc ? rc->left : 0, rc ? rc->top : 0,
+                rc ? rc->right : 0, rc ? rc->bottom : 0, fmt, fh, face, buf);
+        }
+        ++g_textLogs;
+    }
+}
+
+static int WINAPI hkDrawTextA(HDC hdc, LPCSTR text, int count, LPRECT rc, UINT fmt)
+{
+    LogTextCall("A", hdc, text, NULL, rc, fmt, count);
+    return g_realDrawTextA ? g_realDrawTextA(hdc, text, count, rc, fmt) : 0;
+}
+
+static int WINAPI hkDrawTextW(HDC hdc, LPCWSTR text, int count, LPRECT rc, UINT fmt)
+{
+    LogTextCall("W", hdc, NULL, text, rc, fmt, count);
+    return g_realDrawTextW ? g_realDrawTextW(hdc, text, count, rc, fmt) : 0;
+}
+
 static void HookInput(void)
 {
     HMODULE hExe = GetModuleHandleA(NULL);
     static const char* names[IN_COUNT] = {
         "GetAsyncKeyState", "GetKeyboardState", "GetKeyState",
-        "GetCursorPos", "SetCursorPos", "GetForegroundWindow"
+        "GetCursorPos", "SetCursorPos", "GetForegroundWindow",
+        "ScreenToClient", "ClientToScreen"
     };
     void* hooks[IN_COUNT] = {
         (void*)hkGetAsyncKeyState, (void*)hkGetKeyboardState, (void*)hkGetKeyState,
         (void*)hkGetCursorPos,     (void*)hkSetCursorPos,
-        (void*)hkGetForegroundWindow
+        (void*)hkGetForegroundWindow,
+        (void*)hkScreenToClient,   (void*)hkClientToScreen
     };
 
     Log("INPUT  IAT patch results (a patched entry proves we can supply this");
@@ -1624,6 +2792,22 @@ static float g_pitchSign  = -1.0f;
 static int   g_cluster    = CLU_BOTH;
 static float g_posScale   = 1.0f;   /* engine units per metre; ~1 [derived] */
 
+/* VR controller mapping (owner, 5 Nov 2026). Right-handed: left trigger =
+   fire mode, right trigger = shoot. Left-handed swaps only those two; every
+   other control is identical. Right-stick turning accumulates a yaw offset so
+   it composes with head look instead of fighting it. */
+static int   g_leftHanded = 0;
+static float g_turnSpeed  = 120.0f; /* degrees per second */
+static float g_turnYaw    = 0.0f;   /* accumulated right-stick yaw, radians */
+static BYTE  g_prevVrBtn[24];
+static BYTE  g_pulseVk[256];        /* frames remaining for edge-pressed keys */
+/* Patch the game's hardcoded 4:3 projection aspect to the container aspect.
+   OFF by default: the owner wants the game's default FOV untouched. The
+   supported device configuration is a 4:3 container (1280x960), where the
+   native frame fills the screen with no bars and no FOV change. The patch is
+   retained as an opt-in experiment (`patchAspect 1` in the INI). */
+static BOOL  g_patchAspect = FALSE;
+
 /* The reference captured at recentre: where the game had us, and the head
    pose we call "straight ahead". */
 static BOOL  g_haveRef    = FALSE;
@@ -1698,6 +2882,10 @@ static void SteerSave(void)
     fprintf(f, "yawSign %.0f\n",   g_yawSign);
     fprintf(f, "pitchSign %.0f\n", g_pitchSign);
     fprintf(f, "cluster %d\n",     g_cluster);
+    fprintf(f, "hudVisualScale %.2f\n", g_hudVisualScale);
+    fprintf(f, "leftHanded %d\n",    g_leftHanded);
+    fprintf(f, "turnSpeed %.0f\n",   g_turnSpeed);
+    fprintf(f, "patchAspect %d\n",   g_patchAspect ? 1 : 0);
     /* The DOF mode is deliberately NOT saved: it is a choice about how
        much to drive in this session, not a fact about XOPS, and
        persisting it would quietly override a better default. */
@@ -1719,6 +2907,13 @@ static void SteerLoad(void)
         if      (!strcmp(key, "yawSign"))   g_yawSign   = v < 0 ? -1.0f : 1.0f;
         else if (!strcmp(key, "pitchSign")) g_pitchSign = v < 0 ? -1.0f : 1.0f;
         else if (!strcmp(key, "cluster"))   g_cluster   = ((int)v) % 3;
+        else if (!strcmp(key, "hudVisualScale")) g_hudVisualScale = v;
+        else if (!strcmp(key, "leftHanded")) g_leftHanded = v != 0;
+        else if (!strcmp(key, "turnSpeed"))  g_turnSpeed  = v;
+        else if (!strcmp(key, "patchAspect")) g_patchAspect = v != 0;
+        /* Older files may carry game-space "hudScale"; ignore it rather than
+           interpreting 0.33 as a visual scale. */
+        else if (!strcmp(key, "hudScale"))  { /* superseded */ }
         /* "dof" appears in files written by an earlier build. Read and
            discard it rather than letting a stale mode win. */
         else if (!strcmp(key, "dof"))       { /* ignored */ }
@@ -1739,6 +2934,7 @@ static void SteerRecentre(void)
     if (SafeRead(CamAddr(A_Y),  &v)) g_refPos[1] = v;
     if (SafeRead(CamAddr(A_H2), &v)) g_refPos[2] = v;
     g_haveRef = TRUE;
+    g_turnYaw = 0.0f;
     /* Start the delta chain from where the head is now, so recentring never
        produces one large jump. */
     g_prevHeadP[0] = g_pose.valid ? g_pose.headP[0] : 0.0f;
@@ -1759,12 +2955,24 @@ static void SteerTick(void)
     float yaw, pitch;
 
     if (!g_steer || !g_posed || !g_pose.valid) return;
+    if (!g_vrExclusive) return;     /* desktop test mode: mouse owns the view */
     if (!g_haveRef) SteerRecentre();
+
+    /* Right stick turns the player body relative to the head. Accumulate a
+       yaw offset so it composes with head look instead of being overwritten
+       by it. 120 deg/s is smooth turn; a snap mode can replace this later. */
+    if (fabs(g_pose.turnX) > 0.15f) {
+        const float dt = 1.0f / 60.0f;
+        g_turnYaw += g_yawSign * g_pose.turnX *
+                     (g_turnSpeed * 0.0174532925f) * dt;
+        while (g_turnYaw >  3.14159265f) g_turnYaw -= 6.2831853f;
+        while (g_turnYaw < -3.14159265f) g_turnYaw += 6.2831853f;
+    }
 
     /* Yaw is relative: the pose's yaw is already measured from the recentre
        point, so add it to where the game had us when we recentred. Pitch is
        absolute against the horizon, so it is written outright. */
-    yaw   = g_refYaw + g_yawSign * g_pose.headYaw;
+    yaw   = g_refYaw + g_turnYaw + g_yawSign * g_pose.headYaw;
     pitch = g_pitchSign * g_pose.headPitch;
 
     if (g_cluster == CLU_A || g_cluster == CLU_BOTH) {
@@ -1775,7 +2983,7 @@ static void SteerTick(void)
         /* B is the player's own orientation, so this is the write that makes
            WALKING follow the head - which is the whole point of the owner's
            input design: forward is where you are looking. */
-        SafeWrite(CamAddr(B_YAW),   g_refYawB + g_yawSign * g_pose.headYaw);
+        SafeWrite(CamAddr(B_YAW),   g_refYawB + g_turnYaw + g_yawSign * g_pose.headYaw);
         SafeWrite(CamAddr(B_PITCH), pitch);
     }
 
@@ -1897,8 +3105,12 @@ static BOOL g_prevRecentreBtn = FALSE;
 
 static long g_lastXforms  = 0;       /* SetTransform calls in the previous frame */
 static long g_lastIndexed = 0;       /* DrawIndexedPrimitive calls, previous frame */
+static long g_lastUP      = 0;       /* DrawPrimitiveUP calls, previous frame */
 
-#define GAMEPLAY_MIN_INDEXED 60   /* gameplay 84-88, menus 26-48 [device] */
+/* Draw-count fallback only. The real detector now uses the game's state
+   globals; the threshold is set to clear the in-mission menu (~28 indexed)
+   while still accepting small levels (DUEL_EXT was 39-53). */
+#define GAMEPLAY_MIN_INDEXED 30
 
 /* TRUE when the last completed frame looked like gameplay rather than a menu.
    Uses the previous frame because the current one is still being built when
@@ -1918,6 +3130,30 @@ static long g_lastIndexed = 0;       /* DrawIndexedPrimitive calls, previous fra
    menus. */
 static BOOL InGameplay(void)
 {
+    /* The game's own state, found by following its UI strings:
+         0x490A44 = selected mission index, 0x40 (64) on the title
+         0x490A48 = mission result, 1 = success, 2 = failure (result screen)
+       Both are fixed addresses in this binary (ASLR off) and rebased here.
+       Fall back to the old draw signature only if they cannot be read. */
+    if (g_exeBase) {
+        int mission = -1, result = -1, player = -1;
+        const UINT_PTR b = g_exeBase;
+        if (SafeReadInt(b + (0x490A44 - 0x400000), &mission) &&
+            SafeReadInt(b + (0x490A48 - 0x400000), &result) &&
+            SafeReadInt(b + (0x48DDD8 - 0x400000), &player)) {
+            if (mission == 0x40) return FALSE;   /* title */
+            if (result != 0)     return FALSE;   /* death / victory / result */
+            if (mission < 0)     return FALSE;   /* no mission loaded */
+            /* 0x48DDD8 is the local player index: -1 on the title, mission
+               select and briefing; 0..0x17 while a player exists. This is
+               what separated the 48-indexed mission-select screen from real
+               gameplay in the 5 Nov log. */
+            if (player < 0)      return FALSE;
+            /* In-mission menu is ~28 indexed; the smallest real level seen
+               (DUEL_EXT) was 39-53. Briefing/2D screens are 0. */
+            return g_lastIndexed >= GAMEPLAY_MIN_INDEXED;
+        }
+    }
     return g_lastXforms == 0 && g_lastIndexed >= GAMEPLAY_MIN_INDEXED;
 }
 
@@ -1927,6 +3163,9 @@ static BOOL InGameplay(void)
 static void VrExclusiveKeys(PBYTE p)
 {
     int vk;
+    /* Only gameplay is VR-exclusive. MODE_VR is 0 on the title, objective,
+       menus, death and victory screens, and desktop input must always pass
+       through there. */
     if (!g_vrExclusive || !InGameplay()) return;
     for (vk = 0; vk < 256; ++vk) {
         if (vk == VK_ESCAPE) continue;       /* the one way out */
@@ -1939,6 +3178,8 @@ static void StickKeys(PBYTE p)
     int pressed = 0;
 
     if (!g_stickMove || !g_posed || !g_pose.valid) return;
+    if (!InGameplay()) return;      /* never move the player in a menu/screen */
+    if (!g_vrExclusive) return;     /* desktop test mode: no synthetic input */
 
     /* Only while steering. Supplying movement keys when the head is not
        driving the view would walk the player sideways relative to where he is
@@ -1962,6 +3203,50 @@ static void StickKeys(PBYTE p)
         }
         g_prevRecentreBtn = now;
     }
+}
+
+/* Edge-press a game key for a few frames. The game polls GetKeyboardState
+   once per frame, so a one-frame edge can be missed; three is reliable. */
+static void VrPulse(int vk)
+{
+    if (vk >= 0 && vk < 256) g_pulseVk[vk] = 3;
+}
+
+static BOOL VrEdge(int idx)
+{
+    const BOOL now = XrButton(&g_pose, idx) ? TRUE : FALSE;
+    const BOOL was = (idx >= 0 && idx < 24 && g_prevVrBtn[idx]) ? TRUE : FALSE;
+    if (idx >= 0 && idx < 24) g_prevVrBtn[idx] = (BYTE)now;
+    return now && !was;
+}
+
+/* The owner's mapping. Held: left stick move, right stick turn, left grip
+   walk, shoot trigger, Y zoom. Edge: fire-mode trigger, right grip jump,
+   B reload, A switch, X drop. */
+static void VrInputKeys(PBYTE p)
+{
+    int vk;
+    if (!g_posed || !g_pose.valid || !InGameplay()) return;
+    if (!g_vrExclusive) return;     /* desktop test mode: no synthetic input */
+
+    if (XrButton(&g_pose, XRB_L_GRIP)) p[VK_TAB] |= 0x80;    /* walk */
+    if (VrEdge(XRB_Y)) VrPulse(VK_SHIFT);                    /* zoom toggle */
+
+    if (!g_leftHanded) {
+        if (XrButton(&g_pose, XRB_R_TRIGGER)) p[VK_LBUTTON] |= 0x80;
+        if (VrEdge(XRB_L_TRIGGER)) VrPulse('X');             /* fire mode */
+    } else {
+        if (XrButton(&g_pose, XRB_L_TRIGGER)) p[VK_LBUTTON] |= 0x80;
+        if (VrEdge(XRB_R_TRIGGER)) VrPulse('X');             /* fire mode */
+    }
+
+    if (VrEdge(XRB_R_GRIP)) VrPulse(VK_SPACE);               /* jump */
+    if (VrEdge(XRB_B))      VrPulse('R');                    /* reload */
+    if (VrEdge(XRB_A))      VrPulse('Z');                    /* switch weapon */
+    if (VrEdge(XRB_X))      VrPulse('G');                    /* drop weapon */
+
+    for (vk = 0; vk < 256; ++vk)
+        if (g_pulseVk[vk]) { p[vk] |= 0x80; --g_pulseVk[vk]; }
 }
 
 static void SteerLog(void)
@@ -1995,11 +3280,17 @@ static void SteerLog(void)
             g_pose.bools[0] ? g_pose.bools : "(none)");
         Log("XR       stick->WASD %s, supplied keys on %ld frames",
             g_stickMove ? "on" : "OFF", g_stickFrames);
-        Log("XR       VR-exclusive input %s; last frame %s"
-            " (%ld SetTransforms, %ld indexed draws)",
-            g_vrExclusive ? "ON" : "off",
+        Log("INPUT    hand=%s turn=%.0f deg/s  Lgrip=walk Ltrig=%s"
+            " Rtrig=%s Rgrip=jump B=reload A=switch X=drop Y=zoom",
+            g_leftHanded ? "left" : "right", g_turnSpeed,
+            g_leftHanded ? "shoot" : "fire mode",
+            g_leftHanded ? "fire mode" : "shoot");
+        Log("INPUT    %s; last frame %s"
+            " (%ld SetTransforms, %ld indexed, %ld UP draws)",
+            g_vrExclusive ? "VR input only (0 for desktop)"
+                          : "desktop input enabled",
             InGameplay() ? "GAMEPLAY" : "MENU/title",
-            g_lastXforms, g_lastIndexed);
+            g_lastXforms, g_lastIndexed, g_lastUP);
         /* Run 11's tester sent a fixed HMD position in floats 22-24, so the
            recentred offset was 0.000 every packet. Positional DOF cannot be
            judged against that, and a silent zero looks like broken code. */
@@ -2187,7 +3478,8 @@ static void ProbeKeys(PBYTE p)
     /* Number row and the two keys beside it. Nothing here is a movement key:
        swallowing W/A/S/D would mean the player cannot walk while probing, and
        walking is often exactly how you tell whether a variable tracks you. */
-    const int watch[33] = { '9', '8', '7', '0', '6', '5', '4', '2', '3', '1',
+    const int watch[41] = { '9', '8', '7', '0', '6', '5', '4', '2', '3', '1',
+                            'F', 'M', 'H', 'V', 'T', 'N', 'J', 'K',
                             VK_OEM_PERIOD,
                             VK_OEM_4, VK_OEM_6, VK_OEM_1, VK_OEM_7, VK_OEM_5,
                             VK_OEM_3,
@@ -2198,7 +3490,7 @@ static void ProbeKeys(PBYTE p)
     BYTE now[256];
     int i, j;
 
-    for (i = 0; i < 33; ++i) {
+    for (i = 0; i < 41; ++i) {
         vk = watch[i];
         now[vk] = (BYTE)(p[vk] & 0x80);
         if (now[vk] && !prev[vk]) {
@@ -2224,6 +3516,49 @@ static void ProbeKeys(PBYTE p)
                 ProbeSelect(0);
             } else if (vk == '2') {
                 ProbeCyclePhase();
+            } else if (vk == 'F') {
+                g_fitWindow = !g_fitWindow;
+                Log("WINDOW  fit-to-display: %s",
+                    g_fitWindow
+                      ? "ON - borderless, full display, re-applied every frame"
+                      : "off - no longer re-applied (the window is not restored)");
+                if (g_fitWindow) FitWindow(g_gameWnd ? g_gameWnd : g_wnd);
+            } else if (vk == 'M') {
+                g_maxRes = !g_maxRes;
+                Log("RESOLUTION target-res composite: %s  (applies at next Reset)",
+                    g_maxRes ? "ON - device asked for the desktop size"
+                             : "off - the game's own 640x480 mode");
+            } else if (vk == 'J') {
+                g_grabFrames = 3;
+                Log("DUMP     back-buffer grab armed: saving in 3 frames");
+            } else if (vk == 'K' && !g_probeMode) {
+                g_customHud = !g_customHud;
+                Log("HUD      custom text HUD: %s  (J grabs the frame)",
+                    g_customHud ? "ON" : "off - the game's own 2D HUD is back");
+            } else if (vk == 'H') {
+                static const float kHudScales[] = { 1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 0.9f };
+                static int hudIdx = 1;   /* default is 1.1 */
+                hudIdx = (hudIdx + 1) % (int)(sizeof(kHudScales)/sizeof(kHudScales[0]));
+                g_hudVisualScale = kHudScales[hudIdx];
+                Log("HUD      visual scale -> %.2f; 1.00 = native size", g_hudVisualScale);
+                SteerSave();
+            } else if (vk == 'V') {
+                g_dumpDraws = 300;
+                Log("DRAWDump armed: next 300 draws, with the first UP vertices");
+                PlayerDump("V");
+            } else if (vk == 'T') {
+                Log("STATE TAG  xforms=%ld indexed=%ld UP=%ld  -> %s",
+                    g_lastXforms, g_lastIndexed, g_lastUP,
+                    InGameplay() ? "GAMEPLAY" : "NOT-GAMEPLAY");
+                StateLog("T");
+            } else if (vk == 'N') {
+                g_leftHanded = !g_leftHanded;
+                Log("INPUT    handedness: %s  (shoot=%s trigger, fire mode=%s"
+                    " trigger; all other buttons unchanged)",
+                    g_leftHanded ? "left-handed" : "right-handed",
+                    g_leftHanded ? "left" : "right",
+                    g_leftHanded ? "right" : "left");
+                SteerSave();
             } else if (vk == '3') {
                 g_steer = !g_steer;
                 if (g_steer) {
@@ -2240,15 +3575,17 @@ static void ProbeKeys(PBYTE p)
                 g_pitchSign = -g_pitchSign;
                 Log("STEER    pitch sign %+.0f", g_pitchSign);
                 SteerSave();
-            } else if (vk == VK_OEM_PERIOD) {
+            } else if (vk == '0' && !g_probeMode) {
                 g_vrExclusive = !g_vrExclusive;
-                Log("INPUT    VR-exclusive input: %s",
+                if (g_vrExclusive) SteerRecentre();
+                Log("INPUT    %s",
                     g_vrExclusive
-                      ? "ON - in gameplay the game sees NO desktop keys or"
-                        " mouse except ESC. Menus are unaffected."
-                      : "off - the desktop keyboard and mouse work normally");
-                Log("INPUT    (last frame: %ld SetTransform, %ld indexed draws"
-                    " -> %s)", g_lastXforms, g_lastIndexed,
+                      ? "VR input only - desktop keys/mouse suppressed in"
+                        " GAMEPLAY; MODE_VR 0 screens always keep desktop input"
+                      : "desktop keyboard/mouse enabled for manual tests;"
+                        " VR steering and synthetic input are paused");
+                Log("INPUT    (last frame: %ld SetTransform, %ld indexed, %ld UP"
+                    " draws -> %s)", g_lastXforms, g_lastIndexed, g_lastUP,
                     InGameplay() ? "GAMEPLAY" : "a MENU or the title");
             } else if (vk == '1') {
                 g_stickMove = !g_stickMove;
@@ -2332,11 +3669,28 @@ static void ProbeKeys(PBYTE p)
     p['9'] = 0;
     p['6'] = 0;
     p['5'] = 0;
+    p['0'] = 0;             /* desktop-input toggle (probe tag in probe mode) */
     /* Steering is not a probe experiment, so its keys are always swallowed
        and always live, whether or not probe mode is on. */
     p['3'] = 0;
     p[VK_OEM_4] = 0; p[VK_OEM_6] = 0; p[VK_OEM_1] = 0; p[VK_OEM_7] = 0;
     p[VK_OEM_5] = 0; p[VK_OEM_3] = 0; p['1'] = 0; p[VK_OEM_PERIOD] = 0;
+    /* Stage-3 comparison switch, always live so it works before probe mode. */
+    p['F'] = 0;
+    /* Fullscreen-resolution experiment; applies at the next Reset. */
+    p['M'] = 0;
+    /* Back-buffer BMP grab. */
+    p['J'] = 0;
+    /* Custom-HUD comparison toggle (K still classifies in probe mode). */
+    p['K'] = 0;
+    /* HUD scale cycle. */
+    p['H'] = 0;
+    /* Draw-order dump for HUD identification. */
+    p['V'] = 0;
+    /* Manual state tag (press on death/victory screens). */
+    p['T'] = 0;
+    /* Handedness toggle. */
+    p['N'] = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2344,6 +3698,56 @@ static void ProbeKeys(PBYTE p)
 // deadlock risk on Windows and a worse one under Wine, so everything happens on
 // the first call into an export instead.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Projection aspect
+//
+// XOPS hardcodes 4:3 when it builds the perspective matrix:
+//
+//     00403A91  68 AB AA AA 3F   push 1.333333
+//
+// Patching that immediate to the window/container aspect widens the rendered
+// horizontal FOV. The 640x480 frame becomes anamorphic: when it is stretched
+// to the target window, the output pixels are square again and the geometry
+// is correct, with no letterbox and no squashed world. The outbound FOV is
+// recomputed to match, so the runtime warps the image consistently.
+// ---------------------------------------------------------------------------
+static void PatchProjectionAspect(void)
+{
+    BYTE* p;
+    DWORD old = 0;
+    float aspect, oldAspect;
+
+    if (!g_exeBase || g_desktopW < 1 || g_desktopH < 1) return;
+    p = (BYTE*)g_exeBase + (0x403A92 - 0x400000);
+    if (*(DWORD*)p != 0x3FAAAAAB) {
+        Log("PROJECTION aspect patch: expected 0x3FAAAAAB, found 0x%08lX at"
+            " IDA 0x403A92 - skipped", *(DWORD*)p);
+        return;
+    }
+    aspect = (float)g_desktopW / (float)g_desktopH;
+    if (aspect < 1.0f) aspect = 1.0f;
+    if (aspect > 2.4f) aspect = 2.4f;
+    if (!VirtualProtect(p, 4, PAGE_EXECUTE_READWRITE, &old)) {
+        Log("PROJECTION aspect patch: VirtualProtect failed (err %lu)",
+            GetLastError());
+        return;
+    }
+    oldAspect = *(float*)p;
+    *(float*)p = aspect;
+    VirtualProtect(p, 4, old, &old);
+    g_projPatched = TRUE;
+
+    {
+        const float pi = 3.14159265358979323846f;
+        const float halfY = XOPS_FOV_Y * pi / 360.0f;
+        g_outFovY = XOPS_FOV_Y;
+        g_outFovX = 2.0f * atanf(tanf(halfY) * aspect) * 180.0f / pi;
+    }
+    Log("PROJECTION aspect patch: %.4f -> %.4f at IDA 0x403A92;"
+        " outbound FOV %.2f x %.2f",
+        oldAspect, aspect, g_outFovX, g_outFovY);
+}
 
 static void EnsureInit(void)
 {
@@ -2353,6 +3757,8 @@ static void EnsureInit(void)
     char dir[MAX_PATH]; GetModuleFileNameA(g_hSelf, dir, MAX_PATH);
     char* slash = strrchr(dir, '\\');
     if (slash) *(slash + 1) = 0; else dir[0] = 0;
+    _snprintf(g_baseDir, MAX_PATH, "%s", dir);
+    g_baseDir[MAX_PATH - 1] = 0;
 
     char logPath[MAX_PATH];
     _snprintf(logPath, MAX_PATH, "%sxops_wxr_probe.log", dir);
@@ -2366,7 +3772,14 @@ static void EnsureInit(void)
     Log("XOPS-WXR d3d8 probe  %s", kBuildStamp);      // line 1 is the stamp
     Log("host           %s", exe);
     Log("exe base       0x%08IX   (IDA addresses below assume 0x400000)", g_exeBase);
-    Log("screen         %dx%d", GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+    Log("FONT  CreateFontIndirectA IAT patched: %s",
+        g_realCreateFontIndirectA ? "yes" : "no");
+    for (int fi = 0; fi < g_fontLogN; ++fi) LogFontRequest(&g_fontLog[fi]);
+    g_fontLogN = 0;
+    /* Capture the desktop mode BEFORE the game enters fullscreen at 640x480. */
+    g_desktopW = GetSystemMetrics(SM_CXSCREEN);
+    g_desktopH = GetSystemMetrics(SM_CYSCREEN);
+    Log("screen         %dx%d", g_desktopW, g_desktopH);
     Log("");
 
     char sys[MAX_PATH]; GetSystemDirectoryA(sys, MAX_PATH);
@@ -2390,16 +3803,28 @@ static void EnsureInit(void)
         Log("XR       handshake dir %s   hmd %s %s", XrDir(), XrMake(), XrModel());
         Log("XR       the game is set to keep running while unfocused, so the");
         Log("XR       tester can hold focus. Backslash toggles that.");
-        Log("XR       press 3 to steer the camera from the pose; ; recentres,");
-        Log("XR       [ and ] flip the yaw and pitch signs, ' cycles the DOF,");
-        Log("XR       ` cycles which cluster is written (A / B / both),");
-        Log("XR       1 toggles the left stick driving W/A/S/D,");
-        Log("XR       . toggles VR-exclusive input (desktop keys dead in play).");
-        Log("XR       Anything settled with those keys is saved next to the DLL.");
+        Log("XR       steering is ON by default; 3 toggles it for debugging,");
+        Log("XR       ; recentres, [ ] flip the signs, ' cycles DOF, ` cluster,");
+        Log("XR       1 toggles left stick W/A/S/D, N toggles handedness.");
+        Log("XR       0 enables desktop keyboard/mouse for manual tests;");
+        Log("XR       MODE_VR 0 screens (title/objective/menu/death/victory)");
+        Log("XR       always keep desktop input regardless of that toggle.");
+        Log("WINDOW   borderless full-display fit is ON - F toggles it.");
+        Log("SYNC     the red square is drawn last in the frame once a packet");
+        Log("SYNC     has arrived; its value is HMD_SYNC echoed verbatim.");
+        Log("CAMHUNT  differential scanner is OFF (camera already confirmed).");
+        Log("CAMHUNT  This removes the raw memory copy that crashed on 5 Nov.");
+        Log("RESOLUTION target-resolution composite is ON: the device asks for");
+        Log("RESOLUTION %dx%d and the 640x480 game frame is stretched to fill it.",
+            g_desktopW, g_desktopH);
+        Log("RESOLUTION M toggles it; the replacement HUD is drawn as a D3D");
+        Log("RESOLUTION texture in the centre square. J saves a back-buffer BMP.");
     } else {
         Log("XR       client FAILED to start: %s", XrLastError());
     }
     SteerLoad();
+    if (g_patchAspect) PatchProjectionAspect();
+    else Log("PROJECTION aspect patch disabled by xops_wxr_steer.ini");
     HookInput();
 }
 
@@ -2433,6 +3858,82 @@ static void NoteCallSite(DWORD type, void* ret)
         Log("CALLSITE  SetTransform(%s)  returns to IDA 0x%08IX  (frame %ld)",
             XformName(type), ida, g_frame);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Window: borderless, filling the display (stage 3)
+//
+// This is a prerequisite for the sync pixel, not cosmetics: WinlatorXR samples
+// pixel (0,0) of the captured window, and with a title bar there that pixel is
+// chrome. The game's back buffer stays 640x480 - the engine projects to that
+// itself - but Direct3D8::Present stretches it to the client rect in windowed
+// mode. That is the documented fallback: sync corner valid, sharpness lost.
+//
+// Re-applied every frame because engines rebuild their window on mode changes,
+// alt-tab and device loss. g_fitWindow is a comparison switch (F), not an undo:
+// turning it off stops re-applying, it does not restore the old chrome.
+// ---------------------------------------------------------------------------
+
+static int  g_fitChanges = 0;
+
+static void FitWindow(HWND h)
+{
+    LONG style, want;
+    int sw, sh;
+    RECT wr;
+
+    if (!g_fitWindow) return;
+    if (!g_deviceWindowed) return;      /* fullscreen: the game owns the window */
+    if (!h) h = g_gameWnd ? g_gameWnd : g_wnd;
+    if (!h || !IsWindow(h)) return;
+
+    sw = GetSystemMetrics(SM_CXSCREEN);
+    sh = GetSystemMetrics(SM_CYSCREEN);
+    style = GetWindowLongA(h, GWL_STYLE);
+    want  = (style & ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER | WS_DLGFRAME))
+            | WS_POPUP | WS_VISIBLE;
+
+    GetWindowRect(h, &wr);
+    if (style == want && wr.left == 0 && wr.top == 0 &&
+        wr.right == sw && wr.bottom == sh)
+        return;                     /* idempotent: nothing to do on a good frame */
+
+    SetWindowLongA(h, GWL_STYLE, want);
+    SetWindowPos(h, NULL, 0, 0, sw, sh,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+    ++g_fitChanges;
+    if (g_fitChanges <= 6 || (g_fitChanges % 60) == 0)
+        Log("WINDOW  fit-to-display #%d: style 0x%08lX -> 0x%08lX,"
+            " %ldx%ld -> %dx%d, no chrome",
+            g_fitChanges, style, GetWindowLongA(h, GWL_STYLE),
+            wr.right - wr.left, wr.bottom - wr.top, sw, sh);
+}
+
+/* Ask the device for the desktop/container size instead of 640x480. Called
+   before the real CreateDevice and before the real Reset. The desktop size was
+   captured at init, before the game switched the display mode. This applies in
+   windowed mode too: the window is made borderless and full-display, so a
+   desktop-sized back buffer is what we want there as well. */
+static void ApplyTargetRes(D3DPRESENT_PARAMETERS8* pp)
+{
+    if (!pp || !g_maxRes || g_desktopW < 640 || g_desktopH < 480)
+        return;
+    g_bbFormat = pp->BackBufferFormat ? pp->BackBufferFormat
+                                      : D3DFMT_X8R8G8B8;
+    if (pp->BackBufferWidth == (UINT)g_desktopW &&
+        pp->BackBufferHeight == (UINT)g_desktopH) {
+        g_bbW = (UINT)g_desktopW;
+        g_bbH = (UINT)g_desktopH;
+        return;
+    }
+    Log("RESOLUTION target-res override: %ux%u -> %dx%d (%s)",
+        pp->BackBufferWidth, pp->BackBufferHeight, g_desktopW, g_desktopH,
+        pp->Windowed ? "windowed" : "fullscreen");
+    pp->BackBufferWidth  = (UINT)g_desktopW;
+    pp->BackBufferHeight = (UINT)g_desktopH;
+    g_bbW = (UINT)g_desktopW;
+    g_bbH = (UINT)g_desktopH;
 }
 
 // ---------------------------------------------------------------------------
@@ -2491,9 +3992,85 @@ static HRESULT __stdcall hkDrawPrimitiveUP(void* dev, DWORD prim, UINT count,
 {
     ++g_drawsThisFrame; ++g_drawsUP;
     NoteDraw(g_curFvf, stride);
+
+    /* Crosshair: four separate prim=3 (LINESTRIP), count=1 UP draws at
+       (317,240), (320,237), (323,240), (320,243). Remove it for VR; a
+       controller laser pointer replaces it later. */
+    if (g_curFvf == 0x0144 && stride == 28 && prim == 3 && count == 1 && data) {
+        const float* v = (const float*)data;
+        if (v && v[0] >= 310.0f && v[0] <= 330.0f &&
+                 v[1] >= 230.0f && v[1] <= 250.0f) {
+            static long crossSkipped = 0;
+            if (crossSkipped++ == 0)
+                Log("HUD      crosshair draws suppressed");
+            return 0;                  /* S_OK, draw nothing */
+        }
+    }
+
+    /* In gameplay the original 2D HUD is replaced by the texture HUD drawn in
+       CompositeFrame(). Its 2D layer is all stride-28 UP; the 3D weapon-slot
+       models are indexed draws and stay visible. Menus/death/victory are
+       MODE_VR 0 and keep their own HUD. */
+    if (g_customHud && g_compositeActive && g_hudValid && HudShouldDraw() &&
+        g_curFvf == 0x0144 && stride == 28) {
+        static long hud2d = 0;
+        if (hud2d++ == 0)
+            Log("HUD      game 2D HUD suppressed; custom HUD active");
+        return 0;
+    }
     if (g_frame < VERBOSE_FRAMES && g_drawsThisFrame <= 4)
         Log("[f%ld] DrawPrimitiveUP  type=%lu count=%u stride=%u  from IDA 0x%08IX",
             g_frame, prim, count, stride, ToIda(_ReturnAddress()));
+    if (g_dumpDraws > 0) {
+        const float* v = (const float*)data;
+        if (v && count > 0)
+            Log("DRAWDump UP   fvf=0x%04lX stride=%u count=%u prim=%lu"
+                " v0=%.1f,%.1f,%.1f,%.1f v1=%.1f,%.1f",
+                g_curFvf, stride, count, prim,
+                v[0], v[1], v[2], v[3],
+                (count > 1 && stride >= 8) ? v[stride/4] : 0.0f,
+                (count > 1 && stride >= 8) ? v[stride/4 + 1] : 0.0f);
+        else
+            Log("DRAWDump UP   fvf=0x%04lX stride=%u count=%u prim=%lu (no data)",
+                g_curFvf, stride, count, prim);
+        --g_dumpDraws;
+    }
+
+    /* HUD = XYZRHW + stride 28. The tricky part: DrawPrimitiveUP's `count` is
+       the PRIMITIVE count, not the vertex count. A HUD triangle fan has
+       prim=6, count=2 -> 4 vertices. Copying count*stride leaves the extra
+       vertices uninitialized and tears the HUD across the screen (seen 5 Nov). */
+    if (g_hudVisualScale != 1.0f && InGameplay() &&
+        g_curFvf == 0x0144 && stride == 28 &&
+        count > 0 && count < 100000 && data) {
+        const UINT verts = PrimVertexCount(prim, count);
+        const SIZE_T bytes = (SIZE_T)verts * stride;
+        const float sx = g_hudVisualScale / (g_displayScaleX > 0.0f ? g_displayScaleX : 1.0f);
+        const float sy = g_hudVisualScale / (g_displayScaleY > 0.0f ? g_displayScaleY : 1.0f);
+        if (!g_hudBuf || bytes > g_hudCap) {
+            if (g_hudBuf) { VirtualFree(g_hudBuf, 0, MEM_RELEASE); g_hudBuf = NULL; }
+            g_hudBuf = (BYTE*)VirtualAlloc(NULL, bytes, MEM_RESERVE | MEM_COMMIT,
+                                           PAGE_READWRITE);
+            g_hudCap = g_hudBuf ? bytes : 0;
+        }
+        if (g_hudBuf) {
+            UINT i;
+            memcpy(g_hudBuf, data, bytes);
+            for (i = 0; i < verts; ++i) {
+                float* p = (float*)(g_hudBuf + (SIZE_T)i * stride);
+                p[0] = (p[0] - HUD_CX) * sx + HUD_CX + g_hudOffsetX;
+                p[1] = (p[1] - HUD_CY) * sy + HUD_CY + g_hudOffsetY;
+            }
+            {
+                static long hudDraws = 0;
+                if (hudDraws++ == 0)
+                    Log("HUD      visual %.2f -> game scale %.3f,%.3f"
+                        " (prim %lu, %u verts)", g_hudVisualScale,
+                        sx, sy, prim, verts);
+            }
+            return o_DrawPrimitiveUP(dev, prim, count, g_hudBuf, stride);
+        }
+    }
     return o_DrawPrimitiveUP(dev, prim, count, data, stride);
 }
 
@@ -2503,10 +4080,29 @@ static HRESULT __stdcall hkDrawPrimitiveUP(void* dev, DWORD prim, UINT count,
 // DrawIndexedPrimitive, an earlier version of this probe would never have seen
 // it, and the conclusion "every draw is XYZRHW" would have been an artefact of
 // hooking only one of the three entry points. Hook all three.
+/* Vertex count from a D3D8 primitive type and PrimitiveCount. DrawPrimitiveUP
+   takes a primitive count; the buffer holds the expanded vertex count. */
+static UINT PrimVertexCount(DWORD prim, UINT primCount)
+{
+    switch (prim) {
+        case 1: return primCount;          /* POINTLIST   */
+        case 2: return primCount * 2;      /* LINELIST    */
+        case 3: return primCount + 1;      /* LINESTRIP   */
+        case 4: return primCount * 3;      /* TRIANGLELIST*/
+        case 5: return primCount + 2;      /* TRIANGLESTRIP */
+        case 6: return primCount + 2;      /* TRIANGLEFAN */
+        default: return primCount;
+    }
+}
+
 static HRESULT __stdcall hkDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
 {
     ++g_drawsThisFrame; ++g_drawsVB;
     NoteDraw(g_curFvf, 0);
+    if (g_dumpDraws > 0) {
+        Log("DRAWDump DIR  fvf=0x%04lX count=%u prim=%lu", g_curFvf, count, prim);
+        --g_dumpDraws;
+    }
     return o_DrawPrimitive(dev, prim, start, count);
 }
 
@@ -2515,7 +4111,527 @@ static HRESULT __stdcall hkDrawIndexedPrim(void* dev, DWORD prim, UINT minIdx,
 {
     ++g_drawsThisFrame; ++g_drawsIDX;
     NoteDraw(g_curFvf, 0);
+    if (g_dumpDraws > 0) {
+        Log("DRAWDump IDX  fvf=0x%04lX primCount=%u numV=%u",
+            g_curFvf, primCount, numV);
+        --g_dumpDraws;
+    }
     return o_DrawIndexedPrim(dev, prim, minIdx, numV, startIdx, primCount);
+}
+
+// The red sync pixel (stage 5). Echo HMD_SYNC exactly as received: the runtime
+// calibrates itself to whatever red values it observes, and its remapping is
+// gated on green == 0. 10x10 at (0,0) survives a border or a scaling pass.
+// Clear is the only route because the back buffer is not lockable [device],
+// and it writes exact bytes with no filtering or blending. It is the last draw
+// before we hand control to the real EndScene, so nothing overwrites it.
+static void DrawSyncPixel(void* dev)
+{
+    static long drawn = 0;
+    int r;
+    D3DRECT8 rc;
+
+    if (!dev || !o_Clear || !g_posed || !g_pose.valid) return;
+
+    r = (int)(g_pose.sync + 0.5f);
+    if (r < 0) r = 0; else if (r > 255) r = 255;
+
+    rc.x1 = 0; rc.y1 = 0; rc.x2 = 10; rc.y2 = 10;
+    o_Clear(dev, 1, &rc, D3DCLEAR_TARGET, D3DCOLOR_XRGB(r, 0, 0), 0.0f, 0);
+
+    if (drawn == 0)
+        Log("SYNC    first red square drawn: RGB(%d,0,0), 10x10 at (0,0)"
+            " - echo of HMD_SYNC", r);
+    ++drawn;
+}
+
+// ---------------------------------------------------------------------------
+// Target-resolution composite
+//
+// The device's back buffer is created at the desktop/container size. XOPS
+// still renders its world and 3D HUD models into the top-left 640x480, so:
+//   1. copy that 640x480 region into a texture,
+//   2. draw it across the whole back buffer,
+//   3. draw the replacement text HUD (also a texture) inside the centre square.
+// This is all in the D3D frame, so WinlatorXR's single-image capture sees it.
+// ---------------------------------------------------------------------------
+
+#define COMP_RS_N   19
+#define COMP_TS0_N  13
+#define COMP_TS1_N  6
+
+typedef struct {
+    DWORD rs[COMP_RS_N];   BYTE rsOk[COMP_RS_N];
+    DWORD ts0[COMP_TS0_N]; BYTE ts0Ok[COMP_TS0_N];
+    DWORD ts1[COMP_TS1_N]; BYTE ts1Ok[COMP_TS1_N];
+    D3DVIEWPORT8 vp;
+    BOOL  haveVp;
+} CompState;
+
+static const DWORD kCompRs[COMP_RS_N] = {
+    D3DRS_FILLMODE, D3DRS_SHADEMODE, D3DRS_ZENABLE, D3DRS_ZWRITEENABLE,
+    D3DRS_ALPHATESTENABLE, D3DRS_SRCBLEND, D3DRS_DESTBLEND, D3DRS_CULLMODE,
+    D3DRS_ALPHABLENDENABLE, D3DRS_FOGENABLE, D3DRS_STENCILENABLE,
+    D3DRS_LIGHTING, D3DRS_COLORVERTEX, D3DRS_CLIPPING,
+    D3DRS_CLIPPLANEENABLE, D3DRS_BLENDOP, D3DRS_COLORWRITEENABLE,
+    D3DRS_SCISSORTESTENABLE, D3DRS_WRAP0
+};
+static const DWORD kCompTs0[COMP_TS0_N] = {
+    D3DTSS_COLOROP, D3DTSS_COLORARG1, D3DTSS_COLORARG2,
+    D3DTSS_ALPHAOP, D3DTSS_ALPHAARG1, D3DTSS_ALPHAARG2,
+    D3DTSS_TEXCOORDINDEX, D3DTSS_TEXTURETRANSFORMFLAGS,
+    D3DTSS_ADDRESSU, D3DTSS_ADDRESSV,
+    D3DTSS_MAGFILTER, D3DTSS_MINFILTER, D3DTSS_MIPFILTER
+};
+static const DWORD kCompTs1Stage[COMP_TS1_N] = { 1, 1, 2, 2, 3, 3 };
+static const DWORD kCompTs1Type[COMP_TS1_N]  = {
+    D3DTSS_COLOROP, D3DTSS_ALPHAOP,
+    D3DTSS_COLOROP, D3DTSS_ALPHAOP,
+    D3DTSS_COLOROP, D3DTSS_ALPHAOP
+};
+
+static void CompSaveState(void* dev, CompState* s)
+{
+    int i;
+    if (!s) return;
+    ZeroMemory(s, sizeof(*s));
+    for (i = 0; i < COMP_RS_N; ++i)
+        s->rsOk[i] = (o_GetRenderState &&
+                      o_GetRenderState(dev, kCompRs[i], &s->rs[i]) == S_OK)
+                     ? 1 : 0;
+    for (i = 0; i < COMP_TS0_N; ++i)
+        s->ts0Ok[i] = (o_GetTextureStageState &&
+                       o_GetTextureStageState(dev, 0, kCompTs0[i],
+                                              &s->ts0[i]) == S_OK) ? 1 : 0;
+    for (i = 0; i < COMP_TS1_N; ++i)
+        s->ts1Ok[i] = (o_GetTextureStageState &&
+                       o_GetTextureStageState(dev, kCompTs1Stage[i],
+                                              kCompTs1Type[i],
+                                              &s->ts1[i]) == S_OK) ? 1 : 0;
+    s->haveVp = (o_GetViewport && o_GetViewport(dev, &s->vp) == S_OK) ? TRUE : FALSE;
+}
+
+static void CompRestoreState(void* dev, const CompState* s)
+{
+    int i;
+    if (!s) return;
+    for (i = 0; i < COMP_RS_N; ++i)
+        if (s->rsOk[i]) o_SetRenderState(dev, kCompRs[i], s->rs[i]);
+    for (i = 0; i < COMP_TS0_N; ++i)
+        if (s->ts0Ok[i]) o_SetTextureStageState(dev, 0, kCompTs0[i], s->ts0[i]);
+    for (i = 0; i < COMP_TS1_N; ++i)
+        if (s->ts1Ok[i]) o_SetTextureStageState(dev, kCompTs1Stage[i],
+                                                kCompTs1Type[i], s->ts1[i]);
+    if (s->haveVp) o_SetViewport(dev, &s->vp);
+}
+
+static void CompSetStates(void* dev)
+{
+    int s;
+    o_SetRenderState(dev, D3DRS_FILLMODE, D3DFILL_SOLID);
+    o_SetRenderState(dev, D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
+    o_SetRenderState(dev, D3DRS_ZENABLE, 0);
+    o_SetRenderState(dev, D3DRS_ZWRITEENABLE, 0);
+    o_SetRenderState(dev, D3DRS_ALPHATESTENABLE, 0);
+    o_SetRenderState(dev, D3DRS_CULLMODE, D3DCULL_NONE);
+    o_SetRenderState(dev, D3DRS_LIGHTING, 0);
+    o_SetRenderState(dev, D3DRS_FOGENABLE, 0);
+    o_SetRenderState(dev, D3DRS_STENCILENABLE, 0);
+    o_SetRenderState(dev, D3DRS_CLIPPING, 0);
+    o_SetRenderState(dev, D3DRS_CLIPPLANEENABLE, 0);
+    o_SetRenderState(dev, D3DRS_BLENDOP, D3DBLENDOP_ADD);
+    o_SetRenderState(dev, D3DRS_COLORWRITEENABLE, 0xFFFFFFFF);
+    o_SetRenderState(dev, D3DRS_SCISSORTESTENABLE, 0);
+    o_SetRenderState(dev, D3DRS_WRAP0, 0);
+    o_SetRenderState(dev, D3DRS_COLORVERTEX, 0);
+    o_SetRenderState(dev, D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    o_SetRenderState(dev, D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    o_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, 0);
+
+    o_SetTextureStageState(dev, 0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+    o_SetTextureStageState(dev, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    o_SetTextureStageState(dev, 0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+    o_SetTextureStageState(dev, 0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+    o_SetTextureStageState(dev, 0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+    o_SetTextureStageState(dev, 0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
+    o_SetTextureStageState(dev, 0, D3DTSS_TEXCOORDINDEX, 0);
+    o_SetTextureStageState(dev, 0, D3DTSS_TEXTURETRANSFORMFLAGS, 0);
+    o_SetTextureStageState(dev, 0, D3DTSS_MAGFILTER, D3DTEXF_POINT);
+    o_SetTextureStageState(dev, 0, D3DTSS_MINFILTER, D3DTEXF_POINT);
+    o_SetTextureStageState(dev, 0, D3DTSS_MIPFILTER, D3DTEXF_NONE);
+    o_SetTextureStageState(dev, 0, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
+    o_SetTextureStageState(dev, 0, D3DTSS_ADDRESSV, D3DTADDRESS_CLAMP);
+    for (s = 1; s <= 3; ++s) {
+        o_SetTextureStageState(dev, s, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        o_SetTextureStageState(dev, s, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+    }
+}
+
+typedef struct {
+    float x, y, z, rhw;
+    DWORD color;
+    float u, v;
+} CompVert;
+
+static void CompDrawQuad(void* dev, float x0, float y0, float x1, float y1,
+                         float u0, float v0, float u1, float v1)
+{
+    CompVert v[4];
+    v[0].x = x0; v[0].y = y0; v[0].z = 0.0f; v[0].rhw = 1.0f;
+    v[0].color = 0xFFFFFFFF; v[0].u = u0; v[0].v = v0;
+    v[1].x = x1; v[1].y = y0; v[1].z = 0.0f; v[1].rhw = 1.0f;
+    v[1].color = 0xFFFFFFFF; v[1].u = u1; v[1].v = v0;
+    v[2].x = x0; v[2].y = y1; v[2].z = 0.0f; v[2].rhw = 1.0f;
+    v[2].color = 0xFFFFFFFF; v[2].u = u0; v[2].v = v1;
+    v[3].x = x1; v[3].y = y1; v[3].z = 0.0f; v[3].rhw = 1.0f;
+    v[3].color = 0xFFFFFFFF; v[3].u = u1; v[3].v = v1;
+    o_SetVertexShader(dev, 0x0144);       /* XYZRHW | DIFFUSE | TEX1 */
+    o_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, v, sizeof(CompVert));
+}
+
+static void ReleaseSavedTargets(void);
+static void BindGameRenderTarget(void* dev);
+static void BindBackBuffer(void* dev);
+
+static void ReleaseCompositeResources(void)
+{
+    ReleaseSavedTargets();
+    if (g_gameRTSurf) { ReleaseIUnknown(g_gameRTSurf); g_gameRTSurf = NULL; }
+    if (g_gameDepth)  { ReleaseIUnknown(g_gameDepth);  g_gameDepth  = NULL; }
+    if (g_gameRT)     { ReleaseIUnknown(g_gameRT);     g_gameRT     = NULL; }
+    if (g_frameSurf)  { ReleaseIUnknown(g_frameSurf);  g_frameSurf  = NULL; }
+    if (g_frameTex)   { ReleaseIUnknown(g_frameTex);   g_frameTex   = NULL; }
+    if (g_hudTex)     { ReleaseIUnknown(g_hudTex);     g_hudTex     = NULL; }
+    if (g_panelTex)   { ReleaseIUnknown(g_panelTex);   g_panelTex   = NULL; }
+    g_hudTexW = g_hudTexH = 0;
+    g_hudValid = FALSE;
+    g_gameRTActive = FALSE;
+    g_compositeActive = FALSE;
+}
+
+static BOOL EnsureCompositeResources(void* dev)
+{
+    DWORD fmt;
+    HRESULT hr;
+
+    if (!dev || !o_CreateTexture || !o_CreateDepthStencilSurface ||
+        !o_SetRenderTarget || !o_GetRenderTarget || !o_GetDepthStencilSurface ||
+        !o_SetViewport || !o_GetBackBuffer || !o_CopyRects ||
+        !o_CreateImageSurface)
+        return FALSE;
+    if (g_bbW < 640 || g_bbH < 480)
+        return FALSE;
+    if (g_bbW == 640 && g_bbH == 480) {
+        Log("COMPOSITE not needed: back buffer is still 640x480");
+        return FALSE;
+    }
+    if (!g_gameRT || !g_gameRTSurf || !g_gameDepth) {
+        fmt = g_bbFormat ? g_bbFormat : D3DFMT_X8R8G8B8;
+        hr = o_CreateTexture(dev, 640, 480, 1, D3DUSAGE_RENDERTARGET,
+                             fmt, D3DPOOL_DEFAULT, &g_gameRT);
+        if (FAILED(hr) || !g_gameRT) {
+            Log("COMPOSITE CreateTexture(640x480 render target fmt=%lu)"
+                " failed hr=0x%08lX", fmt, hr);
+            g_gameRT = NULL;
+            return FALSE;
+        }
+        hr = TexGetSurfaceLevel(g_gameRT, 0, &g_gameRTSurf);
+        if (FAILED(hr) || !g_gameRTSurf) {
+            Log("COMPOSITE GetSurfaceLevel(render target) failed hr=0x%08lX", hr);
+            ReleaseCompositeResources();
+            return FALSE;
+        }
+        hr = o_CreateDepthStencilSurface(dev, 640, 480, D3DFMT_D16, 0,
+                                         &g_gameDepth);
+        if (FAILED(hr) || !g_gameDepth) {
+            Log("COMPOSITE CreateDepthStencilSurface(640x480 D16)"
+                " failed hr=0x%08lX", hr);
+            ReleaseCompositeResources();
+            return FALSE;
+        }
+    }
+    g_compositeActive = TRUE;
+    g_gameRTFirstScene = TRUE;
+    BindGameRenderTarget(dev);
+    Log("COMPOSITE active: back buffer %ux%u, game render target 640x480"
+        " fmt=%lu", g_bbW, g_bbH, g_bbFormat);
+    return TRUE;
+}
+
+static void CompositeFrame(void* dev)
+{
+    CompState st;
+    D3DVIEWPORT8 vp;
+    DWORD savedFvf = g_curFvf;
+    int hw, hh, gw, gh, gx, gy;
+
+    if (!g_compositeActive || !dev || !g_gameRT)
+        return;
+    if (g_gameRTActive)
+        return;     /* EndScene should have restored the back buffer */
+
+    CompSaveState(dev, &st);
+    {
+        static int vpLogs = 0;
+        if (vpLogs++ == 0 && st.haveVp)
+            Log("COMPOSITE game viewport %ux%u at %u,%u (game RT 640x480)",
+                st.vp.Width, st.vp.Height, st.vp.X, st.vp.Y);
+    }
+    if (o_BeginScene(dev) != S_OK) {
+        CompRestoreState(dev, &st);
+        DrawSyncPixel(dev);
+        return;
+    }
+    vp.X = 0; vp.Y = 0; vp.Width = g_bbW; vp.Height = g_bbH;
+    vp.MinZ = 0.0f; vp.MaxZ = 1.0f;
+    o_SetViewport(dev, &vp);
+    CompSetStates(dev);
+
+    /* Default: keep the game's default projection/FOV and show its native 4:3
+       frame. On a 4:3 container (1280x960) the rectangle fills the window
+       exactly - no bars, no crop, no stretch. On another aspect the letterbox
+       is the honest way to keep the FOV unchanged.
+       Opt-in experiment (`patchAspect 1`): the projection aspect is widened
+       to the container, and the frame is stretched full-window instead. */
+    if (g_projPatched) {
+        gw = (int)g_bbW;
+        gh = (int)g_bbH;
+        gx = 0;
+        gy = 0;
+        o_Clear(dev, 0, NULL, D3DCLEAR_TARGET, 0xFF000000, 0.0f, 0);
+        {
+            static int fillLog = 0;
+            if (fillLog++ == 0)
+                Log("COMPOSITE fill: %ux%u <- 640x480 anamorphic"
+                    " (projection widened)", g_bbW, g_bbH);
+        }
+    } else {
+        gw = (int)g_bbW;
+        gh = (gw * 3) / 4;
+        if (gh > (int)g_bbH) {
+            gh = (int)g_bbH;
+            gw = (gh * 4) / 3;
+        }
+        if (gw < 1) gw = 1;
+        if (gh < 1) gh = 1;
+        gx = ((int)g_bbW - gw) / 2;
+        gy = ((int)g_bbH - gh) / 2;
+        o_Clear(dev, 0, NULL, D3DCLEAR_TARGET, 0xFF000000, 0.0f, 0);
+        {
+            static int fitLog = 0;
+            if (fitLog++ == 0)
+                Log("COMPOSITE native 4:3: %ux%u -> %dx%d at %d,%d"
+                    " (bars %d,%d), default FOV", g_bbW, g_bbH, gw, gh,
+                    gx, gy, (int)g_bbW - gw, (int)g_bbH - gh);
+        }
+    }
+
+    o_SetTexture(dev, 0, g_gameRT);
+    o_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, 0);
+    CompDrawQuad(dev, (float)gx, (float)gy,
+                 (float)(gx + gw), (float)(gy + gh),
+                 0.0f, 0.0f, 1.0f, 1.0f);
+
+    if (g_customHud && HudShouldDraw() && UpdateHudTexture(dev)) {
+        hw = (int)g_bbW / 3;
+        hh = (int)g_bbH / 3;
+        o_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, 1);
+        o_SetTexture(dev, 0, g_panelTex);
+        CompDrawQuad(dev, (float)hw, (float)hh,
+                     (float)(hw * 2), (float)(hh * 2),
+                     0.0f, 0.0f,
+                     (float)g_hudDrawW / (float)g_hudTexW,
+                     (float)g_hudDrawH / (float)g_hudTexH);
+        o_SetTexture(dev, 0, g_hudTex);
+        CompDrawQuad(dev, (float)hw, (float)hh,
+                     (float)(hw * 2), (float)(hh * 2),
+                     0.0f, 0.0f,
+                     (float)g_hudDrawW / (float)g_hudTexW,
+                     (float)g_hudDrawH / (float)g_hudTexH);
+    }
+
+    o_EndScene(dev);
+
+    /* Outside our scene, still before Present, and before restoring the game's
+       scissor/clip state: the red square must survive the composite. */
+    DrawSyncPixel(dev);
+
+    CompRestoreState(dev, &st);
+    if (savedFvf) o_SetVertexShader(dev, savedFvf);
+}
+
+/* G: save the composited back buffer to a BMP next to the DLL. This is the
+   only reliable way to inspect the frame on this box - screen captures of the
+   D3D window come back black. */
+static void DumpBackBuffer(void* dev)
+{
+    void* bb = NULL;
+    void* sys = NULL;
+    RECT r;
+    POINT pt;
+    D3DLOCKED_RECT8 lr;
+    char path[MAX_PATH];
+    FILE* f;
+    DWORD rowBytes;
+    int y;
+
+    if (g_grabFrames <= 0) return;
+    if (--g_grabFrames != 0) return;
+    if (!o_GetBackBuffer || !o_CreateImageSurface || !o_CopyRects) return;
+
+    if (g_bbFormat != D3DFMT_A8R8G8B8 && g_bbFormat != D3DFMT_X8R8G8B8) {
+        Log("DUMP     unsupported back-buffer format %lu", g_bbFormat);
+        return;
+    }
+    if (o_GetBackBuffer(dev, 0, 0, &bb) != S_OK || !bb) {
+        Log("DUMP     GetBackBuffer failed");
+        return;
+    }
+    if (o_CreateImageSurface(dev, g_bbW, g_bbH, g_bbFormat, &sys) != S_OK ||
+        !sys) {
+        Log("DUMP     CreateImageSurface failed");
+        ReleaseIUnknown(bb);
+        return;
+    }
+    r.left = 0; r.top = 0; r.right = (LONG)g_bbW; r.bottom = (LONG)g_bbH;
+    pt.x = 0; pt.y = 0;
+    if (o_CopyRects(dev, bb, &r, 1, sys, &pt) != S_OK) {
+        Log("DUMP     CopyRects(back buffer -> system surface) failed");
+        ReleaseIUnknown(sys); ReleaseIUnknown(bb);
+        return;
+    }
+    if (SurfLock(sys, &lr, NULL, 0) != S_OK || !lr.pBits) {
+        Log("DUMP     LockRect(system surface) failed");
+        ReleaseIUnknown(sys); ReleaseIUnknown(bb);
+        return;
+    }
+
+    _snprintf(path, MAX_PATH, "%sxops_frame_%ld.bmp", g_baseDir, g_frame);
+    path[MAX_PATH - 1] = 0;
+    f = fopen(path, "wb");
+    if (f) {
+        BITMAPFILEHEADER bf;
+        BITMAPINFOHEADER bi;
+        rowBytes = g_bbW * 4;
+        ZeroMemory(&bf, sizeof(bf));
+        ZeroMemory(&bi, sizeof(bi));
+        bf.bfType = 0x4D42;
+        bf.bfOffBits = sizeof(bf) + sizeof(bi);
+        bf.bfSize = bf.bfOffBits + rowBytes * g_bbH;
+        bi.biSize = sizeof(bi);
+        bi.biWidth = (LONG)g_bbW;
+        bi.biHeight = -(LONG)g_bbH;       /* top-down */
+        bi.biPlanes = 1;
+        bi.biBitCount = 32;
+        bi.biCompression = BI_RGB;
+        bi.biSizeImage = rowBytes * g_bbH;
+        fwrite(&bf, sizeof(bf), 1, f);
+        fwrite(&bi, sizeof(bi), 1, f);
+        for (y = 0; y < (int)g_bbH; ++y)
+            fwrite((BYTE*)lr.pBits + (SIZE_T)y * lr.Pitch, 1, rowBytes, f);
+        fclose(f);
+        Log("DUMP     wrote %s (%ux%u)", path, g_bbW, g_bbH);
+    } else {
+        Log("DUMP     could not open %s", path);
+    }
+
+    SurfUnlock(sys);
+    ReleaseIUnknown(sys);
+    ReleaseIUnknown(bb);
+}
+
+static HRESULT __stdcall hkSetViewport(void* dev, const D3DVIEWPORT8* vp)
+{
+    if (g_gameRTActive && vp && g_bbW > 0 && g_bbH > 0) {
+        D3DVIEWPORT8 v = *vp;
+        if (v.Width > 640 || v.Height > 480) {
+            v.X = (UINT)((float)v.X * 640.0f / (float)g_bbW);
+            v.Y = (UINT)((float)v.Y * 480.0f / (float)g_bbH);
+            v.Width = (UINT)((float)v.Width * 640.0f / (float)g_bbW);
+            v.Height = (UINT)((float)v.Height * 480.0f / (float)g_bbH);
+            {
+                static int n = 0;
+                if (n++ < 6)
+                    Log("VIEWPORT game %ux%u at %u,%u -> %ux%u at %u,%u",
+                        vp->Width, vp->Height, vp->X, vp->Y,
+                        v.Width, v.Height, v.X, v.Y);
+            }
+        }
+        return o_SetViewport(dev, &v);
+    }
+    return o_SetViewport(dev, vp);
+}
+
+static HRESULT __stdcall hkSetRenderTarget(void* dev, void* rt, void* depth)
+{
+    if (g_gameRTActive && (rt != g_gameRTSurf || depth != g_gameDepth)) {
+        static int n = 0;
+        if (n++ < 4)
+            Log("VIEWPORT game tried to change the render target inside the"
+                " frame - keeping the 640x480 RT");
+        return o_SetRenderTarget(dev, g_gameRTSurf, g_gameDepth);
+    }
+    return o_SetRenderTarget(dev, rt, depth);
+}
+
+static void ReleaseSavedTargets(void)
+{
+    if (g_savedRT)    { ReleaseIUnknown(g_savedRT);    g_savedRT = NULL; }
+    if (g_savedDepth) { ReleaseIUnknown(g_savedDepth); g_savedDepth = NULL; }
+}
+
+static void RestoreGameRenderTarget(void* dev)
+{
+    D3DVIEWPORT8 vp;
+
+    if (!g_gameRTActive) return;
+    if (o_SetRenderTarget) {
+        if (g_savedRT) {
+            o_SetRenderTarget(dev, g_savedRT, g_savedDepth);
+        } else {
+            void* bb = NULL;
+            if (o_GetBackBuffer && o_GetBackBuffer(dev, 0, 0, &bb) == S_OK) {
+                o_SetRenderTarget(dev, bb, NULL);
+                ReleaseIUnknown(bb);
+            }
+        }
+    }
+    ReleaseSavedTargets();
+    g_gameRTActive = FALSE;
+    if (o_SetViewport) {
+        vp.X = 0; vp.Y = 0; vp.Width = g_bbW; vp.Height = g_bbH;
+        vp.MinZ = 0.0f; vp.MaxZ = 1.0f;
+        o_SetViewport(dev, &vp);
+    }
+}
+
+static void BindGameRenderTarget(void* dev)
+{
+    D3DVIEWPORT8 vp;
+    if (!g_compositeActive || !g_gameRTSurf || !g_gameDepth ||
+        !o_SetRenderTarget)
+        return;
+    if (o_SetRenderTarget(dev, g_gameRTSurf, g_gameDepth) == S_OK) {
+        g_gameRTActive = TRUE;
+        vp.X = 0; vp.Y = 0; vp.Width = 640; vp.Height = 480;
+        vp.MinZ = 0.0f; vp.MaxZ = 1.0f;
+        o_SetViewport(dev, &vp);
+    }
+}
+
+static void BindBackBuffer(void* dev)
+{
+    void* bb = NULL;
+    D3DVIEWPORT8 vp;
+    if (!g_compositeActive) return;
+    if (o_GetBackBuffer && o_GetBackBuffer(dev, 0, 0, &bb) == S_OK && bb) {
+        g_gameRTActive = FALSE;
+        o_SetRenderTarget(dev, bb, NULL);
+        ReleaseIUnknown(bb);
+        vp.X = 0; vp.Y = 0; vp.Width = g_bbW; vp.Height = g_bbH;
+        vp.MinZ = 0.0f; vp.MaxZ = 1.0f;
+        o_SetViewport(dev, &vp);
+    }
 }
 
 static HRESULT __stdcall hkBeginScene(void* dev)
@@ -2523,19 +4639,89 @@ static HRESULT __stdcall hkBeginScene(void* dev)
     ++g_beginThisFrame;
     /* Poll first, then steer, then let the probe wiggle on top - so a probe
        experiment always wins over the pose and stays usable while steering. */
-    if (XrRunning()) { g_posed = XrPoll(&g_pose) ? TRUE : g_posed; SteerTick(); }
+    if (XrRunning()) {
+        g_posed = XrPoll(&g_pose) ? TRUE : g_posed;
+        /* Only drive the camera while the previous frame looked like gameplay.
+           In the title, briefing/objective, menus and death screens the game
+           owns its own camera and the runtime is in MODE_VR 0. */
+        if (InGameplay()) SteerTick();
+    }
     if (g_probePhase == PHASE_BEGINSCENE) ProbeTick();
+    /* The 640x480 target is bound persistently outside Present, so draws the
+       title screen makes before BeginScene land in it too. Do not clear here:
+       a pre-scene title background must survive. */
     return o_BeginScene(dev);
 }
 
 static HRESULT __stdcall hkEndScene(void* dev)
 {
+    HRESULT hr;
     ++g_endThisFrame;
-    return o_EndScene(dev);
+    hr = o_EndScene(dev);
+    /* Keep the game target bound - the title background is drawn between
+       scenes. The back buffer is bound only in Present. */
+    if (!g_compositeActive) DrawSyncPixel(dev);
+    return hr;
 }
 
 static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND c, void* d)
 {
+    /* Re-apply the borderless full-display window every frame. Cheap when it
+       is already correct; repairs it when the engine resets it. Done before
+       Present so the frame lands in the new client rect. */
+    FitWindow(g_gameWnd ? g_gameWnd : g_wnd);
+
+    /* One automatic draw-order dump once the session is in its stride, so the
+       HUD draws can be identified by path/vertices rather than guessed from
+       stride. V arms another dump on demand. */
+    if (!g_dumpArmed && g_frame >= 600) {
+        g_dumpArmed = TRUE;
+        g_dumpDraws = 300;
+        Log("DRAWDump auto-armed at frame %ld", g_frame);
+        PlayerDump("auto");
+    }
+
+    /* D3D8 does NOT stretch a smaller back buffer to a larger client rect.
+       Confirmed on screen 5 Nov 2026: a 1920x1080 borderless window showed the
+       640x480 image 1:1 in the top-left with black everywhere else. Passing
+       the client rect as the destination makes Present stretch it, which is
+       what the fallback in the plan assumes. Respect any rect the game sets -
+       this only fills in the null case. */
+    /* The game's own Present passes an explicit 640x480 destination rect
+       (0x403AFE/0x403B0E builds it), not NULL. Replacing only a NULL dest is
+       why the earlier windowed stretch did nothing. Override the rect the game
+       gives us with the full client rect, which makes D3D8 stretch the 640x480
+       software output to the window. In fullscreen the client is 640x480, so
+       this is a no-op there. */
+    RECT dst;
+    const RECT* pDest = b;
+    const RECT* pSrc  = a;
+    if (g_gameWnd && GetClientRect(g_gameWnd, &dst) &&
+        dst.right > 0 && dst.bottom > 0) {
+        g_displayScaleX = (float)dst.right / 640.0f;
+        g_displayScaleY = (float)dst.bottom / 480.0f;
+        if (b && (b->right - b->left != dst.right ||
+                  b->bottom - b->top != dst.bottom)) {
+            static int destLogs = 0;
+            if (destLogs < 3) {
+                Log("PRESENT dest override: %ldx%ld -> %ldx%ld",
+                    b->right - b->left, b->bottom - b->top,
+                    dst.right, dst.bottom);
+                ++destLogs;
+            }
+        }
+        if (g_deviceWindowed && g_fitWindow) pDest = &dst;
+    }
+    /* With the target-resolution composite the back buffer already holds the
+       finished, full-window image: present all of it, unscaled, into the whole
+       window. The game's own 640x480 source/dest rects must not crop it. */
+    if (g_compositeActive) {
+        pSrc = NULL;
+        pDest = NULL;
+        g_displayScaleX = (float)g_bbW / 640.0f;
+        g_displayScaleY = (float)g_bbH / 480.0f;
+    }
+
     // Per-frame summary. The Begin/End counts answer "is EndScene once per
     // presented frame?", which decides where the sync square goes.
     if (Verbose()) {
@@ -2582,9 +4768,26 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
     /* Keep sending every frame even when MODE_VR is 0, or the stream cannot
        be turned back on - the mode is only ever re-read from a packet we
        send. Mono first, per the settled decisions. */
-    if (XrRunning())
-        XrSendFrame(0.0f, 0.0f, g_steer ? XR_VR_ON : XR_VR_SCREEN,
-                    XR_3D_MONO, 104.5f, 104.5f);
+    if (XrRunning()) {
+        /* MODE_VR 0 on the title, briefing/objective, menus and death screens:
+           the runtime stops the pose stream, restores its own mouse control
+           and presents flat. MODE_VR 1 only when the previous frame had the
+           gameplay draw signature. Keep sending the packet in both modes, or
+           the stream cannot be turned back on. */
+        const int modeVr = InGameplay() ? XR_VR_ON : XR_VR_OFF;
+        static int lastModeVr = -1;
+        if (modeVr != lastModeVr) {
+            Log("XR       MODE_VR -> %d  (%s)  last frame: %ld xforms,"
+                " %ld indexed, %ld UP",
+                modeVr,
+                modeVr ? "in-game: immersive, pose stream on"
+                       : "title/objective/menu/death: flat, runtime mouse",
+                g_lastXforms, g_lastIndexed, g_lastUP);
+            StateLog("MODE_VR");
+            lastModeVr = modeVr;
+        }
+        XrSendFrame(0.0f, 0.0f, modeVr, XR_3D_MONO, g_outFovX, g_outFovY);
+    }
 
     if ((g_frame % 120) == 0 && g_frame > 60) { WatchDump("periodic"); SteerLog(); }
     BallisticTick();
@@ -2594,13 +4797,27 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
 
     g_lastXforms  = g_xformThisFrame;
     g_lastIndexed = g_drawsIDX;
+    g_lastUP      = g_drawsUP;
     for (int i = 0; i < IN_COUNT; ++i) g_inFrame[i] = 0;
     g_beginThisFrame = g_endThisFrame = g_drawsThisFrame = g_xformThisFrame = 0;
     g_xfView = g_xfProj = g_xfWorld = g_xfOther = 0;
     g_drawsUP = g_drawsVB = g_drawsIDX = 0;
     g_drawKinds = 0;
     ++g_frame;
-    return o_Present(dev, a, b, c, d);
+
+    {
+        HRESULT hr;
+        if (g_compositeActive) {
+            BindBackBuffer(dev);
+            CompositeFrame(dev);
+            if (g_grabFrames > 0) DumpBackBuffer(dev);
+        }
+        hr = o_Present(dev, pSrc, pDest, c, d);
+        /* Leave the game target bound for the next frame, including any
+           title/demo draws that happen before BeginScene. */
+        if (g_compositeActive) BindGameRenderTarget(dev);
+        return hr;
+    }
 }
 
 static void HookDevice(void* dev);
@@ -2612,10 +4829,67 @@ static HRESULT __stdcall hkReset(void* dev, D3DPRESENT_PARAMETERS8* pp)
         pp ? pp->BackBufferWidth : 0, pp ? pp->BackBufferHeight : 0,
         pp ? pp->Windowed : 0, pp ? pp->BackBufferFormat : 0,
         pp ? pp->Flags : 0, g_frame);
+
+    /* A minimized/hidden fullscreen window has a lost device; Reset then fails
+       with D3DERR_DEVICELOST. Restore the window before handing Reset through,
+       and retry once if it still comes back lost. This is deliberately not a
+       ShowWindow IAT hook: blocking the game's own minimize calls changed its
+       startup state and made frame 1 fail instead. */
+    HWND hw = g_gameWnd ? g_gameWnd : g_wnd;
+    if (hw) {
+        RECT wr;
+        BOOL min = IsIconic(hw);
+        if (!min && GetWindowRect(hw, &wr) && wr.left <= -30000) min = TRUE;
+        if (min) {
+            Log("RESET  window is minimized or hidden - restoring it");
+            ShowWindow(hw, SW_RESTORE);
+            SetForegroundWindow(hw);
+            Sleep(250);
+        }
+    }
+
+    if (pp) g_deviceWindowed = pp->Windowed ? TRUE : FALSE;
+
+    D3DPRESENT_PARAMETERS8 orig;
+    BOOL resized = FALSE;
+    if (pp) {
+        orig = *pp;
+        ApplyTargetRes(pp);
+        resized = (pp->BackBufferWidth != orig.BackBufferWidth ||
+                   pp->BackBufferHeight != orig.BackBufferHeight) ? TRUE : FALSE;
+        g_bbW = pp->BackBufferWidth;
+        g_bbH = pp->BackBufferHeight;
+        g_bbFormat = pp->BackBufferFormat ? pp->BackBufferFormat
+                                          : D3DFMT_X8R8G8B8;
+    }
+
+    /* Default-pool resources do not survive Reset. */
+    ReleaseCompositeResources();
+
     HRESULT hr = o_Reset(dev, pp);
+    if (FAILED(hr) && resized) {
+        Log("RESET  target-res reset failed hr=0x%08lX - retrying at %ux%u",
+            hr, orig.BackBufferWidth, orig.BackBufferHeight);
+        *pp = orig;
+        g_bbW = orig.BackBufferWidth;
+        g_bbH = orig.BackBufferHeight;
+        g_bbFormat = orig.BackBufferFormat ? orig.BackBufferFormat
+                                           : D3DFMT_X8R8G8B8;
+        hr = o_Reset(dev, pp);
+    }
+    if (hr == (HRESULT)0x88760868 && hw) {          /* D3DERR_DEVICELOST */
+        Log("RESET  DEVICELOST - restoring the window and retrying once");
+        ShowWindow(hw, SW_RESTORE);
+        SetForegroundWindow(hw);
+        Sleep(400);
+        hr = o_Reset(dev, pp);
+        Log("RESET  retry hr=0x%08lX", hr);
+    }
     Log("RESET  hr=0x%08lX", hr);
     // A Reset can replace the vtable in some implementations; re-patch cheaply.
     HookDevice(dev);
+    FitWindow(g_gameWnd ? g_gameWnd : g_wnd);
+    if (SUCCEEDED(hr)) EnsureCompositeResources(dev);
     return hr;
 }
 
@@ -2623,6 +4897,32 @@ static void HookDevice(void* dev)
 {
     if (!dev) return;
     void* tmp = NULL;
+
+    /* Clear is not patched - we only need to call it for the sync square.
+       Capture it here rather than assuming the vtable survives a Reset. */
+    {
+        void** vtbl = *(void***)dev;
+        if (vtbl) {
+            o_Clear = (PFN_Clear)vtbl[VT_DEV_CLEAR];
+            /* Read-only slots used by the target-resolution composite. */
+            o_GetBackBuffer        = (PFN_GetBackBuffer)vtbl[VT_DEV_GETBACKBUFFER];
+            o_CreateTexture        = (PFN_CreateTexture)vtbl[VT_DEV_CREATETEXTURE];
+            o_CreateDepthStencilSurface = (PFN_CreateDepthStencilSurface)vtbl[VT_DEV_CREATEDEPTHSTENCIL];
+            o_CreateImageSurface   = (PFN_CreateImageSurface)vtbl[VT_DEV_CREATEIMAGESURFACE];
+            o_CopyRects            = (PFN_CopyRects)vtbl[VT_DEV_COPYRECTS];
+            o_GetRenderTarget      = (PFN_GetRenderTarget)vtbl[VT_DEV_GETRENDERTARGET];
+            o_GetDepthStencilSurface = (PFN_GetDepthStencilSurface)vtbl[VT_DEV_GETDEPTHSTENCIL];
+            o_GetViewport          = (PFN_GetViewport)vtbl[VT_DEV_GETVIEWPORT];
+            o_SetRenderState       = (PFN_SetRenderState)vtbl[VT_DEV_SETRENDERSTATE];
+            o_GetRenderState       = (PFN_GetRenderState)vtbl[VT_DEV_GETRENDERSTATE];
+            o_SetTexture           = (PFN_SetTexture)vtbl[VT_DEV_SETTEXTURE];
+            o_SetTextureStageState = (PFN_SetTextureStageState)vtbl[VT_DEV_SETTEXTURESTAGESTATE];
+            o_GetTextureStageState = (PFN_GetTextureStageState)vtbl[VT_DEV_GETTEXTURESTAGESTATE];
+        }
+    }
+
+    if (PatchSlot(dev, VT_DEV_SETRENDERTARGET, (void*)hkSetRenderTarget, &tmp) && tmp != (void*)hkSetRenderTarget) o_SetRenderTarget = (PFN_SetRenderTarget)tmp;
+    if (PatchSlot(dev, VT_DEV_SETVIEWPORT,     (void*)hkSetViewport,     &tmp) && tmp != (void*)hkSetViewport)     o_SetViewport     = (PFN_SetViewport)tmp;
 
     if (PatchSlot(dev, VT_DEV_SETTRANSFORM,    (void*)hkSetTransform,    &tmp) && tmp != (void*)hkSetTransform) o_SetTransform    = (PFN_SetTransform)tmp;
     if (PatchSlot(dev, VT_DEV_PRESENT,         (void*)hkPresent,         &tmp) && tmp != (void*)hkPresent)       o_Present         = (PFN_Present)tmp;
@@ -2642,6 +4942,7 @@ static HRESULT __stdcall hkCreateDevice(void* self, UINT adapter, DWORD devType,
     Log("");
     Log("CREATEDEVICE  called from IDA 0x%08IX", ToIda(_ReturnAddress()));
     if (pp) {
+        g_deviceWindowed = pp->Windowed ? TRUE : FALSE;
         Log("  backbuffer    %ux%u  count=%u  format=%lu",
             pp->BackBufferWidth, pp->BackBufferHeight, pp->BackBufferCount, pp->BackBufferFormat);
         Log("  windowed      %ld        swapeffect=%lu  multisample=%lu",
@@ -2658,11 +4959,41 @@ static HRESULT __stdcall hkCreateDevice(void* self, UINT adapter, DWORD devType,
         Log("  behaviour     0x%08lX  devtype=%lu  adapter=%u", behaviour, devType, adapter);
     }
 
-    HRESULT hr = o_CreateDevice(self, adapter, devType, hFocus, behaviour, pp, outDev);
+    HRESULT hr;
+    if (pp) {
+        D3DPRESENT_PARAMETERS8 orig = *pp;
+        BOOL resized;
+        ApplyTargetRes(pp);
+        resized = (pp->BackBufferWidth != orig.BackBufferWidth ||
+                   pp->BackBufferHeight != orig.BackBufferHeight) ? TRUE : FALSE;
+        g_bbW = pp->BackBufferWidth;
+        g_bbH = pp->BackBufferHeight;
+        g_bbFormat = pp->BackBufferFormat ? pp->BackBufferFormat
+                                          : D3DFMT_X8R8G8B8;
+        hr = o_CreateDevice(self, adapter, devType, hFocus, behaviour, pp, outDev);
+        if (FAILED(hr) && resized) {
+            Log("CREATEDEVICE target-res create failed hr=0x%08lX -"
+                " retrying at %ux%u", hr,
+                orig.BackBufferWidth, orig.BackBufferHeight);
+            *pp = orig;
+            g_bbW = orig.BackBufferWidth;
+            g_bbH = orig.BackBufferHeight;
+            g_bbFormat = orig.BackBufferFormat ? orig.BackBufferFormat
+                                               : D3DFMT_X8R8G8B8;
+            hr = o_CreateDevice(self, adapter, devType, hFocus, behaviour,
+                                pp, outDev);
+        }
+    } else {
+        hr = o_CreateDevice(self, adapter, devType, hFocus, behaviour, pp, outDev);
+    }
     Log("CREATEDEVICE  hr=0x%08lX  dev=%p", hr, (outDev && *outDev) ? *outDev : NULL);
 
     if (SUCCEEDED(hr) && outDev && *outDev) {
         HookDevice(*outDev);
+        /* Stage 3: take the chrome off while we are outside the frame loop,
+           so the first SetWindowPos is not re-entered through Present. */
+        FitWindow(g_gameWnd ? g_gameWnd : (pp ? pp->hDeviceWindow : hFocus));
+        EnsureCompositeResources(*outDev);
         Log("device hooks installed: SetTransform(37) Present(15) BeginScene(34) "
             "EndScene(35) DrawPrimitive(70) DrawIndexedPrimitive(71) "
             "DrawPrimitiveUP(72) SetVertexShader(76) Reset(14)");
@@ -2730,6 +5061,15 @@ BOOL APIENTRY DllMain(HMODULE hMod, DWORD reason, LPVOID)
         g_hSelf = hMod;
         DisableThreadLibraryCalls(hMod);
         InitializeCriticalSection(&g_lock);
+        /* Capture fonts created before Direct3DCreate8. This is an IAT write,
+           not LoadLibrary, so it is safe under the loader lock. */
+        g_realCreateFontIndirectA = (PFN_CreateFontIndirectA)
+            PatchIat(GetModuleHandleA(NULL), "CreateFontIndirectA",
+                     (void*)hkCreateFontIndirectA);
+        g_realDrawTextA = (PFN_DrawTextA)
+            PatchIat(GetModuleHandleA(NULL), "DrawTextA", (void*)hkDrawTextA);
+        g_realDrawTextW = (PFN_DrawTextW)
+            PatchIat(GetModuleHandleA(NULL), "DrawTextW", (void*)hkDrawTextW);
     } else if (reason == DLL_PROCESS_DETACH) {
         ProbeRestore();
         XrStop();

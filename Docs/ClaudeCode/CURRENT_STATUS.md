@@ -4,6 +4,21 @@
 "working" only after the owner has observed it on a Quest 3. Nothing is
 "working" today.
 
+> **5 Nov 2026 update - see `Docs/OpenCode/DeepSeek41Flash/README.md` section 2d.**
+> The borderless/fullscreen window, the red sync pixel and the real-FOV change
+> are now implemented and **desktop-verified** (the sync value echoed exactly:
+> captured `RGB(120,0,0)` and `RGB(36,0,0)` at screen `(0,0)`, including in
+> gameplay). The working display path is the game's **own fullscreen config**
+> (`config.dat` byte `0x13 = 01`), not a stretched 1920x1080 window. **No Quest 3
+> verification has happened yet.** The owner also confirmed on 5 Nov that
+> **`pitchSign +1` gives the correct up/down direction** on the fullscreen
+> build, so the saved INI is right and the older "`-1` settled" note is
+> superseded for this setup. **MODE_VR is now driven by the game's own state**
+> (`0x490A44` mission index, `0x490A48` result: 1 = victory, 2 = death,
+> `0x48DDD8` player index), and two deaths plus one victory were verified on
+> the desktop; DUEL_EXT's low draw count no longer drops head tracking. The
+> rows below dated 3 Nov still describe the code before this pass.
+
 ---
 
 ## One-line summary

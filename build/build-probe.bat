@@ -45,7 +45,7 @@ cl /nologo /LD /O2 /MT /W3 /EHsc ^
    "%ROOT%\src\d3d8probe.cpp" "%ROOT%\src\xrapi.cpp" ^
    /link /DEF:"%ROOT%\src\d3d8probe.def" /MACHINE:X86 ^
          /OUT:"%OUTDIR%\d3d8.dll" ^
-         /IMPLIB:"%OUTDIR%\d3d8probe.lib" user32.lib ws2_32.lib
+         /IMPLIB:"%OUTDIR%\d3d8probe.lib" user32.lib ws2_32.lib gdi32.lib
 if errorlevel 1 (
     echo [FAIL] build failed.
     exit /b 1
