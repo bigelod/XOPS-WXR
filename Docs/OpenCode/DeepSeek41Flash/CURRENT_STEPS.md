@@ -1,12 +1,12 @@
-# XOPS-WXR — CURRENT STEPS / handover
+﻿# XOPS-WXR â€” CURRENT STEPS / handover
 
 **Date:** 6 Nov 2026, DeepSeek V4.1 Flash session.
 **Read with:** `COMPLETED_STEPS.md` (what is done), `NEXT_STEPS.md` (what is
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 07:01:29`, SHA-256
-`3186c8e1a69e0e98a83eacc120f70ec0b90b891641a786506ebc334e571f0c5d`,
+**Current build:** `built Nov  6 2026 07:13:13`, SHA-256
+`037e219d977ff1b556ae256e1d567e46bb3367f19b209797b1547f707d083f11`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---
@@ -107,6 +107,7 @@ Left-handed mode swaps only shoot and fire mode. Walk is gone.
 - `J/K` previous/next draw (hunt), `N` attach.
 - `V` draw dump, `H` HUD scale, `F` window fit, `M` target res.
 - `.` grab two consecutive composited frames (`xops_frame_<n>.bmp`).
+- `/` toggle head-roll live (for comparing roll on/off).
 - Verbose-only keys and probe keys are muted while the game is unfocused.
 
 ## 7. Config
@@ -122,7 +123,7 @@ haptic_frames = 2           # 1..5
 verbose_debug = true        # this test PC; ship with false
 stereo = mono               # experimental: aer
 roll = true                 # rotate the world sprite with head tilt
-roll_sign = 1               # -1 if the device horizon tilts the wrong way
+roll_sign = -1              # default; +1 if the device horizon tilts the wrong way
 ```
 
 `xops_wxr_steer.ini` still carries the settled steering facts (`yawSign`,

@@ -931,19 +931,25 @@ space) moved. The fix is the owner's original idea - **rotate the presented
 - `CompDrawQuadRot` draws the game texture as a rotated 2D quad around the
   centre. **No scaling**: black corners are accepted because the HMD lenses
   hide them.
-- The hand/gun/laser pass gets a view rotation of the opposite angle, so it
-  keeps its tracked orientation instead of rolling twice.
+- The hand/gun/laser pass gets a **view rotation** that cancels the sprite on
+  screen. Camera space is y-up and the sprite is y-down, so the view angle is
+  `+sprite`, not `-sprite`; the first attempt used the wrong sign and the
+  hands rolled twice.
 - The custom HUD is drawn after the sprite and stays fixed; the sync pixel is
   fixed at the top-left.
-- Config: `roll = true`, `roll_sign = 1` (flip on device if the horizon tilts
-  the wrong way).
+- `roll_sign` default is **-1** (the owner reported the original +1 direction
+  as inverted). `/` toggles roll live for comparison.
 
-Verified on the PC with an oscillating +/-25 degree head-roll feeder: the world
-tilts with the head, the HUD panels stay upright, and the hand/gun stays at its
-tracked orientation. The corners of the rotated sprite go black, as accepted.
+Verified on the PC in `building.ext` with a static +25 degree head-roll pose
+and the `/` toggle, same camera and hands:
 
-Design note: the earlier projection-roll attempt was removed. `roll_sign` is
-the one-line device correction.
+- World sprite: clearly rolled by 25 degrees with black corners.
+- HUD: upright, unchanged.
+- Hand/gun pass: the **red laser is pixel-identical** with roll on and off
+  (centroid 1057,805 vs 1058,806; axis 70.0 degrees both; same endpoints), so
+  the counter-rotation is exact. The game's own bottom-right weapon-slot
+  models are inside the sprite and do roll with the world, which is what made
+  it look as if the hands were moving.
 
-Build `built Nov  6 2026 07:01:29`, SHA-256
-`3186c8e1a69e0e98a83eacc120f70ec0b90b891641a786506ebc334e571f0c5d`.
+Build `built Nov  6 2026 07:13:13`, SHA-256
+`037e219d977ff1b556ae256e1d567e46bb3367f19b209797b1547f707d083f11`.

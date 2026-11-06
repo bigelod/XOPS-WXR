@@ -4,8 +4,8 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 07:01:29`, SHA-256
-`3186c8e1a69e0e98a83eacc120f70ec0b90b891641a786506ebc334e571f0c5d`.
+**Last build:** `built Nov  6 2026 07:13:13`, SHA-256
+`037e219d977ff1b556ae256e1d567e46bb3367f19b209797b1547f707d083f11`.
 
 ---
 
@@ -56,8 +56,9 @@ outstanding:
   laser and hand-aim, two-handed aim, weapon clone across swaps/drops/pickups
   and textures, haptics feel, tracking latency/judder.
 - **Roll:** tilt the head and confirm the world tilts the correct way and the
-  HUD stays fixed. If it is inverted, set `roll_sign = -1`; if the black
-  corners are visible in the lenses, note it for the stereo pass.
+  HUD stays fixed. The default is `roll_sign = -1`; if it is inverted on
+  device, set `+1`. If the black corners are visible in the lenses, note it
+  for the stereo pass.
 - After this run, create `BUG_FIXES.md` from the device findings.
 
 ## 6. Stereo

@@ -1192,7 +1192,7 @@ static BOOL  g_twoHanded    = FALSE;
    hand/gun pass keep the unrolled projection, so they stay correct relative
    to the head. `roll_sign` flips the direction on device if needed. */
 static BOOL  g_roll         = TRUE;
-static float g_rollSign     = 1.0f;
+static float g_rollSign     = -1.0f;
 
 /* Stereo experiment. 0 = mono (shipping), 1 = SBS, 2 = AER. AER alternates
    one eye per presented frame and offsets the view by +/- IPD/2 along the
@@ -4143,7 +4143,7 @@ static void ProbeKeys(PBYTE p)
     const int watch[] = {
         '0', 'F', 'M', 'H', 'V', 'T', 'N', 'J', 'K',
         VK_OEM_4, VK_OEM_6, VK_OEM_1, VK_OEM_7, VK_OEM_5, VK_OEM_3,
-        VK_OEM_PERIOD
+        VK_OEM_PERIOD, VK_OEM_2
     };
     const int watchN = (int)(sizeof(watch) / sizeof(watch[0]));
     BYTE now[256];
@@ -4321,6 +4321,9 @@ static void ProbeKeys(PBYTE p)
                 g_grabFrames = 1;
                 g_grabPair = TRUE;
                 Log("DUMP     armed: next two composited frames -> xops_frame_<n>.bmp");
+            } else if (vk == VK_OEM_2) {
+                g_roll = !g_roll;
+                Log("ROLL     %s  (sign %+.0f)", g_roll ? "on" : "off", g_rollSign);
             } else if (vk == VK_OEM_3) {
                 g_cluster = (g_cluster + 1) % 3;
                 SteerRecentre();
@@ -4388,6 +4391,7 @@ static void ProbeKeys(PBYTE p)
     p[VK_OEM_4] = 0; p[VK_OEM_6] = 0; p[VK_OEM_1] = 0; p[VK_OEM_7] = 0;
     p[VK_OEM_5] = 0; p[VK_OEM_3] = 0;
     p[VK_OEM_PERIOD] = 0;
+    p[VK_OEM_2] = 0;
     /* Stage-3 comparison switch, always live so it works before probe mode. */
     p['F'] = 0;
     /* Fullscreen-resolution experiment; applies at the next Reset. */
@@ -6769,12 +6773,19 @@ static void DrawHandAndLaserWorld(void* dev)
        geometry the opposite way so it keeps its tracked orientation instead
        of being rolled twice. */
     {
-        const float ha = -SpriteRoll();
+        const float sprite = SpriteRoll();
+        /* Camera space is y-up while the presented sprite is y-down, so the
+           viewport flips the rotation direction. Use +sprite here so the
+           projected hand rotation cancels the sprite's -sprite on screen. */
+        const float ha = sprite;
         if (fabsf(ha) > 0.0005f) {
             const float c = cosf(ha), s = sinf(ha);
             view.m[0][0] = c;  view.m[0][1] = s;
             view.m[1][0] = -s; view.m[1][1] = c;
         }
+        if (g_roll && (g_frame % 120) == 0)
+            LogD("ROLL     sprite %+.1f deg  hand view %+.1f deg",
+                 sprite * 57.29578f, ha * 57.29578f);
     }
     /* World must stay identity: no leftover model matrix. Do not copy the
        translated view into it or the eye shift is applied twice. */
