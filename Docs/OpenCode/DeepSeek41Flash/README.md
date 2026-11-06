@@ -233,6 +233,48 @@ converted to opaque black during upload, so it stays readable both on the
 panels and on bright walls. The panel texture is separate from the text texture
 so its alpha does not wash out the glyphs.
 
+**Virtual hands + laser (5-6 Nov).** Both controller hands and the targeting
+laser are real 3D geometry in the game's own pipeline. The important discovery:
+XOPS's world vertices are **XYZ + TEX1** (stride 20, object space), and each
+object is placed with its own **world matrix**. D3D then applies the view and
+the 4:3 projection (`1.17726 / 1.56969 / 1.00125 / -0.10013`, near 0.1,
+far 80). The hand/laser therefore have to reset **all three** transforms:
+
+- `DrawHandAndLaserWorld` runs from the first 3D HUD weapon-model draw, while
+  the 640x480 target and D16 depth buffer are still bound, so it lands in the
+  gameplay layer underneath the HUD and not on top of it. It saves the device
+  world/view/projection and sets **world = view = identity** plus the captured
+  game projection, then draws with `XYZ | DIFFUSE | TEX1` (FVF 0x142, 24-byte
+  vertices). Forgetting the world matrix was the bug that made the hands
+  invisible: the leftover object matrix moved them out of the depth range.
+- **Both hands** are solid 0.08 x 0.14 x 0.14 m 3D boxes at their own XrApi
+  poses, each with six textured faces and a generated grey/black glove
+  texture. The dominant hand gets `hand_flip`; the off-hand does not.
+- **Laser:** a single continuous camera-facing 3D triangle strip sharing one
+  right vector (so joints do not gap), 30 m long; width is scaled with
+  distance so it reads as a roughly 2px beam. Depth test is `LESSEQUAL`,
+  Z-write is off for the beam and on for the hand boxes, so walls really cut
+  the laser off and hide a hand behind geometry.
+- **Zoom:** Y toggles the game's zoom and hides the laser; the hands stay.
+- **Fallback:** if the XrApi tester sends no hand position, a default
+  view-space offset is used so the desktop test is still visible.
+
+**Hand config.** `config.txt` is looked up **one directory above the game
+folder** (for example `E:\tmp\Q3Mods\config.txt` when the game is
+`E:\tmp\Q3Mods\xops096`), so a game update does not overwrite it. It is created
+with defaults if missing:
+
+```
+handedness = right
+hand_flip = false
+```
+
+`handedness` selects the dominant hand for the laser and the initial
+shoot/fire-mode trigger swap (`N` still toggles both in-session).
+`hand_flip` rotates the dominant virtual hand/gun 180 degrees around its
+**roll/forward axis only** - not pitch or yaw - matching the HWXR/Shogo
+convention. The off-hand stays unflipped.
+
 The game's own 3D HUD weapon-slot draws are **indexed** draws and are left
 untouched; only the stride-28 2D `DrawPrimitiveUP` HUD set is replaced. The
 crosshair's four UP line draws at `(317..323, 237..243)` are removed. **Still
@@ -269,6 +311,15 @@ tests without a headset or fake XrApi data, and pauses synthetic VR input.
 **MODE_VR 0 screens always keep desktop input** (title, objective, menus,
 death, victory) regardless of that toggle.
 
+**The game no longer steals the desktop cursor.** XOPS recentres the pointer
+with `SetCursorPos` every frame to read its mouse delta. When another window
+has focus, `hkSetCursorPos` now records the requested position and returns
+success **without** calling the real API, so the player's cursor stays where
+they left it and the desktop is usable while the game keeps running in the
+background. `hkGetCursorPos` still hands the game back exactly those
+coordinates, so its computed look delta is zero and the view does not spin
+when focus returns.
+
 **Crash fixed, same day.** The probe then APPCRASHed three times in the CRT
 `memcpy` at `d3d8.dll` RVA `0x985e`. The caller was `BuildSnapshot()` in the
 inherited camera-hunt scanner: `VirtualQuery` and a raw `memcpy` of a game
@@ -280,7 +331,7 @@ and FOV code was not implicated. See `WORKLOG.md` for the evidence.
 **Second failure fixed: fullscreen Reset.** On the title-to-level transition
 XOPS called `Reset(640x480, windowed=0)` and our `FitWindow` had resized a
 160x28 transition window to 1920x1080, so the Reset returned
-`D3DERR_DEVICELOST` (`0x88760868`) and XOPS raised its “Reset” error. Both
+`D3DERR_DEVICELOST` (`0x88760868`) and XOPS raised its â€œResetâ€ error. Both
 `FitWindow` and the `Present` destination-rect override are now skipped when
 the device is **fullscreen** (`g_deviceWindowed`, tracked from `CreateDevice`
 and `Reset`).
@@ -400,8 +451,8 @@ deployed copy with SHA-256 (`match=True`). The DLL is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  5 2026 22:40:22`, SHA-256
-`8cfdeb585feed90573fe17c0d7e574e1f8178f2704ddff3470b186c17c9b3629`,
+Current handover build: `built Nov  6 2026 00:04:41`, SHA-256
+`ef596da3b33c4928e68f5a7b0da9d6903be4cb08d0df54607372301565932c2d`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---

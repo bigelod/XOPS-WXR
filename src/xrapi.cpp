@@ -404,9 +404,8 @@ int XrPoll(XrPose* out)
     }
 
     {
-        float u[3];
-        ToGameSpace(g_rQuat, g_rPos, out->rF, u, out->rP);
-        ToGameSpace(g_lQuat, g_lPos, out->lF, u, out->lP);
+        ToGameSpace(g_rQuat, g_rPos, out->rF, out->rU, out->rP);
+        ToGameSpace(g_lQuat, g_lPos, out->lF, out->lU, out->lP);
     }
 
     out->moveX = g_lStick[0]; out->moveY = g_lStick[1];

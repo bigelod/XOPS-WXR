@@ -35,6 +35,7 @@ typedef struct {
 
     float rF[3], rP[3];     /* right (dominant) hand - this is what aims */
     float lF[3], lP[3];     /* left hand */
+    float rU[3], lU[3];     /* hand up vectors, for the virtual hand roll */
 
     float moveX, moveY;     /* left stick  (x right, y forward) */
     float turnX, turnY;     /* right stick */

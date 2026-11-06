@@ -333,7 +333,7 @@ h=18  w=0  weight=500  italic=0  charset=128 (Shift-JIS)  face=<garbled Japanese
 ```
 
 It is created before `EnsureInit`, so the hook is installed in `DllMain` (an
-IAT write, not `LoadLibrary`). Scaling it to 1.25× (`h 18 -> 22`) made the text
+IAT write, not `LoadLibrary`). Scaling it to 1.25Ã— (`h 18 -> 22`) made the text
 **worse**: the HUD uses a bitmap glyph atlas drawn as many tiny quads, so the
 larger font changes the atlas and layout rather than adding clean detail.
 Reverted to 1.0.
@@ -528,6 +528,90 @@ the word centred above the panels in a larger status font with the same dark
 outline. **Font size:** big = HUD region height `/ 10`, status = big `* 7/5`
 (slightly smaller for VR).
 
+### Virtual hands + laser
+
+The first pass drew the hand/laser as a screen-space overlay. That was wrong:
+it could not intersect or be occluded by the map. A second pass tried
+per-vertex depth on XYZRHW, but the world depth still did not match.
+
+The decisive finding: **the world vertices are XYZ + TEX1 (stride 20), and
+every object is placed by its own world matrix.** The dump showed `x,y,z,u,v`
+with small object-space z values, and the device still had a model matrix
+bound at the HUD-model draw. The hand pass must therefore reset **world as
+well as view**:
+
+- `DrawHandAndLaserWorld` is called from the first 3D HUD weapon-model draw,
+  while the 640x480 target and D16 depth are bound, so it is in the gameplay
+  layer under the HUD rather than on top of it. It saves the
+  world/view/projection, sets **world = view = identity** and the captured
+  game projection, and draws `XYZ | DIFFUSE | TEX1` (FVF 0x142, 24-byte
+  vertices).
+- **Both hands** are solid 0.08 x 0.14 x 0.14 m 3D boxes at their own XrApi
+  poses, with six textured faces and a generated grey/black glove texture.
+  The dominant hand applies `hand_flip`; the off-hand does not.
+- **Laser:** one continuous camera-facing triangle strip with a shared right
+  vector, 30 m long; width is scaled with distance so it reads about 2 px. The
+  depth test is real D3D depth (`LESSEQUAL`), Z-write off for the beam, on for
+  the hands. A wall cuts the beam off.
+- Y zoom hides the laser (hands stay).
+- If the tester sends no hand position, a fallback view-space offset is used.
+
+**Config:** `config.txt` one directory above the game folder (created if
+missing):
+
+```
+handedness = right   # or left
+hand_flip = false    # true = 180-degree roll of the dominant hand/gun only
+```
+
+`handedness` sets the dominant hand (laser + initial trigger swap); `N` toggles
+both in-session. `hand_flip` negates the dominant hand's up and right vectors
+about forward, i.e. roll only.
+
+**The bug that hid the hands.** The first 3D-pass version reset only the view
+and projection. The leftover **world** matrix from the last model draw then
+transformed the hand vertices out of the depth range, so the pass drew and was
+then invisible. A full-screen magenta test quad with depth off also vanished,
+which proved the pass itself was fine and the transform was wrong. Setting
+`D3DTS_WORLD` to identity made both hands and the laser appear. The world
+matrix should have been the *first* suspect: the HUD-model `WORLDZ` dump shows
+object-space coordinates (`z` around -0.1..0.1), which only make sense with a
+model matrix.
+
+The game also clears after the hand pass (`flags=0x2` depth only, twice per
+frame; the `flags=0x3` colour clear is the **next** frame's start-of-scene
+clear and happens before `BeginScene`). Those depth clears are harmless; the
+hands survive to `Present`.
+
+**Verification:** a mock feeder drove both hands with independent X/Y/Z
+sinewaves (and small yaw/pitch). The log showed both raw positions changing on
+all three axes, e.g.:
+
+```
+HAND raw L -0.392 -0.060  0.551   R  0.419 -0.086  0.512
+HAND raw L -0.339 -0.112  0.337   R  0.171 -0.105  0.313
+HAND raw L -0.120 -0.193  0.432   R  0.190 -0.183  0.537
+```
+
+The one-time matrix log confirmed `HAND view` is identity and `HAND proj` is
+`1.17726 / 1.56969 / 1.00125 / -0.10013`. In the wall-facing test frame the
+laser stopped at the wall instead of crossing it, and the hand boxes were
+partially hidden by it, confirming real depth intersection.
+
+### Background cursor (6 Nov)
+
+XOPS recentres the pointer with `SetCursorPos` every frame and reads it back
+to compute its look delta. With "run while unfocused" on, it did that even
+when another window had focus, so it dragged the owner's desktop cursor into
+the game window and made the machine unusable while the game kept running.
+
+`hkSetCursorPos` now checks the **real** foreground window (the unhooked
+`GetForegroundWindow`). If it is not the game window, it records the requested
+position for the fake look delta and returns success **without** calling the
+real API. The desktop cursor therefore stays where the player left it, the
+game still sees a zero delta (because `hkGetCursorPos` returns exactly what
+was "set"), and refocusing does not snap the view.
+
 ### Verification
 
 Desktop run, `building.ext`, 1920x1080 windowed desktop (the device container
@@ -575,8 +659,8 @@ button pulses.
 
 ### Build
 
-`built Nov  5 2026 22:40:22`, SHA-256
-`8cfdeb585feed90573fe17c0d7e574e1f8178f2704ddff3470b186c17c9b3629`,
+`built Nov  6 2026 00:04:41`, SHA-256
+`ef596da3b33c4928e68f5a7b0da9d6903be4cb08d0df54607372301565932c2d`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ### Open / next

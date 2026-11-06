@@ -1,4 +1,4 @@
-// XOPS-WXR - d3d8 diagnostic probe
+﻿// XOPS-WXR - d3d8 diagnostic probe
 //
 // A drop-in d3d8.dll proxy that logs everything we need to know about how XOPS
 // drives Direct3D, then forwards every call to the real d3d8.dll.
@@ -41,6 +41,7 @@
 #include <intrin.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 #include <math.h>
 
 static void ResolveForwards(void);
@@ -75,6 +76,17 @@ static const char* DofName(int m);
 
 static void SteerLog(void);
 static void FitWindow(HWND h);
+static void DrawHandAndLaserWorld(void* dev);
+static void ManualHandKeys(PBYTE p);
+static void ManualHandApply(void);
+static void RecaptureWeapon(void);
+static void SteerAimWrite(void);
+static void CaptureHudBatch(void* dev, UINT start, UINT count);
+static void CaptureHudBatchUP(void* dev, const void* data, UINT count);
+static void ReleaseHudBatches(void);
+static void HandViewPose(const float* hp, const float* hf, const float* hu,
+                         BOOL isRight, BOOL flip,
+                         float vp[3], float vf[3], float vu[3], float vr[3]);
 static UINT PrimVertexCount(DWORD prim, UINT primCount);
 static BOOL SafeWrite(UINT_PTR a, float v);
 static UINT_PTR WatchAddr(int i);
@@ -92,6 +104,7 @@ typedef struct { float m[4][4]; } D3DMATRIX8;
 typedef struct { LONG x1, y1, x2, y2; } D3DRECT8;
 typedef struct { int Pitch; void* pBits; } D3DLOCKED_RECT8;
 typedef struct { UINT X, Y, Width, Height; float MinZ, MaxZ; } D3DVIEWPORT8;
+typedef struct { float x, y, z; DWORD color; float u, v; } CompVert3D;
 
 typedef HRESULT (__stdcall *PFN_GetBackBuffer)(void*, UINT, DWORD, void**);
 typedef HRESULT (__stdcall *PFN_CreateTexture)(void*, UINT, UINT, UINT, DWORD,
@@ -104,11 +117,18 @@ typedef HRESULT (__stdcall *PFN_CopyRects)(void*, void*, const RECT*, UINT,
 typedef HRESULT (__stdcall *PFN_SetRenderTarget)(void*, void*, void*);
 typedef HRESULT (__stdcall *PFN_GetRenderTarget)(void*, void**);
 typedef HRESULT (__stdcall *PFN_GetDepthStencilSurface)(void*, void**);
+typedef HRESULT (__stdcall *PFN_GetStreamSource)(void*, UINT, void**, UINT*);
+typedef HRESULT (__stdcall *PFN_DrawIndexedPrimitiveUP)(void*, DWORD, UINT, UINT,
+    UINT, const void*, DWORD, const void*, UINT);
+static PFN_DrawIndexedPrimitiveUP o_DrawIndexedPrimitiveUP = NULL;
+typedef HRESULT (__stdcall *PFN_GetIndices)(void*, void**, UINT*);
+static PFN_GetIndices          o_GetIndices          = NULL;
 typedef HRESULT (__stdcall *PFN_SetViewport)(void*, const D3DVIEWPORT8*);
 typedef HRESULT (__stdcall *PFN_GetViewport)(void*, D3DVIEWPORT8*);
 typedef HRESULT (__stdcall *PFN_SetRenderState)(void*, DWORD, DWORD);
 typedef HRESULT (__stdcall *PFN_GetRenderState)(void*, DWORD, DWORD*);
 typedef HRESULT (__stdcall *PFN_SetTexture)(void*, DWORD, void*);
+typedef HRESULT (__stdcall *PFN_GetTexture)(void*, DWORD, void**);
 typedef HRESULT (__stdcall *PFN_SetTextureStageState)(void*, DWORD, DWORD, DWORD);
 typedef HRESULT (__stdcall *PFN_GetTextureStageState)(void*, DWORD, DWORD, DWORD*);
 typedef HRESULT (__stdcall *PFN_CreateStateBlock)(void*, DWORD, DWORD*);
@@ -160,6 +180,7 @@ enum {
     VT_DEV_ENDSCENE           = 35,   // 0x8C
     VT_DEV_CLEAR              = 36,   // 0x90  <- sync pixel, no lock needed
     VT_DEV_SETTRANSFORM       = 37,   // 0x94  <- confirmed in XOPS.exe
+    VT_DEV_GETTRANSFORM       = 38,   // 0x98
     VT_DEV_SETVIEWPORT        = 40,   // 0xA0
     VT_DEV_GETVIEWPORT        = 41,   // 0xA4
     VT_DEV_SETRENDERSTATE     = 50,   // 0xC8  <- confirmed in XOPS.exe
@@ -173,6 +194,7 @@ enum {
     VT_DEV_DRAWPRIMITIVE      = 70,   // 0x118
     VT_DEV_DRAWINDEXEDPRIM    = 71,   // 0x11C
     VT_DEV_DRAWPRIMITIVEUP    = 72,   // 0x120 <- the loc_401396 draw call
+    VT_DEV_DRAWINDEXEDPRIMUP  = 73,   // 0x124
     VT_DEV_SETVERTEXSHADER    = 76    // 0x130
 };
 
@@ -197,9 +219,12 @@ enum {
 #define D3DFMT_D16             80
 #define D3DCLEAR_ZBUFFER       0x00000002
 #define D3DPT_TRIANGLESTRIP     5
+#define D3DPT_TRIANGLELIST      4
 #define D3DCULL_NONE            1
+#define D3DCMP_LESSEQUAL        4
 #define D3DBLEND_SRCALPHA       5
 #define D3DBLEND_INVSRCALPHA    6
+#define D3DBLEND_ONE            2
 #define D3DBLENDOP_ADD          1
 #define D3DSHADE_GOURAUD        2
 #define D3DFILL_SOLID           3
@@ -223,10 +248,12 @@ enum {
 #define D3DTEXF_NONE            0
 #define D3DTEXF_POINT           1
 #define D3DTADDRESS_CLAMP       3
+#define D3DTADDRESS_WRAP        1
 #define D3DRS_FILLMODE          8
 #define D3DRS_SHADEMODE         9
 #define D3DRS_ZENABLE           7
 #define D3DRS_ZWRITEENABLE      14
+#define D3DRS_ZFUNC             23
 #define D3DRS_ALPHATESTENABLE   15
 #define D3DRS_SRCBLEND          19
 #define D3DRS_DESTBLEND         20
@@ -245,6 +272,7 @@ enum {
 
 #define D3DTS_VIEW        2
 #define D3DTS_PROJECTION  3
+#define D3DTS_WORLD       256
 #define D3DFVF_XYZRHW     0x004
 #define D3DCLEAR_TARGET   0x00000001
 #define D3DCOLOR_XRGB(r,g,b) ((DWORD)(((DWORD)(r) << 16) | \
@@ -277,6 +305,7 @@ typedef HRESULT (__stdcall *PFN_EndScene)(void*);
 typedef HRESULT (__stdcall *PFN_Clear)(void*, DWORD, const D3DRECT8*, DWORD,
                                        DWORD, float, DWORD);
 typedef HRESULT (__stdcall *PFN_SetTransform)(void*, DWORD, const D3DMATRIX8*);
+typedef HRESULT (__stdcall *PFN_GetTransform)(void*, DWORD, D3DMATRIX8*);
 typedef HRESULT (__stdcall *PFN_DrawPrimitiveUP)(void*, DWORD, UINT, const void*, UINT);
 typedef HRESULT (__stdcall *PFN_DrawPrimitive)(void*, DWORD, UINT, UINT);
 typedef HRESULT (__stdcall *PFN_DrawIndexedPrim)(void*, DWORD, UINT, UINT, UINT, UINT);
@@ -304,6 +333,7 @@ static PFN_BeginScene       o_BeginScene       = NULL;
 static PFN_EndScene         o_EndScene         = NULL;
 static PFN_Clear            o_Clear            = NULL;
 static PFN_SetTransform     o_SetTransform     = NULL;
+static PFN_GetTransform     o_GetTransform     = NULL;
 static PFN_DrawPrimitiveUP  o_DrawPrimitiveUP  = NULL;
 static PFN_DrawPrimitive    o_DrawPrimitive    = NULL;
 static PFN_DrawIndexedPrim  o_DrawIndexedPrim  = NULL;
@@ -312,6 +342,7 @@ static PFN_SetVertexShader  o_SetVertexShader  = NULL;
 
 /* Target-resolution composite (read-only slots, captured in HookDevice). */
 static PFN_GetBackBuffer       o_GetBackBuffer       = NULL;
+static PFN_GetStreamSource     o_GetStreamSource     = NULL;
 static PFN_CreateTexture       o_CreateTexture       = NULL;
 static PFN_CreateDepthStencilSurface o_CreateDepthStencilSurface = NULL;
 static PFN_CreateImageSurface  o_CreateImageSurface  = NULL;
@@ -324,6 +355,7 @@ static PFN_GetViewport         o_GetViewport         = NULL;
 static PFN_SetRenderState      o_SetRenderState      = NULL;
 static PFN_GetRenderState      o_GetRenderState      = NULL;
 static PFN_SetTexture          o_SetTexture          = NULL;
+static PFN_GetTexture          o_GetTexture          = NULL;
 static PFN_SetTextureStageState o_SetTextureStageState = NULL;
 static PFN_GetTextureStageState o_GetTextureStageState = NULL;
 
@@ -345,6 +377,8 @@ static long g_xfView = 0, g_xfProj = 0, g_xfWorld = 0, g_xfOther = 0;
 static D3DMATRIX8 g_lastView;
 static BOOL       g_haveView   = FALSE;
 static long       g_lastViewAt = -1;
+static D3DMATRIX8 g_lastProj;
+static BOOL       g_haveProj   = FALSE;
 
 // Which vertex format each draw used. XYZRHW means the game transformed the
 // vertices itself on the CPU; XYZ means it relied on the device - and
@@ -1040,6 +1074,17 @@ static const char* WeaponNameShort(int id, char* out, size_t n)
     return out;
 }
 
+static const char* ActiveWeaponName(void)
+{
+    static char nm[64] = "?";
+    HudVals v;
+    int id;
+    if (!ReadHudVals(&v)) return nm;
+    id = v.sel ? v.w1 : v.w0;
+    WeaponNameShort(id, nm, sizeof(nm));
+    return nm;
+}
+
 static const char* StateName(int health)
 {
     return health >= 0x50 ? "FINE"
@@ -1087,9 +1132,90 @@ static int     g_hudBigH  = 0, g_hudSmallH = 0, g_hudStatusH = 0;
 static HBRUSH  g_panelShadowBrush = NULL, g_panelFillBrush = NULL;
 static HPEN    g_panelBorderPen   = NULL;
 
+/* Virtual dominant hand + laser pointer. */
+static void*   g_handTex   = NULL;
+static void*   g_whiteTex  = NULL;
+static int     g_handedness = 0;     /* 0 = right, 1 = left */
+static BOOL    g_handFlip   = FALSE; /* 180-degree roll of the hand model */
+
+/* Manual right-hand override for test driving, active only while the "0"
+   user-control mode is ON. See ManualHandKeys for the key map.
+   Positions/orientations are in XOPS space (+X right, +Y up, +Z forward),
+   because that is what XrPoll already delivers. */
+static BOOL    g_manualRight = FALSE;
+static float   g_manualPos[3] = { 0.22f, -0.16f, 0.45f };
+static float   g_manualYaw   = 0.0f;
+static float   g_manualPitch = 0.0f;
+static float   g_manualRoll  = 0.0f;
+
+/* Per-weapon visual offset of the dominant hand box. The cloned gun stays at
+   the base hand pose, so Q+numpad slides the hand against the gun; T saves
+   the offset for the active weapon. */
+static float   g_handAdj[3] = { 0.0f, 0.0f, 0.0f };
+static float   g_handAdjTable[32][3];
+static int     g_adjWeapon = -1;
+
+/* Set while a shot is aimed at the hand so the view can be restored before
+   the world is drawn. */
+static BOOL    g_aimRestore = FALSE;
+static float   g_aimSavedA[2] = { 0.0f, 0.0f };
+static float   g_aimSavedB[2] = { 0.0f, 0.0f };
+static BOOL    g_aimSavedBok = FALSE;
+static BOOL    g_zoomOn     = FALSE; /* Y toggles the game's zoom; hide laser */
+static BOOL    g_fireHeld   = FALSE; /* shoot trigger / mouse button this frame */
+static long    g_flashFrames = 0;    /* frames left to show the muzzle flash */
+static BOOL    g_handLogged = FALSE;
+static BOOL    g_handDrawnThisFrame = FALSE;
+
+/* Draw-elimination diagnostic: after the world/hand pass, number every draw
+   and suppress one per 3 s. When the spinning inventory gun vanishes, the
+   logged index is its draw. */
+static int     g_3dIdx = 0;
+static int     g_3dPrevN = 0;
+static int     g_3dShown = -1;
+static BOOL    g_3dFreeze = FALSE;   /* N marks the current draw */
+static int     g_3dFreezeIdx = -1;
+static BOOL    g_3dManual = FALSE;   /* J/K stepped the selection */
+static int     g_3dSel    = 96;      /* identified inventory-gun draw */
+static BOOL    g_3dAttach = TRUE;    /* capture the N-2 weapon draw automatically */
+static BOOL    g_cloneValid = FALSE; /* one-shot weapon clone captured */
+static BOOL    g_needCapture = FALSE;/* waiting for the next weapon draw */
+static BOOL    g_tailDump = FALSE;   /* dump the tail draws once */
+
+typedef struct { int idx; void* vb; UINT numV, prim; void* tex; } TailDraw;
+static TailDraw g_tail[16];
+static int g_tailHead = 0;
+
+static void LogDrawSource(const void* ra, const char* path,
+                          UINT count, UINT stride)
+{
+    if (!g_3dAttach || g_cloneValid || g_3dIdx != g_3dSel) return;
+    Log("HIDE     draw %d source: %s caller IDA 0x%08IX count=%u stride=%u",
+        g_3dSel, path, ToIda((void*)ra), count, stride);
+}
+
+static BOOL HideThisDraw(void)
+{
+    const int idx = g_3dIdx++;
+    if (g_3dAttach) return FALSE;      /* found it: keep the HUD copy */
+    if (g_3dPrevN <= 0) return FALSE;
+    if (g_3dManual) return idx == g_3dSel;
+    if (idx != (int)((GetTickCount() / 3000u) % (DWORD)g_3dPrevN)) return FALSE;
+    if (idx != g_3dShown) {
+        g_3dShown = idx;
+        Log("HIDE     3D draw %d of %d", idx, g_3dPrevN);
+    }
+    return TRUE;
+}
+
 static void ReleaseIUnknown(void* p)
 {
     if (p) ((PFN_Release)(*(void***)p)[VT_IUNKNOWN_RELEASE])(p);
+}
+
+static void AddRefIUnknown(void* p)
+{
+    if (p) ((ULONG (__stdcall*)(void*))(*(void***)p)[1])(p);
 }
 
 static HRESULT TexGetSurfaceLevel(void* tex, UINT level, void** out)
@@ -1977,7 +2103,16 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
         ProbeKeys(p);          /* our own control keys, read then removed */
         VrExclusiveKeys(p);    /* then the game loses the desktop keyboard */
         StickKeys(p);          /* left stick -> movement */
+        ManualHandKeys(p);     /* numpad right hand, 0 mode only */
         VrInputKeys(p);        /* buttons, walk, shoot, zoom, edges */
+        /* Fire state for the muzzle flash, and the hand-aim shot. In VR the
+           trigger sets LButton above; in user mode it is the real mouse. */
+        g_fireHeld = (p[VK_LBUTTON] & 0x80) ? TRUE : FALSE;
+        if (g_fireHeld) g_flashFrames = 4;
+        /* User-control mode: fire with the mouse, but land the shot on the
+           right hand's laser. The view is restored at BeginScene. */
+        if (!g_vrExclusive && g_manualRight && g_fireHeld)
+            SteerAimWrite();
 
         /* Anything still held after that is real input - including the mouse
            buttons, which live in this same array. */
@@ -2068,8 +2203,20 @@ static HWND WINAPI hkGetForegroundWindow(void)
 
 static BOOL WINAPI hkSetCursorPos(int x, int y)
 {
+    HWND fg = NULL;
+
     ++g_inCalls[IN_SETCURSORPOS]; ++g_inFrame[IN_SETCURSORPOS];
     g_lastCursor.x = x; g_lastCursor.y = y; g_cursorKnown = TRUE;
+
+    /* Never move the real desktop cursor while another window has focus. The
+       game still gets a consistent answer: hkGetCursorPos hands back exactly
+       these coordinates, so its look delta stays zero, but the player's
+       cursor stays where they left it and the desktop remains usable while
+       the game keeps running in the background. */
+    if (g_inReal[IN_GETFOREGROUNDWINDOW])
+        fg = ((PFN_GetForegroundWindow)g_inReal[IN_GETFOREGROUNDWINDOW])();
+    if (g_gameWnd && fg != g_gameWnd) return TRUE;
+
     return ((PFN_SetCursorPos)g_inReal[IN_SETCURSORPOS])(x, y);
 }
 
@@ -3055,6 +3202,276 @@ static const char* DofName(int m)
                            : "yaw and pitch only";
 }
 
+/* ---------------------------------------------------------------------------
+ * HAND AIM - point the game's shot at the laser, render from the head
+ *
+ * The game computes its shot from the player's yaw/pitch. While the shoot
+ * trigger is held we overwrite those fields with the direction from the eyes
+ * to the dominant hand's laser endpoint. This runs during the input phase,
+ * i.e. before the game's update/shot step. SteerTick runs again at
+ * BeginScene and writes the HMD orientation back before the world is drawn,
+ * so the shot follows the hand but the frame is still rendered from the
+ * head's own 6DOF pose.
+ * ------------------------------------------------------------------------- */
+
+static long g_aimWrites = 0;
+
+/* Manual right-hand pose. Only live while the "0" user-control mode is ON;
+   in VR the XrApi pose always wins. */
+static void ManualHandApply(void)
+{
+    const float cy = cosf(g_manualYaw), sy = sinf(g_manualYaw);
+    const float cp = cosf(g_manualPitch), sp = sinf(g_manualPitch);
+    const float cr = cosf(g_manualRoll),  sr = sinf(g_manualRoll);
+    float fx, fy, fz, ux, uy, uz, cx, cy2, cz;
+
+    g_pose.rP[0] = g_manualPos[0];
+    g_pose.rP[1] = g_manualPos[1];
+    g_pose.rP[2] = g_manualPos[2];
+    /* XOPS axes: +X right, +Y up, +Z forward. Positive yaw turns right. */
+    fx =  sy * cp;
+    fy =  sp;
+    fz =  cy * cp;
+    ux = -sy * sp;
+    uy =  cp;
+    uz = -cy * sp;
+    /* Roll = rotate the up vector around the forward axis (Rodrigues;
+       up is perpendicular to forward, so the parallel term drops out). */
+    cx = fy * uz - fz * uy;
+    cy2 = fz * ux - fx * uz;
+    cz = fx * uy - fy * ux;
+    g_pose.rF[0] = fx;  g_pose.rF[1] = fy;  g_pose.rF[2] = fz;
+    g_pose.rU[0] = ux * cr + cx * sr;
+    g_pose.rU[1] = uy * cr + cy2 * sr;
+    g_pose.rU[2] = uz * cr + cz * sr;
+}
+
+/* Default desktop-test pose: head at the origin, both hands out in front.
+   Used when user-control mode is enabled without any XrApi stream. */
+static void ManualDefaultPose(void)
+{
+    ZeroMemory(&g_pose, sizeof(g_pose));
+    g_pose.valid = TRUE;
+    g_pose.headF[2] = 1.0f;
+    g_pose.headU[1] = 1.0f;
+
+    g_pose.lP[0] = -0.22f; g_pose.lP[1] = -0.16f; g_pose.lP[2] = 0.45f;
+    g_pose.lF[2] = 1.0f;
+    g_pose.lU[1] = 1.0f;
+
+    g_pose.rP[0] =  0.22f; g_pose.rP[1] = -0.16f; g_pose.rP[2] = 0.45f;
+    g_pose.rF[2] = 1.0f;
+    g_pose.rU[1] = 1.0f;
+
+    g_manualPos[0] = 0.22f;
+    g_manualPos[1] = -0.16f;
+    g_manualPos[2] = 0.45f;
+    g_manualYaw = 0.0f;
+    g_manualPitch = 0.0f;
+    g_manualRoll = 0.0f;
+
+    g_posed = TRUE;
+    ManualHandApply();
+}
+
+/* Copy the live XrApi right-hand pose into the manual values. */
+static void ManualHandSync(void)
+{
+    const float fx = g_pose.rF[0], fy = g_pose.rF[1], fz = g_pose.rF[2];
+    float baseUp[3], liveUp[3], cross[3], dot;
+    float cy, sy, cp, sp;
+
+    g_manualPos[0] = g_pose.rP[0];
+    g_manualPos[1] = g_pose.rP[1];
+    g_manualPos[2] = g_pose.rP[2];
+
+    if (fx*fx + fy*fy + fz*fz < 1e-6f) return;
+    g_manualYaw   = atan2f(fx, fz);          /* XOPS: +X is right */
+    g_manualPitch = asinf(fy < -1.0f ? -1.0f : fy > 1.0f ? 1.0f : fy);
+    g_manualRoll  = 0.0f;
+
+    /* Recover any roll the controller already had, so the hand does not snap
+       upright on the first frame of user mode. */
+    cy = cosf(g_manualYaw);  sy = sinf(g_manualYaw);
+    cp = cosf(g_manualPitch); sp = sinf(g_manualPitch);
+    baseUp[0] = -sy * sp;
+    baseUp[1] =  cp;
+    baseUp[2] = -cy * sp;
+    liveUp[0] = g_pose.rU[0];
+    liveUp[1] = g_pose.rU[1];
+    liveUp[2] = g_pose.rU[2];
+    cross[0] = baseUp[1]*liveUp[2] - baseUp[2]*liveUp[1];
+    cross[1] = baseUp[2]*liveUp[0] - baseUp[0]*liveUp[2];
+    cross[2] = baseUp[0]*liveUp[1] - baseUp[1]*liveUp[0];
+    dot = baseUp[0]*liveUp[0] + baseUp[1]*liveUp[1] + baseUp[2]*liveUp[2];
+    g_manualRoll = atan2f(cross[0]*fx + cross[1]*fy + cross[2]*fz, dot);
+}
+
+/* Numpad test drive, "0" user-control mode only:
+     no E              hold E
+     8  pitch up       8  move up   (+Y)
+     5  pitch down     5  move down (-Y)
+     4  yaw left       4  move left (-X)
+     6  yaw right      6  move right(+X)
+     7  roll anticlock 7  move back (+Z)
+     9  roll clockwise 9  move fwd  (-Z)
+   E is used instead of Shift because Shift is bound in the game (the
+   Shift+numpad combination was reaching XOPS and showing its own model).
+   The numpad keys are blocked from the game whenever user control is ON. */
+static void ManualHandKeys(PBYTE p)
+{
+    const float dt = 1.0f / 60.0f;
+    const float angRate = 0.7853982f;   /* 45 deg/s */
+    const float moveRate = 0.35f;       /* m/s */
+    const BOOL move = (p['E'] & 0x80) ? TRUE : FALSE;
+    const BOOL adj  = (p['Q'] & 0x80) ? TRUE : FALSE;
+    const BOOL k8 = (p[VK_NUMPAD8] & 0x80) ? TRUE : FALSE;
+    const BOOL k5 = (p[VK_NUMPAD5] & 0x80) ? TRUE : FALSE;
+    const BOOL k4 = (p[VK_NUMPAD4] & 0x80) ? TRUE : FALSE;
+    const BOOL k6 = (p[VK_NUMPAD6] & 0x80) ? TRUE : FALSE;
+    const BOOL k7 = (p[VK_NUMPAD7] & 0x80) ? TRUE : FALSE;
+    const BOOL k9 = (p[VK_NUMPAD9] & 0x80) ? TRUE : FALSE;
+    static long logCount = 0;
+
+    if (!g_manualRight && !adj) return;
+
+    /* Block the numpads so the game never sees them while user control is
+       on, whether E is held or not. Read them into locals first. */
+    p[VK_NUMPAD5] = 0; p[VK_NUMPAD7] = 0; p[VK_NUMPAD8] = 0;
+    p[VK_NUMPAD9] = 0; p[VK_NUMPAD4] = 0; p[VK_NUMPAD6] = 0;
+
+    /* Q + numpad slides the hand box only; the cloned gun stays put. */
+    if (adj) {
+        const float r = moveRate * dt;
+        p['Q'] = 0;
+        if (k8) g_handAdj[1] += r;
+        if (k5) g_handAdj[1] -= r;
+        if (k4) g_handAdj[0] -= r;
+        if (k6) g_handAdj[0] += r;
+        if (k9) g_handAdj[2] += r;
+        if (k7) g_handAdj[2] -= r;
+        if ((++logCount % 30) == 0)
+            Log("HAND     adj % .3f % .3f % .3f  (Q+numpad, T saves)",
+                g_handAdj[0], g_handAdj[1], g_handAdj[2]);
+        return;
+    }
+
+    if (!InGameplay()) return;
+
+    if (k8) {
+        if (move) g_manualPos[1] += moveRate * dt;
+        else      g_manualPitch += angRate  * dt;
+    }
+    if (k5) {
+        if (move) g_manualPos[1] -= moveRate * dt;
+        else      g_manualPitch -= angRate  * dt;
+    }
+    if (k4) {
+        if (move) g_manualPos[0] -= moveRate * dt;
+        else      g_manualYaw   -= angRate  * dt;   /* left  */
+    }
+    if (k6) {
+        if (move) g_manualPos[0] += moveRate * dt;
+        else      g_manualYaw   += angRate  * dt;   /* right */
+    }
+    if (k7) {
+        if (move) g_manualPos[2] -= moveRate * dt;   /* back  */
+        else      g_manualRoll  += angRate  * dt;    /* roll A */
+    }
+    if (k9) {
+        if (move) g_manualPos[2] += moveRate * dt;   /* fwd   */
+        else      g_manualRoll  -= angRate  * dt;    /* roll C */
+    }
+
+    if (g_manualPitch >  1.4f) g_manualPitch =  1.4f;
+    if (g_manualPitch < -1.4f) g_manualPitch = -1.4f;
+    while (g_manualRoll >  3.14159265f) g_manualRoll -= 6.2831853f;
+    while (g_manualRoll < -3.14159265f) g_manualRoll += 6.2831853f;
+
+    ManualHandApply();
+    if ((++logCount % 60) == 0)
+        Log("HAND     manual R pos % .3f % .3f % .3f"
+            "  yaw % .3f pitch % .3f roll % .3f",
+            g_manualPos[0], g_manualPos[1], g_manualPos[2],
+            g_manualYaw, g_manualPitch, g_manualRoll);
+}
+
+static void SteerAimWrite(void)
+{
+    float vp[3], vf[3], vu[3], vr[3];
+    float dir[3], len;
+    float yawBaseA, yawBaseB, pitchBase, yawOff, pitchOff;
+    BOOL domRight;
+
+    if (!g_steer) return;
+    if (!g_posed || !g_pose.valid) return;
+    if (!g_vrExclusive && !g_manualRight) return;
+    if (!g_haveRef) SteerRecentre();
+
+    domRight = (g_handedness == 0) ? TRUE : FALSE;
+    if (domRight)
+        HandViewPose(g_pose.rP, g_pose.rF, g_pose.rU, TRUE, g_handFlip,
+                     vp, vf, vu, vr);
+    else
+        HandViewPose(g_pose.lP, g_pose.lF, g_pose.lU, FALSE, g_handFlip,
+                     vp, vf, vu, vr);
+
+    /* The laser runs 30 m along the hand's forward; aim at that endpoint,
+       measured from the eyes at the view-space origin. */
+    dir[0] = vp[0] + vf[0] * 30.0f;
+    dir[1] = vp[1] + vf[1] * 30.0f;
+    dir[2] = vp[2] + vf[2] * 30.0f;
+    len = sqrtf(dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]);
+    if (len < 0.001f) return;
+    dir[0] /= len; dir[1] /= len; dir[2] /= len;
+    if (dir[2] <= 0.0f) return;        /* hand pointing behind the player */
+
+    if (g_vrExclusive) {
+        /* VR: the HMD orientation is the render pose; SteerTick writes it
+           back at BeginScene. */
+        yawBaseA  = g_refYaw  + g_turnYaw + g_yawSign * g_pose.headYaw;
+        yawBaseB  = g_refYawB + g_turnYaw + g_yawSign * g_pose.headYaw;
+        pitchBase = g_pitchSign * g_pose.headPitch;
+    } else {
+        /* User-control mode: the view is mouse-driven and there is no
+           SteerTick, so remember it and restore it before the draw. */
+        float ay, ap, by, bp;
+        if (!SafeRead(CamAddr(A_YAW), &ay)) return;
+        if (!SafeRead(CamAddr(A_PITCH), &ap)) return;
+        yawBaseA  = ay;
+        pitchBase = ap;
+        yawBaseB  = ay;
+        g_aimSavedA[0] = ay;
+        g_aimSavedA[1] = ap;
+        g_aimSavedBok = (SafeRead(CamAddr(B_YAW),   &by) &&
+                         SafeRead(CamAddr(B_PITCH), &bp)) ? TRUE : FALSE;
+        if (g_aimSavedBok) {
+            g_aimSavedB[0] = by;
+            g_aimSavedB[1] = bp;
+            yawBaseB = by;
+        }
+        g_aimRestore = TRUE;
+    }
+    yawOff    = g_yawSign * atan2f(dir[0], dir[2]);
+    pitchOff  = g_pitchSign * asinf(dir[1] < -1.0f ? -1.0f
+                                  : dir[1] >  1.0f ?  1.0f : dir[1]);
+
+    if (g_cluster == CLU_A || g_cluster == CLU_BOTH) {
+        SafeWrite(CamAddr(A_YAW),   yawBaseA + yawOff);
+        SafeWrite(CamAddr(A_PITCH), pitchBase + pitchOff);
+    }
+    if (g_cluster == CLU_B || g_cluster == CLU_BOTH) {
+        SafeWrite(CamAddr(B_YAW),   yawBaseB + yawOff);
+        SafeWrite(CamAddr(B_PITCH), pitchBase + pitchOff);
+    }
+    ++g_aimWrites;
+    if (g_aimWrites <= 3 || (g_aimWrites % 60) == 0)
+        Log("AIM      shot -> hand laser: yaw %+ .4f rad (%+ .1f deg)"
+            "  pitch %+ .4f (%+ .1f deg)  [writes %ld]",
+            yawOff, yawOff * 57.2957795f,
+            pitchOff, pitchOff * 57.2957795f, g_aimWrites);
+}
+
 // ---------------------------------------------------------------------------
 // STICK INPUT - the left thumbstick becomes W/A/S/D
 //
@@ -3230,13 +3647,24 @@ static void VrInputKeys(PBYTE p)
     if (!g_vrExclusive) return;     /* desktop test mode: no synthetic input */
 
     if (XrButton(&g_pose, XRB_L_GRIP)) p[VK_TAB] |= 0x80;    /* walk */
-    if (VrEdge(XRB_Y)) VrPulse(VK_SHIFT);                    /* zoom toggle */
+    if (VrEdge(XRB_Y)) {
+        g_zoomOn = !g_zoomOn;
+        VrPulse(VK_SHIFT);                                  /* zoom toggle */
+        Log("HAND     zoom %s - laser pointer %s", g_zoomOn ? "ON" : "off",
+            g_zoomOn ? "hidden" : "visible");
+    }
 
     if (!g_leftHanded) {
-        if (XrButton(&g_pose, XRB_R_TRIGGER)) p[VK_LBUTTON] |= 0x80;
+        if (XrButton(&g_pose, XRB_R_TRIGGER)) {
+            p[VK_LBUTTON] |= 0x80;
+            SteerAimWrite();                                 /* shot -> laser */
+        }
         if (VrEdge(XRB_L_TRIGGER)) VrPulse('X');             /* fire mode */
     } else {
-        if (XrButton(&g_pose, XRB_L_TRIGGER)) p[VK_LBUTTON] |= 0x80;
+        if (XrButton(&g_pose, XRB_L_TRIGGER)) {
+            p[VK_LBUTTON] |= 0x80;
+            SteerAimWrite();                                 /* shot -> laser */
+        }
         if (VrEdge(XRB_R_TRIGGER)) VrPulse('X');             /* fire mode */
     }
 
@@ -3273,6 +3701,9 @@ static void SteerLog(void)
         Log("XR       head pos  % .3f % .3f % .3f m   ipd %.3f  fov %.1f x %.1f",
             g_pose.headP[0], g_pose.headP[1], g_pose.headP[2],
             g_pose.ipd, g_pose.fovx, g_pose.fovy);
+        Log("HAND     raw L % .3f % .3f % .3f   R % .3f % .3f % .3f",
+            g_pose.lP[0], g_pose.lP[1], g_pose.lP[2],
+            g_pose.rP[0], g_pose.rP[1], g_pose.rP[2]);
         Log("XR       signs: yaw %+.0f  pitch %+.0f    writes so far %ld",
             g_yawSign, g_pitchSign, g_steerWrites);
         Log("XR       sticks: move % .2f,% .2f  turn % .2f,% .2f   bools %s",
@@ -3475,22 +3906,18 @@ static void ProbeKeys(PBYTE p)
     /* Edge-triggered: act on the transition from up to down. */
     static BYTE prev[256];
     int vk;
-    /* Number row and the two keys beside it. Nothing here is a movement key:
-       swallowing W/A/S/D would mean the player cannot walk while probing, and
-       walking is often exactly how you tell whether a variable tracks you. */
-    const int watch[41] = { '9', '8', '7', '0', '6', '5', '4', '2', '3', '1',
-                            'F', 'M', 'H', 'V', 'T', 'N', 'J', 'K',
-                            VK_OEM_PERIOD,
-                            VK_OEM_4, VK_OEM_6, VK_OEM_1, VK_OEM_7, VK_OEM_5,
-                            VK_OEM_3,
-                            'U', 'K', 'L', 'O', 'P', VK_OEM_MINUS, VK_OEM_PLUS,
-                            VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3, VK_NUMPAD4,
-                            VK_NUMPAD5, VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD8,
-                            VK_NUMPAD9 };
+    /* Only 0 remains from the old number-key set. 1-9 and the numpad are
+       deliberately passed through to the game. The letters/punctuation below
+       are the VR/debug controls. */
+    const int watch[] = {
+        '0', 'F', 'M', 'H', 'V', 'T', 'N', 'J', 'K',
+        VK_OEM_4, VK_OEM_6, VK_OEM_1, VK_OEM_7, VK_OEM_5, VK_OEM_3
+    };
+    const int watchN = (int)(sizeof(watch) / sizeof(watch[0]));
     BYTE now[256];
-    int i, j;
+    int i;
 
-    for (i = 0; i < 41; ++i) {
+    for (i = 0; i < watchN; ++i) {
         vk = watch[i];
         now[vk] = (BYTE)(p[vk] & 0x80);
         if (now[vk] && !prev[vk]) {
@@ -3529,12 +3956,25 @@ static void ProbeKeys(PBYTE p)
                     g_maxRes ? "ON - device asked for the desktop size"
                              : "off - the game's own 640x480 mode");
             } else if (vk == 'J') {
-                g_grabFrames = 3;
-                Log("DUMP     back-buffer grab armed: saving in 3 frames");
+                /* Hunt mode: stop attaching, hide the previous draw. */
+                g_3dManual = TRUE;
+                g_3dAttach = FALSE;
+                RecaptureWeapon();
+                if (g_3dPrevN > 0) {
+                    g_3dSel = (g_3dSel <= 0 ? g_3dPrevN - 1 : g_3dSel - 1);
+                    Log("HIDE     draw -> %d of %d  (J prev, K next, N attach)  weapon '%s'",
+                        g_3dSel, g_3dPrevN, ActiveWeaponName());
+                }
             } else if (vk == 'K' && !g_probeMode) {
-                g_customHud = !g_customHud;
-                Log("HUD      custom text HUD: %s  (J grabs the frame)",
-                    g_customHud ? "ON" : "off - the game's own 2D HUD is back");
+                /* Hunt mode: stop attaching, hide the next draw. */
+                g_3dManual = TRUE;
+                g_3dAttach = FALSE;
+                RecaptureWeapon();
+                if (g_3dPrevN > 0) {
+                    g_3dSel = (g_3dSel + 1) % g_3dPrevN;
+                    Log("HIDE     draw -> %d of %d  (J prev, K next, N attach)  weapon '%s'",
+                        g_3dSel, g_3dPrevN, ActiveWeaponName());
+                }
             } else if (vk == 'H') {
                 static const float kHudScales[] = { 1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 0.9f };
                 static int hudIdx = 1;   /* default is 1.1 */
@@ -3547,19 +3987,32 @@ static void ProbeKeys(PBYTE p)
                 Log("DRAWDump armed: next 300 draws, with the first UP vertices");
                 PlayerDump("V");
             } else if (vk == 'T') {
+                /* Save the current hand-vs-gun offset for this weapon. */
+                {
+                    int id = -1;
+                    HudVals hv;
+                    if (ReadHudVals(&hv)) id = hv.sel ? hv.w1 : hv.w0;
+                    if (id >= 0 && id < 32) {
+                        g_handAdjTable[id][0] = g_handAdj[0];
+                        g_handAdjTable[id][1] = g_handAdj[1];
+                        g_handAdjTable[id][2] = g_handAdj[2];
+                    }
+                    Log("HAND     saved adj '%s' (id %d): % .3f % .3f % .3f",
+                        ActiveWeaponName(), id,
+                        g_handAdj[0], g_handAdj[1], g_handAdj[2]);
+                }
                 Log("STATE TAG  xforms=%ld indexed=%ld UP=%ld  -> %s",
                     g_lastXforms, g_lastIndexed, g_lastUP,
                     InGameplay() ? "GAMEPLAY" : "NOT-GAMEPLAY");
                 StateLog("T");
             } else if (vk == 'N') {
-                g_leftHanded = !g_leftHanded;
-                Log("INPUT    handedness: %s  (shoot=%s trigger, fire mode=%s"
-                    " trigger; all other buttons unchanged)",
-                    g_leftHanded ? "left-handed" : "right-handed",
-                    g_leftHanded ? "left" : "right",
-                    g_leftHanded ? "right" : "left");
-                SteerSave();
-            } else if (vk == '3') {
+                /* Attach and capture this draw. */
+                g_3dManual = TRUE;
+                g_3dAttach = TRUE;
+                RecaptureWeapon();
+                Log("HIDE     ATTACH draw %d of %d  weapon '%s'",
+                    g_3dSel, g_3dPrevN, ActiveWeaponName());
+            } else if (vk == 'H') {
                 g_steer = !g_steer;
                 if (g_steer) {
                     ProbeRestore();     /* a sine wave fighting the head is noise */
@@ -3577,7 +4030,35 @@ static void ProbeKeys(PBYTE p)
                 SteerSave();
             } else if (vk == '0' && !g_probeMode) {
                 g_vrExclusive = !g_vrExclusive;
-                if (g_vrExclusive) SteerRecentre();
+                if (g_vrExclusive) {
+                    SteerRecentre();
+                    /* Back to VR: the XrApi pose owns the hand again. */
+                    if (g_manualRight) {
+                        g_manualRight = FALSE;
+                        Log("HAND     user control OFF - XrApi pose restored");
+                    }
+                } else {
+                    /* User control just turned ON: default both hands in
+                       front of the player so no XrApi stream is needed. */
+                    ManualDefaultPose();
+                    g_manualRight = TRUE;
+                    {
+                        HWND w = g_gameWnd ? g_gameWnd : g_wnd;
+                        RECT rc;
+                        POINT pt;
+                        if (w && GetClientRect(w, &rc)) {
+                            pt.x = (rc.right - rc.left) / 2;
+                            pt.y = (rc.bottom - rc.top) / 2;
+                            if (ClientToScreen(w, &pt)) {
+                                SetCursorPos(pt.x, pt.y);
+                                g_lastCursor = pt;
+                                g_cursorKnown = TRUE;
+                            }
+                        }
+                    }
+                    Log("HAND     user control ON (numpad drives the right hand;"
+                        " hold E to move; cursor centred once; incoming 6DOF ignored)");
+                }
                 Log("INPUT    %s",
                     g_vrExclusive
                       ? "VR input only - desktop keys/mouse suppressed in"
@@ -3652,29 +4133,11 @@ static void ProbeKeys(PBYTE p)
         prev[vk] = now[vk];
     }
 
-    /* Swallow the control keys so the game never sees them: pressing W must
-       step the probe, not walk the player somewhere else while you are trying
-       to judge what changed. */
-    /* Swallow only our own control keys. Movement is left completely alone, so
-       the player can walk, strafe and turn normally while a variable is being
-       wiggled - which is the point, since "does it track me when I move?" is
-       the most useful question to ask of a candidate. */
-    if (g_probeMode) {
-        p['8'] = 0; p['7'] = 0; p['0'] = 0; p['4'] = 0;
-        p['U'] = 0; p['K'] = 0; p['L'] = 0; p['O'] = 0; p['P'] = 0;
-        p['2'] = 0;
-        for (j = VK_NUMPAD1; j <= VK_NUMPAD9; ++j) p[j] = 0;
-        p[VK_OEM_MINUS] = 0; p[VK_OEM_PLUS] = 0;
-    }
-    p['9'] = 0;
-    p['6'] = 0;
-    p['5'] = 0;
-    p['0'] = 0;             /* desktop-input toggle (probe tag in probe mode) */
-    /* Steering is not a probe experiment, so its keys are always swallowed
-       and always live, whether or not probe mode is on. */
-    p['3'] = 0;
+    /* Swallow only the remaining VR/debug controls. Number keys 1-9 and the
+       numpad are deliberately passed through to the game. */
+    p['0'] = 0;             /* desktop-input toggle */
     p[VK_OEM_4] = 0; p[VK_OEM_6] = 0; p[VK_OEM_1] = 0; p[VK_OEM_7] = 0;
-    p[VK_OEM_5] = 0; p[VK_OEM_3] = 0; p['1'] = 0; p[VK_OEM_PERIOD] = 0;
+    p[VK_OEM_5] = 0; p[VK_OEM_3] = 0;
     /* Stage-3 comparison switch, always live so it works before probe mode. */
     p['F'] = 0;
     /* Fullscreen-resolution experiment; applies at the next Reset. */
@@ -3747,6 +4210,107 @@ static void PatchProjectionAspect(void)
     Log("PROJECTION aspect patch: %.4f -> %.4f at IDA 0x403A92;"
         " outbound FOV %.2f x %.2f",
         oldAspect, aspect, g_outFovX, g_outFovY);
+}
+
+// ---------------------------------------------------------------------------
+// Virtual hand / laser config
+//
+// `config.txt` lives one directory above the game, so a game update does not
+// overwrite it. If it is missing, it is created with the defaults.
+//
+//     handedness = right | left
+//     hand_flip  = false | true
+//
+// hand_flip is a 180-degree roll of the virtual hand/gun only, not pitch/yaw.
+// ---------------------------------------------------------------------------
+static char* HandTrim(char* s)
+{
+    char* e;
+    while (*s && isspace((unsigned char)*s)) ++s;
+    e = s + strlen(s);
+    while (e > s && isspace((unsigned char)e[-1])) --e;
+    *e = 0;
+    return s;
+}
+
+static void HandLoadConfig(void)
+{
+    char parent[MAX_PATH], path[MAX_PATH], alt[MAX_PATH];
+    char line[256];
+    FILE* f;
+    size_t n;
+    char* slash;
+
+    if (!g_baseDir[0]) return;
+
+    strncpy(parent, g_baseDir, sizeof(parent) - 1);
+    parent[sizeof(parent) - 1] = 0;
+    n = strlen(parent);
+    while (n && (parent[n-1] == '\\' || parent[n-1] == '/')) parent[--n] = 0;
+    slash = strrchr(parent, '\\');
+    if (slash && slash > parent + 2) *(slash + 1) = 0;
+    else parent[0] = 0;
+
+    if (parent[0]) _snprintf(path, sizeof(path), "%sconfig.txt", parent);
+    else           _snprintf(path, sizeof(path), "config.txt");
+    path[sizeof(path) - 1] = 0;
+    _snprintf(alt, sizeof(alt), "%sconfig.txt", g_baseDir);
+    alt[sizeof(alt) - 1] = 0;
+
+    f = fopen(path, "r");
+    if (!f) {
+        /* Be forgiving if the owner put it next to the game instead. */
+        f = fopen(alt, "r");
+        if (f) _snprintf(path, sizeof(path), "%s", alt);
+    }
+    if (!f) {
+        f = fopen(path, "w");
+        if (f) {
+            fputs("# XOPS-WXR virtual hand / laser\n", f);
+            fputs("# handedness: right (default) or left\n", f);
+            fputs("# hand_flip: false (default) or true"
+                  " - 180-degree roll of the hand/gun\n", f);
+            fputs("handedness = right\n", f);
+            fputs("hand_flip = false\n", f);
+            fclose(f);
+            Log("HAND     created %s with defaults", path);
+        } else {
+            Log("HAND     could not create %s (err %lu)", path, GetLastError());
+        }
+        g_handedness = 0;
+        g_handFlip = FALSE;
+        g_leftHanded = 0;
+        return;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        char* key;
+        char* val;
+        char* eq;
+        key = HandTrim(line);
+        if (!*key || *key == '#' || *key == ';') continue;
+        eq = strchr(key, '=');
+        if (!eq) continue;
+        *eq = 0;
+        val = HandTrim(eq + 1);
+        key = HandTrim(key);
+        if (!_stricmp(key, "handedness")) {
+            if (!_stricmp(val, "left") || !strcmp(val, "1"))
+                g_handedness = 1;
+            else if (!_stricmp(val, "right") || !strcmp(val, "0"))
+                g_handedness = 0;
+        } else if (!_stricmp(key, "hand_flip")) {
+            g_handFlip = (!_stricmp(val, "true") || !_stricmp(val, "yes") ||
+                          !strcmp(val, "1")) ? TRUE : FALSE;
+        }
+    }
+    fclose(f);
+
+    /* Dominant hand also selects which trigger shoots. The in-session N key
+       can still toggle this, but the config is the startup authority. */
+    g_leftHanded = (g_handedness == 1) ? 1 : 0;
+    Log("HAND     config %s  handedness=%s  hand_flip=%s", path,
+        g_handedness ? "left" : "right", g_handFlip ? "true" : "false");
 }
 
 static void EnsureInit(void)
@@ -3823,6 +4387,7 @@ static void EnsureInit(void)
         Log("XR       client FAILED to start: %s", XrLastError());
     }
     SteerLoad();
+    HandLoadConfig();
     if (g_patchAspect) PatchProjectionAspect();
     else Log("PROJECTION aspect patch disabled by xops_wxr_steer.ini");
     HookInput();
@@ -3955,7 +4520,7 @@ static HRESULT __stdcall hkSetTransform(void* dev, DWORD type, const D3DMATRIX8*
     NoteCallSite(type, _ReturnAddress());
     ++g_xformThisFrame;
     if      (type == D3DTS_VIEW)       { ++g_xfView;  if (m) { g_lastView = *m; g_haveView = TRUE; g_lastViewAt = g_frame; } }
-    else if (type == D3DTS_PROJECTION) ++g_xfProj;
+    else if (type == D3DTS_PROJECTION) { ++g_xfProj; if (m) { g_lastProj = *m; g_haveProj = TRUE; } }
     else if (type == 256)              ++g_xfWorld;
     else                               ++g_xfOther;
 
@@ -3992,6 +4557,19 @@ static HRESULT __stdcall hkDrawPrimitiveUP(void* dev, DWORD prim, UINT count,
 {
     ++g_drawsThisFrame; ++g_drawsUP;
     NoteDraw(g_curFvf, stride);
+    /* 3D HUD/inventory models arrive as stride-24 XYZ+DIFFUSE+TEX1 UP draws
+       (the 2D HUD is stride 28). Keep them for the identification row. */
+    if (prim == 4 && stride == 24 && count >= 8 && count <= 600)
+        CaptureHudBatchUP(dev, data, count);
+
+    /* Fallback if the 3D HUD model draws did not trigger the hand pass: the
+       first 2D HUD draw is still after the world and before the HUD layer. */
+    if (g_compositeActive && g_gameRTActive && !g_handDrawnThisFrame &&
+        InGameplay() && g_curFvf == 0x0144 && stride == 28) {
+        DrawHandAndLaserWorld(dev);
+        g_handDrawnThisFrame = TRUE;
+    }
+    if (g_handDrawnThisFrame && HideThisDraw()) return 0;
 
     /* Crosshair: four separate prim=3 (LINESTRIP), count=1 UP draws at
        (317,240), (320,237), (323,240), (320,243). Remove it for VR; a
@@ -4095,25 +4673,810 @@ static UINT PrimVertexCount(DWORD prim, UINT primCount)
     }
 }
 
+typedef HRESULT (__stdcall *PFN_VBLock)(void*, UINT, UINT, BYTE**, DWORD);
+typedef HRESULT (__stdcall *PFN_VBUnlock)(void*);
+
+/* Bounds of a DrawPrimitive vertex-buffer batch. The 2D HUD gun icon is in
+   one of these, so this finds it by its screen position. */
+static void DumpVBBounds(void* dev, UINT start, UINT count)
+{
+    void* vb = NULL;
+    UINT stride = 0;
+    BYTE* data = NULL;
+    PFN_VBLock lock;
+    PFN_VBUnlock unlock;
+    float mnx = 1e9f, mxx = -1e9f, mny = 1e9f, mxy = -1e9f;
+    UINT i, n;
+
+    if (!o_GetStreamSource || count < 1) return;
+    if (o_GetStreamSource(dev, 0, &vb, &stride) != S_OK || !vb) return;
+    if (stride < 8) { ReleaseIUnknown(vb); return; }
+    lock   = (PFN_VBLock)(*(void***)vb)[11];
+    unlock = (PFN_VBUnlock)(*(void***)vb)[12];
+    if (lock(vb, start * stride, count * stride, &data, 0x10) != S_OK || !data) {
+        if (lock(vb, 0, 0, &data, 0x10) != S_OK || !data) {
+            ReleaseIUnknown(vb);
+            return;
+        }
+        data += start * stride;
+    }
+    n = count > 600 ? 600 : count;
+    for (i = 0; i < n; ++i) {
+        const float* f = (const float*)(data + (SIZE_T)i * stride);
+        if (f[0] < mnx) mnx = f[0];
+        if (f[0] > mxx) mxx = f[0];
+        if (f[1] < mny) mny = f[1];
+        if (f[1] > mxy) mxy = f[1];
+    }
+    unlock(vb);
+    ReleaseIUnknown(vb);
+    {
+        D3DMATRIX8 wm;
+        void* tex = NULL;
+        char wtxt[64] = "";
+        if (o_GetTransform && o_GetTransform(dev, D3DTS_WORLD, &wm) == S_OK)
+            _snprintf(wtxt, sizeof(wtxt), "  world %.2f %.2f %.2f",
+                      wm.m[3][0], wm.m[3][1], wm.m[3][2]);
+        if (o_GetTexture) o_GetTexture(dev, 0, &tex);
+        Log("DRAWDump DIR  bounds x %.0f..%.0f  y %.0f..%.0f  stride=%u"
+            "  tex=%p%s", mnx, mxx, mny, mxy, stride, tex, wtxt);
+        if (tex) ReleaseIUnknown(tex);
+    }
+}
+
+static HRESULT __stdcall hkDrawIndexedPrimitiveUP(void* dev, DWORD prim,
+    UINT minIndex, UINT numVertices, UINT primCount, const void* indexData,
+    DWORD indexFormat, const void* vertexData, UINT vertexStride)
+{
+    ++g_drawsThisFrame; ++g_drawsUP;
+    NoteDraw(g_curFvf, vertexStride);
+    if (vertexData && vertexStride == 24 && prim == 4 &&
+        numVertices >= 8 && numVertices <= 600)
+        CaptureHudBatchUP(dev, vertexData, numVertices);
+    if (g_compositeActive && g_gameRTActive && !g_handDrawnThisFrame &&
+        InGameplay() && vertexStride == 24) {
+        DrawHandAndLaserWorld(dev);
+        g_handDrawnThisFrame = TRUE;
+    }
+    if (g_handDrawnThisFrame && HideThisDraw()) return 0;
+    return o_DrawIndexedPrimitiveUP(dev, prim, minIndex, numVertices, primCount,
+                                    indexData, indexFormat, vertexData,
+                                    vertexStride);
+}
+
 static HRESULT __stdcall hkDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
 {
     ++g_drawsThisFrame; ++g_drawsVB;
     NoteDraw(g_curFvf, 0);
+    /* The inventory / HUD 3D models come through here as expanded triangle
+       lists with stride 24 (XYZ + DIFFUSE + TEX1). Keep a copy of the one
+       draw that carries the active weapon model. */
+    if (prim == 4 && count >= 8 && count <= 600 &&
+        g_3dAttach && !g_cloneValid && g_3dIdx == g_3dSel) {
+        CaptureHudBatch(dev, start, count);
+    }
     if (g_dumpDraws > 0) {
         Log("DRAWDump DIR  fvf=0x%04lX count=%u prim=%lu", g_curFvf, count, prim);
+        DumpVBBounds(dev, start, count);
         --g_dumpDraws;
     }
+    if (g_handDrawnThisFrame && HideThisDraw()) return 0;
     return o_DrawPrimitive(dev, prim, start, count);
+}
+
+static void DumpWorldZ(void* dev, UINT minIdx, UINT numV)
+{
+    void* vb = NULL;
+    UINT stride = 0;
+    BYTE* data = NULL;
+    PFN_VBLock lock;
+    PFN_VBUnlock unlock;
+    float zmin = 1e30f, zmax = -1e30f;
+    float sample[4] = { 0, 0, 0, 0 };
+    UINT i, n;
+
+    if (!o_GetStreamSource || numV < 1) return;
+    if (o_GetStreamSource(dev, 0, &vb, &stride) != S_OK || !vb) return;
+    if (stride < 16) { ReleaseIUnknown(vb); return; }
+
+    lock = (PFN_VBLock)(*(void***)vb)[11];
+    unlock = (PFN_VBUnlock)(*(void***)vb)[12];
+    if (lock(vb, minIdx * stride, numV * stride, &data, 0x10) != S_OK || !data) {
+        if (lock(vb, 0, 0, &data, 0x10) != S_OK || !data) {
+            Log("WORLDZ  vertex buffer not readable (stride %u)", stride);
+            ReleaseIUnknown(vb);
+            return;
+        }
+        data += minIdx * stride;
+    }
+    n = numV > 64 ? 64 : numV;
+    for (i = 0; i < n; ++i) {
+        const float z = *(const float*)(data + (SIZE_T)i * stride + 8);
+        if (z < zmin) zmin = z;
+        if (z > zmax) zmax = z;
+        if (i < 4) sample[i] = z;
+    }
+    Log("WORLDZ  stride=%u minIdx=%u numV=%u  z %.4f..%.4f  first %.3f %.3f %.3f %.3f",
+        stride, minIdx, numV, zmin, zmax, sample[0], sample[1], sample[2], sample[3]);
+    for (i = 0; i < 3 && i < numV; ++i) {
+        const float* f = (const float*)(data + (SIZE_T)i * stride);
+        Log("WORLDZ  v%u  % .4f % .4f % .4f % .4f % .4f",
+            i, f[0], f[1], f[2], f[3], f[4]);
+    }
+    unlock(vb);
+    ReleaseIUnknown(vb);
+}
+
+/* ---------------------------------------------------------------------------
+ * HUD WEAPON MODEL: keep a copy of the geometry
+ *
+ * The game draws the HUD slot icons as small 3D models (primCount 28,
+ * numV 34, XYZ + TEX1, stride 20). We read every candidate and keep the one
+ * that is most elongated (a gun), then draw that copy at the hand. The can /
+ * ammo icons score much lower, so they are ignored.
+ * ------------------------------------------------------------------------- */
+
+#define GUN_MAXV 2048
+#define GUN_MAXI 8192
+
+static void*  g_gunTex      = NULL;
+static BOOL   g_gunCapValid = FALSE;
+static UINT   g_gunCapN     = 0;
+static float  g_gunCapV[GUN_MAXV][5];
+static UINT   g_gunCapIN    = 0;
+static WORD   g_gunCapI[GUN_MAXI];
+static float  g_gunScore    = 0.0f;
+static int    g_gunLong     = 1;    /* local axis mapped to forward */
+static int    g_gunMid      = 2;    /* local axis mapped to up      */
+static float  g_gunScale    = 1.0f;
+static float  g_gunScaleMul = 1.0f;  /* per-weapon trim (grenade is smaller) */
+static BOOL   g_gunVertical  = FALSE;/* grenade stands up instead of forward */
+
+/* Multi-part weapon clone: one group of draws sharing a vertex buffer. */
+#define GUN_PARTS 8
+typedef struct {
+    BOOL  valid;
+    UINT  nV;
+    float V[GUN_MAXV][5];
+    UINT  nI;
+    WORD  I[GUN_MAXI];
+    void* tex;
+    int   la, ma;
+    float scale;
+} GunPart;
+static GunPart g_parts[GUN_PARTS];
+static int     g_partN = 0;
+static void*   g_weaponVB = NULL;
+static BOOL    g_needParts = FALSE;
+
+/* Re-capture whenever the active weapon changes. The active slot's model is
+   the second-to-last 3D draw, so g_3dSel follows g_3dPrevN - 2. */
+static int g_lastWeaponKey = -1;
+static BOOL g_weaponEmpty = FALSE;
+static BOOL g_dropLatch  = FALSE;   /* dropped/emptied: hands only */
+static int  g_emptyCount = 0;
+static BOOL g_haveInv = FALSE;       /* player inventory read at least once */
+static int g_prevW0 = -1, g_prevW1 = -1, g_prevSel = -1;
+
+static void RecaptureWeapon(void)
+{
+    int i;
+    g_cloneValid = FALSE;
+    g_gunCapValid = FALSE;
+    g_gunScore = 0.0f;
+    g_needCapture = TRUE;
+    g_tailDump = TRUE;
+    g_needParts = TRUE;
+    g_weaponVB = NULL;
+    for (i = 0; i < g_partN; ++i) {
+        if (g_parts[i].tex) ReleaseIUnknown(g_parts[i].tex);
+        g_parts[i].tex = NULL;
+        g_parts[i].valid = FALSE;
+    }
+    g_partN = 0;
+    if (g_gunTex) { ReleaseIUnknown(g_gunTex); g_gunTex = NULL; }
+}
+
+static void ClearWeaponParts(void)
+{
+    int i;
+    for (i = 0; i < g_partN; ++i) {
+        if (g_parts[i].tex) ReleaseIUnknown(g_parts[i].tex);
+        g_parts[i].tex = NULL;
+        g_parts[i].valid = FALSE;
+    }
+    g_partN = 0;
+    g_needParts = FALSE;
+    g_weaponVB = NULL;
+    if (g_gunTex) { ReleaseIUnknown(g_gunTex); g_gunTex = NULL; }
+}
+
+static void AmmoSanity(const HudVals* v)
+{
+    if (g_dropLatch) return;
+    if (!g_weaponEmpty) return;
+    if ((v->cur0 + v->cur1 + v->res0 + v->res1) <= 0) return;
+    g_weaponEmpty = FALSE;
+    g_3dManual = FALSE;
+    g_3dAttach = TRUE;
+    RecaptureWeapon();
+    Log("HIDE     sanity: ammo %d/%d/%d/%d with empty hand - showing weapon",
+        v->cur0, v->cur1, v->res0, v->res1);
+}
+
+static void WatchWeaponSwap(void)
+{
+    HudVals v;
+    int active, key;
+    const int prevW0 = g_prevW0, prevW1 = g_prevW1, prevSel = g_prevSel;
+    BOOL dropped = FALSE, gained = FALSE;
+
+    if (!ReadHudVals(&v)) return;
+    g_haveInv = TRUE;
+
+    active = v.sel ? v.w1 : v.w0;
+    key = (v.sel & 0xFF) | ((v.w0 & 0xFF) << 8) | ((v.w1 & 0xFF) << 16);
+
+    if (prevW0 >= 0) {
+        dropped = ((prevW0 > 0 && v.w0 == 0) ||
+                   (prevW1 > 0 && v.w1 == 0)) ? TRUE : FALSE;
+        gained  = (((prevW0 == 0 && v.w0 > 0) ||
+                    (prevW1 == 0 && v.w1 > 0) ||
+                    (prevW0 != v.w0 && v.w0 > 0) ||
+                    (prevW1 != v.w1 && v.w1 > 0))) ? TRUE : FALSE;
+    }
+
+    if (active == 0 && (v.cur0 + v.cur1 + v.res0 + v.res1) == 0) {
+        if (g_emptyCount < 1000) ++g_emptyCount;
+    } else {
+        g_emptyCount = 0;
+    }
+    g_weaponEmpty = (g_emptyCount > 10) ? TRUE : FALSE;
+
+    /* A deliberate drop, an explicit switch to the empty slot, or the
+       grenade emptying to NONE latches hands-only until a pickup or a
+       switch to a non-empty slot. */
+    if (dropped || (prevSel >= 0 && v.sel != prevSel && active == 0) ||
+        (g_weaponEmpty && active == 0)) {
+        if (!g_dropLatch)
+            Log("HIDE     weapon gone (drop/empty): hands only");
+        g_dropLatch = TRUE;
+    }
+    if (g_dropLatch &&
+        ((gained && active != 0) || (v.sel != prevSel && active != 0))) {
+        g_dropLatch = FALSE;
+        g_emptyCount = 0;
+        Log("HIDE     pickup/switch after drop: recapturing");
+    }
+
+    if (g_dropLatch) {
+        g_weaponEmpty = TRUE;
+        g_needParts = FALSE;
+        g_weaponVB = NULL;
+        g_cloneValid = TRUE;
+        g_gunCapValid = FALSE;
+        if (g_partN > 0) ClearWeaponParts();
+        if (g_gunTex) { ReleaseIUnknown(g_gunTex); g_gunTex = NULL; }
+        g_lastWeaponKey = key;
+        g_prevW0 = v.w0; g_prevW1 = v.w1; g_prevSel = v.sel;
+        return;
+    }
+
+    g_weaponEmpty = FALSE;
+
+    if (active != g_adjWeapon) {
+        g_adjWeapon = active;
+        if (active >= 0 && active < 32) {
+            g_handAdj[0] = g_handAdjTable[active][0];
+            g_handAdj[1] = g_handAdjTable[active][1];
+            g_handAdj[2] = g_handAdjTable[active][2];
+        } else {
+            g_handAdj[0] = g_handAdj[1] = g_handAdj[2] = 0.0f;
+        }
+    }
+
+    if (active > 0) {
+        char nm[64];
+        WeaponNameShort(active, nm, sizeof(nm));
+        if (_strnicmp(nm, "GREN", 4) == 0) {
+            g_gunScaleMul = 1.0f / 3.0f;
+            g_gunVertical = TRUE;
+        } else if (_strnicmp(nm, "MAC", 3) == 0) {
+            g_gunScaleMul = 0.75f;
+            g_gunVertical = FALSE;
+        } else {
+            g_gunScaleMul = 1.0f;
+            g_gunVertical = FALSE;
+        }
+    }
+
+    if (g_lastWeaponKey < 0) {
+        g_lastWeaponKey = key;
+        g_needParts = TRUE;
+        g_weaponVB = NULL;
+        g_prevW0 = v.w0; g_prevW1 = v.w1; g_prevSel = v.sel;
+        return;
+    }
+
+    if (key != g_lastWeaponKey) {
+        g_lastWeaponKey = key;
+        g_3dManual = FALSE;
+        g_3dAttach = TRUE;
+        RecaptureWeapon();
+        Log("HIDE     weapon %d in slot %d: recapturing model",
+            active, v.sel);
+    }
+
+    AmmoSanity(&v);
+    g_prevW0 = v.w0; g_prevW1 = v.w1; g_prevSel = v.sel;
+}
+
+static void CaptureGunModel(void* dev, UINT minIdx, UINT numV,
+                            UINT startIdx, UINT primCount)
+{
+    void* vb = NULL;
+    UINT stride = 0;
+    BYTE* data = NULL;
+    void* ib = NULL;
+    UINT base = 0;
+    PFN_VBLock lock;
+    PFN_VBUnlock unlock;
+    float v[GUN_MAXV][5];
+    WORD idx[GUN_MAXI];
+    UINT idxN = 0;
+    void* tex = NULL;
+    float mn[3] = { 1e9f, 1e9f, 1e9f };
+    float mx[3] = { -1e9f, -1e9f, -1e9f };
+    float ext[3];
+    float big, mid, small, score;
+    int longAxis = 1, midAxis = 2, shortAxis = 0;
+    UINT i, k;
+
+    if (!o_GetStreamSource || !o_GetIndices) return;
+    if (numV > GUN_MAXV || numV < 4) {
+        Log("HIDE     capture skipped: numV=%u (max %u)", numV, GUN_MAXV);
+        return;
+    }
+
+    if (o_GetStreamSource(dev, 0, &vb, &stride) != S_OK || !vb) return;
+    if (stride < 20) { ReleaseIUnknown(vb); return; }
+
+    lock   = (PFN_VBLock)(*(void***)vb)[11];
+    unlock = (PFN_VBUnlock)(*(void***)vb)[12];
+    if (lock(vb, minIdx * stride, numV * stride, &data, 0x10) != S_OK || !data) {
+        if (lock(vb, 0, 0, &data, 0x10) != S_OK || !data) {
+            ReleaseIUnknown(vb);
+            return;
+        }
+        data += minIdx * stride;
+    }
+    for (i = 0; i < numV; ++i) {
+        const float* f = (const float*)(data + (SIZE_T)i * stride);
+        const int uo = (stride >= 28) ? 5 : (stride >= 24) ? 4 : 3;
+        const int vo = uo + 1;
+        v[i][0] = f[0];
+        v[i][1] = f[1];
+        v[i][2] = f[2];
+        v[i][3] = f[uo];
+        v[i][4] = f[vo];
+        for (k = 0; k < 3; ++k) {
+            if (v[i][k] < mn[k]) mn[k] = v[i][k];
+            if (v[i][k] > mx[k]) mx[k] = v[i][k];
+        }
+    }
+    unlock(vb);
+    ReleaseIUnknown(vb);
+
+    if (o_GetIndices(dev, &ib, &base) != S_OK || !ib) return;
+    {
+        PFN_VBLock ilock   = (PFN_VBLock)(*(void***)ib)[11];
+        PFN_VBUnlock iunlock = (PFN_VBUnlock)(*(void***)ib)[12];
+        BYTE* idata = NULL;
+        if (ilock(ib, 0, 0, &idata, 0x10) == S_OK && idata) {
+            UINT cnt = primCount * 3;
+            if (cnt > GUN_MAXI) cnt = GUN_MAXI;
+            memcpy(idx, idata + (SIZE_T)startIdx * 2, (SIZE_T)cnt * 2);
+            idxN = cnt;
+            iunlock(ib);
+        }
+        ReleaseIUnknown(ib);
+    }
+    if (idxN < 3) return;
+
+    {
+        static int fmtLogs = 0;
+        if (fmtLogs < 30) {
+            Log("HIDE     model fmt: stride=%u fvf=0x%04lX"
+                "  uv0 % .3f,% .3f  uv1 % .3f,% .3f  tex=%p",
+                stride, g_curFvf, v[0][3], v[0][4], v[1][3], v[1][4], tex);
+            ++fmtLogs;
+        }
+    }
+
+    for (k = 0; k < 3; ++k) ext[k] = mx[k] - mn[k];
+    big = ext[0]; mid = ext[1]; small = ext[2];
+    longAxis = 0; midAxis = 1; shortAxis = 2;
+    if (mid > big)   { float t = big; big = mid; mid = t; midAxis = 0; longAxis = 1; }
+    if (small > mid) { float t = mid; mid = small; small = t; shortAxis = midAxis; midAxis = 2; }
+    if (mid > big)   { float t = big; big = mid; mid = t; k = (UINT)longAxis; longAxis = midAxis; midAxis = (int)k; }
+    if (small > big) { float t = big; big = small; small = t; k = (UINT)longAxis; longAxis = shortAxis; shortAxis = (int)k; }
+    score = big / (small > 0.01f ? small : 0.01f);
+
+    if (o_GetTexture) o_GetTexture(dev, 0, &tex);
+
+    {
+        static int logs = 0;
+        if (logs < 24) {
+            D3DMATRIX8 wm;
+            char wtxt[64] = "";
+            if (o_GetTransform && o_GetTransform(dev, D3DTS_WORLD, &wm) == S_OK)
+                _snprintf(wtxt, sizeof(wtxt), "  world %.3f %.3f %.3f",
+                          wm.m[3][0], wm.m[3][1], wm.m[3][2]);
+            Log("HAND     model cand %d: %u v %u i  ext %.3f/%.3f/%.3f"
+                " score %.1f  tex=%p%s",
+                logs, numV, idxN, ext[0], ext[1], ext[2], score, tex, wtxt);
+            ++logs;
+        }
+    }
+
+    if (score <= g_gunScore) {
+        if (tex) ReleaseIUnknown(tex);
+        return;
+    }
+
+    /* Better candidate: replace the stored model. */
+    if (g_gunTex) ReleaseIUnknown(g_gunTex);
+    g_gunTex = tex;
+    memcpy(g_gunCapV, v, sizeof(float) * 5 * numV);
+    memcpy(g_gunCapI, idx, sizeof(WORD) * idxN);
+    g_gunCapN = numV;
+    g_gunCapIN = idxN;
+    g_gunLong = longAxis;
+    g_gunMid = midAxis;
+    g_gunScale = 0.525f / (big > 0.01f ? big : 1.0f);
+    g_gunScore = score;
+    g_gunCapValid = TRUE;
+}
+
+static void HandDrawCapturedGun(void* dev, const float vp[3], const float vf[3],
+                                const float vu[3], const float vr[3])
+{
+    static CompVert3D out[GUN_MAXI];
+    float origin[3];
+    int pi;
+
+    if (g_partN <= 0) return;
+
+    /* Weapon UVs can be negative (atlas offsets), so wrap instead of clamp. */
+    o_SetTextureStageState(dev, 0, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
+    o_SetTextureStageState(dev, 0, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
+
+    origin[0] = vp[0] + vf[0] * 0.10f;
+    origin[1] = vp[1] + vf[1] * 0.10f;
+    origin[2] = vp[2] + vf[2] * 0.10f;
+
+    for (pi = 0; pi < g_partN; ++pi) {
+        GunPart* b = &g_parts[pi];
+        const int la = b->la;
+        const int ma = b->ma;
+        const int sa = 3 - la - ma;
+        const float S = b->scale * g_gunScaleMul;
+        UINT n = 0, i;
+
+        if (!b->valid || b->nI < 3) continue;
+        for (i = 0; i < b->nI && n < GUN_MAXI; ++i) {
+            const UINT vi = b->I[i];
+            const float* v;
+            if (vi >= b->nV) continue;
+            v = b->V[vi];
+            if (g_gunVertical) {
+                out[n].x = origin[0] - vr[0]*v[sa]*S + vu[0]*v[la]*S - vf[0]*v[ma]*S;
+                out[n].y = origin[1] - vr[1]*v[sa]*S + vu[1]*v[la]*S - vf[1]*v[ma]*S;
+                out[n].z = origin[2] - vr[2]*v[sa]*S + vu[2]*v[la]*S - vf[2]*v[ma]*S;
+            } else {
+                out[n].x = origin[0] - vr[0]*v[sa]*S + vu[0]*v[ma]*S - vf[0]*v[la]*S;
+                out[n].y = origin[1] - vr[1]*v[sa]*S + vu[1]*v[ma]*S - vf[1]*v[la]*S;
+                out[n].z = origin[2] - vr[2]*v[sa]*S + vu[2]*v[ma]*S - vf[2]*v[la]*S;
+            }
+            out[n].color = 0xFFFFFFFFu;
+            out[n].u = v[3];
+            out[n].v = v[4];
+            ++n;
+        }
+        if (n < 3) continue;
+        o_SetTexture(dev, 0, b->tex ? b->tex : g_whiteTex);
+        o_SetVertexShader(dev, 0x0142);
+        o_DrawPrimitiveUP(dev, D3DPT_TRIANGLELIST, n / 3, out, sizeof(CompVert3D));
+    }
+}
+
+
+#define HUD_BMAX 16
+#define HUD_BV  600
+
+typedef struct {
+    BOOL  valid;
+    UINT  n;
+    float v[HUD_BV][5];
+    void* tex;
+    float scale;
+    int   la, ma;
+} HudBatch;
+
+static HudBatch  g_hbSetA[HUD_BMAX];
+static HudBatch  g_hbSetB[HUD_BMAX];
+static HudBatch* g_hbCur  = g_hbSetA;   /* being filled this frame */
+static HudBatch* g_hbPrev = g_hbSetB;   /* drawn by the hand pass  */
+static int       g_hbCurN  = 0;
+static int       g_hbPrevN = 0;
+
+/* One-shot clone of the identified weapon model. Frozen after the first
+   capture so the game's spinning copy does not affect ours. */
+static HudBatch  g_clone;
+
+static void CloneFromBatch(const HudBatch* b)
+{
+    if (g_cloneValid || !b || !b->valid) return;
+    g_clone = *b;
+    if (g_clone.tex) AddRefIUnknown(g_clone.tex);
+    g_cloneValid = TRUE;
+    Log("HIDE     clone captured: n=%u tex=%p", b->n, b->tex);
+}
+
+/* Called at BeginScene: drop the set from two frames ago, then swap the
+   captured set into the one the hand pass will draw. */
+static void ReleaseHudBatches(void)
+{
+    int i;
+    for (i = 0; i < g_hbPrevN; ++i) {
+        if (g_hbPrev[i].tex) {
+            ReleaseIUnknown(g_hbPrev[i].tex);
+            g_hbPrev[i].tex = NULL;
+        }
+        g_hbPrev[i].valid = FALSE;
+    }
+    {
+        HudBatch* t = g_hbPrev;
+        g_hbPrev = g_hbCur;
+        g_hbCur  = t;
+    }
+    g_hbPrevN = g_hbCurN;
+    g_hbCurN  = 0;
+}
+
+static void CaptureHudBatch(void* dev, UINT start, UINT count)
+{
+    void* vb = NULL;
+    UINT stride = 0;
+    BYTE* data = NULL;
+    PFN_VBLock lock;
+    PFN_VBUnlock unlock;
+    HudBatch* b;
+    float mn[3] = { 1e9f, 1e9f, 1e9f };
+    float mx[3] = { -1e9f, -1e9f, -1e9f };
+    float ext[3], big;
+    UINT i, k;
+
+    if (!o_GetStreamSource || g_hbCurN >= HUD_BMAX) return;
+    if (o_GetStreamSource(dev, 0, &vb, &stride) != S_OK || !vb) return;
+    if (stride != 24) { ReleaseIUnknown(vb); return; }
+
+    lock   = (PFN_VBLock)(*(void***)vb)[11];
+    unlock = (PFN_VBUnlock)(*(void***)vb)[12];
+    if (lock(vb, start * stride, count * stride, &data, 0x10) != S_OK || !data) {
+        ReleaseIUnknown(vb);
+        return;
+    }
+    b = &g_hbCur[g_hbCurN];
+    b->n = count > HUD_BV ? HUD_BV : count;
+    for (i = 0; i < b->n; ++i) {
+        const float* f = (const float*)(data + (SIZE_T)i * stride);
+        for (k = 0; k < 5; ++k) b->v[i][k] = f[k];
+        for (k = 0; k < 3; ++k) {
+            if (b->v[i][k] < mn[k]) mn[k] = b->v[i][k];
+            if (b->v[i][k] > mx[k]) mx[k] = b->v[i][k];
+        }
+    }
+    unlock(vb);
+    ReleaseIUnknown(vb);
+
+    for (k = 0; k < 3; ++k) ext[k] = mx[k] - mn[k];
+    big = ext[0]; b->la = 0; b->ma = 1;
+    if (ext[1] > big) { big = ext[1]; b->la = 1; b->ma = 0; }
+    if (ext[2] > big) { big = ext[2]; b->la = 2; b->ma = (ext[0] > ext[1] ? 0 : 1); }
+    b->scale = 0.09f / (big > 0.01f ? big : 1.0f);
+    b->tex = NULL;
+    if (o_GetTexture) o_GetTexture(dev, 0, &b->tex);
+    b->valid = TRUE;
+    ++g_hbCurN;
+    if (g_3dAttach) CloneFromBatch(b);
+    {
+        static int logs = 0;
+        if (logs < 30) {
+            Log("HUD      batch %d: n=%u ext %.1f/%.1f/%.1f tex=%p",
+                g_hbCurN - 1, b->n, ext[0], ext[1], ext[2], b->tex);
+            ++logs;
+        }
+    }
+}
+
+static void CaptureHudBatchUP(void* dev, const void* data, UINT count)
+{
+    HudBatch* b;
+    const BYTE* p = (const BYTE*)data;
+    float mn[3] = { 1e9f, 1e9f, 1e9f };
+    float mx[3] = { -1e9f, -1e9f, -1e9f };
+    float ext[3], big;
+    UINT i, k;
+
+    if (!data || g_hbCurN >= HUD_BMAX) return;
+    b = &g_hbCur[g_hbCurN];
+    b->n = count > HUD_BV ? HUD_BV : count;
+    for (i = 0; i < b->n; ++i) {
+        const float* f = (const float*)(p + (SIZE_T)i * 24);
+        for (k = 0; k < 5; ++k) b->v[i][k] = f[k];
+        for (k = 0; k < 3; ++k) {
+            if (b->v[i][k] < mn[k]) mn[k] = b->v[i][k];
+            if (b->v[i][k] > mx[k]) mx[k] = b->v[i][k];
+        }
+    }
+    for (k = 0; k < 3; ++k) ext[k] = mx[k] - mn[k];
+    big = ext[0]; b->la = 0; b->ma = 1;
+    if (ext[1] > big) { big = ext[1]; b->la = 1; b->ma = 0; }
+    if (ext[2] > big) { big = ext[2]; b->la = 2; b->ma = (ext[0] > ext[1] ? 0 : 1); }
+    b->scale = 0.09f / (big > 0.01f ? big : 1.0f);
+    b->tex = NULL;
+    if (o_GetTexture) o_GetTexture(dev, 0, &b->tex);
+    b->valid = TRUE;
+    ++g_hbCurN;
+    if (g_3dAttach) CloneFromBatch(b);
+    {
+        static int logs = 0;
+        if (logs < 30) {
+            Log("HUD      UP batch %d: n=%u ext %.1f/%.1f/%.1f tex=%p",
+                g_hbCurN - 1, b->n, ext[0], ext[1], ext[2], b->tex);
+            ++logs;
+        }
+    }
+}
+
+static void HandDrawHudBatchRow(void* dev)
+{
+    CompVert3D row[HUD_BV];
+    static DWORD lastIdx = 0xFFFFFFFFu;
+    DWORD idx;
+
+    if (g_hbPrevN <= 0) return;
+    /* Cycle the model shown at the top-left every 5 s, so two screenshots
+       taken inside one window show the same batch at different times. */
+    idx = (GetTickCount() / 5000u) % (DWORD)g_hbPrevN;
+    if (idx != lastIdx) {
+        Log("HUD      showing batch %lu of %d", idx, g_hbPrevN);
+        lastIdx = idx;
+    }
+    o_SetRenderState(dev, D3DRS_ZENABLE, 0);
+    {
+        HudBatch* b = &g_hbPrev[idx];
+        const int la = b->la, ma = b->ma, sa = 3 - la - ma;
+        const float cx = 0.0f, cy = 0.30f, cz = 0.60f;
+        UINT n = 0, i;
+        if (b->valid) {
+            for (i = 0; i < b->n; ++i) {
+                const float* v = b->v[i];
+                row[n].x = cx + v[la] * b->scale;
+                row[n].y = cy + v[ma] * b->scale;
+                row[n].z = cz + v[sa] * b->scale;
+                row[n].color = 0xFFFFFFFFu;
+                row[n].u = v[3];
+                row[n].v = v[4];
+                ++n;
+            }
+            if (n >= 3) {
+                o_SetTexture(dev, 0, b->tex ? b->tex : g_whiteTex);
+                o_SetVertexShader(dev, 0x0142);
+                o_DrawPrimitiveUP(dev, D3DPT_TRIANGLELIST, n / 3, row, sizeof(CompVert3D));
+            }
+        }
+    }
+    o_SetRenderState(dev, D3DRS_ZENABLE, 1);
+}
+
+/* Draw the captured inventory gun at the dominant hand. */
+static void HandDrawAttachedBatch(void* dev, const float vp[3], const float vf[3],
+                                  const float vu[3], const float vr[3])
+{
+    CompVert3D out[HUD_BV];
+    HudBatch* b;
+    int la, ma, sa;
+    float s, o[3];
+    UINT n = 0, i;
+
+    if (g_hbPrevN <= 0 && !g_cloneValid) return;
+    b = g_cloneValid ? &g_clone : &g_hbPrev[0];
+    if (!b->valid || b->n < 3) return;
+    la = b->la; ma = b->ma; sa = 3 - la - ma;
+    s = b->scale * (0.35f / 0.09f);
+    o[0] = vp[0] + vf[0] * 0.10f;
+    o[1] = vp[1] + vf[1] * 0.10f;
+    o[2] = vp[2] + vf[2] * 0.10f;
+    for (i = 0; i < b->n; ++i) {
+        const float* v = b->v[i];
+        out[n].x = o[0] + vr[0]*v[sa]*s + vu[0]*v[ma]*s + vf[0]*v[la]*s;
+        out[n].y = o[1] + vr[1]*v[sa]*s + vu[1]*v[ma]*s + vf[1]*v[la]*s;
+        out[n].z = o[2] + vr[2]*v[sa]*s + vu[2]*v[ma]*s + vf[2]*v[la]*s;
+        out[n].color = 0xFFFFFFFFu;
+        out[n].u = v[3];
+        out[n].v = v[4];
+        ++n;
+    }
+    if (n < 3) return;
+    o_SetTexture(dev, 0, b->tex ? b->tex : g_whiteTex);
+    o_SetVertexShader(dev, 0x0142);
+    o_DrawPrimitiveUP(dev, D3DPT_TRIANGLELIST, n / 3, out, sizeof(CompVert3D));
 }
 
 static HRESULT __stdcall hkDrawIndexedPrim(void* dev, DWORD prim, UINT minIdx,
                                            UINT numV, UINT startIdx, UINT primCount)
 {
+    /* The world is drawn; the last three primCount=28/numV=34 draws are the
+       3D HUD weapon-slot models. Draw the virtual hands/laser just before the
+       first of those, so they are in the gameplay layer underneath the HUD
+       layer, not after it. */
+    if (g_compositeActive && g_gameRTActive && !g_handDrawnThisFrame &&
+        InGameplay() && primCount == 28 && numV == 34) {
+        DrawHandAndLaserWorld(dev);
+        g_handDrawnThisFrame = TRUE;
+    }
+    /* Multi-part capture: gather every draw that uses the primary weapon's
+       vertex buffer, one part per submesh. */
+    if (g_needParts && g_weaponVB && g_partN < GUN_PARTS && !g_weaponEmpty) {
+        void* vb = NULL;
+        UINT st = 0;
+        if (o_GetStreamSource) o_GetStreamSource(dev, 0, &vb, &st);
+        if (vb == g_weaponVB) {
+            g_gunScore = 0.0f;
+            CaptureGunModel(dev, minIdx, numV, startIdx, primCount);
+            if (g_gunCapValid) {
+                GunPart* p = &g_parts[g_partN];
+                p->nV = g_gunCapN;
+                memcpy(p->V, g_gunCapV, sizeof(float) * 5 * g_gunCapN);
+                p->nI = g_gunCapIN;
+                memcpy(p->I, g_gunCapI, sizeof(WORD) * g_gunCapIN);
+                p->tex = g_gunTex;
+                g_gunTex = NULL;
+                p->la = g_gunLong;
+                p->ma = g_gunMid;
+                p->scale = g_gunScale;
+                p->valid = TRUE;
+                ++g_partN;
+                Log("HIDE     part %d: %u v %u i tex=%p",
+                    g_partN - 1, p->nV, p->nI, p->tex);
+            }
+        }
+        if (vb) ReleaseIUnknown(vb);
+    }
+    if (g_handDrawnThisFrame && HideThisDraw()) return 0;
+    {
+        void* vb = NULL; UINT st = 0; void* tex = NULL;
+        TailDraw* t = &g_tail[g_tailHead & 15];
+        if (o_GetStreamSource) o_GetStreamSource(dev, 0, &vb, &st);
+        if (o_GetTexture) o_GetTexture(dev, 0, &tex);
+        t->idx = (int)g_3dIdx;
+        t->vb = vb;
+        t->numV = numV;
+        t->prim = primCount;
+        t->tex = tex;
+        ++g_tailHead;
+        if (vb) ReleaseIUnknown(vb);
+        if (tex) ReleaseIUnknown(tex);
+    }
     ++g_drawsThisFrame; ++g_drawsIDX;
     NoteDraw(g_curFvf, 0);
     if (g_dumpDraws > 0) {
         Log("DRAWDump IDX  fvf=0x%04lX primCount=%u numV=%u",
             g_curFvf, primCount, numV);
+        if (g_curFvf == 0x0144 && numV >= 20 && primCount >= 20)
+            DumpWorldZ(dev, minIdx, numV);
         --g_dumpDraws;
     }
     return o_DrawIndexedPrim(dev, prim, minIdx, numV, startIdx, primCount);
@@ -4156,7 +5519,7 @@ static void DrawSyncPixel(void* dev)
 // This is all in the D3D frame, so WinlatorXR's single-image capture sees it.
 // ---------------------------------------------------------------------------
 
-#define COMP_RS_N   19
+#define COMP_RS_N   20
 #define COMP_TS0_N  13
 #define COMP_TS1_N  6
 
@@ -4174,7 +5537,7 @@ static const DWORD kCompRs[COMP_RS_N] = {
     D3DRS_ALPHABLENDENABLE, D3DRS_FOGENABLE, D3DRS_STENCILENABLE,
     D3DRS_LIGHTING, D3DRS_COLORVERTEX, D3DRS_CLIPPING,
     D3DRS_CLIPPLANEENABLE, D3DRS_BLENDOP, D3DRS_COLORWRITEENABLE,
-    D3DRS_SCISSORTESTENABLE, D3DRS_WRAP0
+    D3DRS_SCISSORTESTENABLE, D3DRS_WRAP0, D3DRS_ZFUNC
 };
 static const DWORD kCompTs0[COMP_TS0_N] = {
     D3DTSS_COLOROP, D3DTSS_COLORARG1, D3DTSS_COLORARG2,
@@ -4289,6 +5652,476 @@ static void CompDrawQuad(void* dev, float x0, float y0, float x1, float y1,
     o_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, v, sizeof(CompVert));
 }
 
+static float HandDot(const float a[3], const float b[3])
+{
+    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+
+static void HandCross(const float a[3], const float b[3], float o[3])
+{
+    o[0] = a[1]*b[2] - a[2]*b[1];
+    o[1] = a[2]*b[0] - a[0]*b[2];
+    o[2] = a[0]*b[1] - a[1]*b[0];
+}
+
+static float HandLen(const float a[3])
+{
+    return sqrtf(HandDot(a, a));
+}
+
+static void HandNorm(float a[3])
+{
+    float l = HandLen(a);
+    if (l > 1e-6f) { a[0] /= l; a[1] /= l; a[2] /= l; }
+    else           { a[0] = 0.0f; a[1] = 0.0f; a[2] = 1.0f; }
+}
+
+/* Project a view-space point into the game's 640x480 image. The game view is
+   +Z forward, +Y up, +X right. */
+static BOOL HandProject(const float v[3], float* sx, float* sy)
+{
+    const float pi = 3.14159265358979323846f;
+    float tx, ty, nx, ny;
+
+    if (!sx || !sy || v[2] <= 0.05f) return FALSE;
+    tx = tanf(g_outFovX * pi / 360.0f);
+    ty = tanf(g_outFovY * pi / 360.0f);
+    if (tx < 0.01f) tx = 0.01f;
+    if (ty < 0.01f) ty = 0.01f;
+    nx = v[0] / (v[2] * tx);
+    ny = v[1] / (v[2] * ty);
+    *sx = (nx * 0.5f + 0.5f) * 640.0f;
+    *sy = (0.5f - ny * 0.5f) * 480.0f;
+    return TRUE;
+}
+
+static void HandMapScreen(int gx, int gy, int gw, int gh, float* x, float* y)
+{
+    *x = (float)gx + (*x * (float)gw / 640.0f);
+    *y = (float)gy + (*y * (float)gh / 480.0f);
+}
+
+static void HandDrawQuad(void* dev, const float* px, const float* py,
+                         const float* pz, const float* pu, const float* pv,
+                         DWORD color, void* tex)
+{
+    CompVert v[4];
+    int i;
+
+    if (!dev || !tex) return;
+    for (i = 0; i < 4; ++i) {
+        v[i].x = px[i]; v[i].y = py[i];
+        v[i].z = pz ? pz[i] : 0.0f;
+        v[i].rhw = 1.0f;
+        v[i].color = color;
+        v[i].u = pu[i]; v[i].v = pv[i];
+    }
+    o_SetTexture(dev, 0, tex);
+    o_SetVertexShader(dev, 0x0144);       /* XYZRHW | DIFFUSE | TEX1 */
+    o_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, v, sizeof(CompVert));
+}
+
+static void HandDrawLine(void* dev, float x0, float y0, float z0,
+                         float x1, float y1, float z1,
+                         float width, DWORD color)
+{
+    float dx, dy, len, px, py;
+    float px4[4], py4[4], pz4[4];
+    const float pu[4] = { 0, 1, 0, 1 };
+    const float pv[4] = { 0, 0, 1, 1 };
+
+    if (!dev || !g_whiteTex) return;
+    dx = x1 - x0; dy = y1 - y0;
+    len = sqrtf(dx*dx + dy*dy);
+    if (len < 0.001f) return;
+    px = -dy / len * width * 0.5f;
+    py =  dx / len * width * 0.5f;
+    px4[0] = x0 - px; py4[0] = y0 - py; pz4[0] = z0;
+    px4[1] = x1 - px; py4[1] = y1 - py; pz4[1] = z1;
+    px4[2] = x0 + px; py4[2] = y0 + py; pz4[2] = z0;
+    px4[3] = x1 + px; py4[3] = y1 + py; pz4[3] = z1;
+    HandDrawQuad(dev, px4, py4, pz4, pu, pv, color, g_whiteTex);
+}
+
+/* XYZ + DIFFUSE + TEX1, 24 bytes. D3D projects and depth-tests it with the
+   game's own view/projection, so it matches the world depth buffer. */
+static void HandDrawQuad3D(void* dev, const float p[4][3],
+                           const float* pu, const float* pv,
+                           DWORD color, void* tex)
+{
+    CompVert3D v[4];
+    int i;
+
+    if (!dev || !tex) return;
+    for (i = 0; i < 4; ++i) {
+        v[i].x = p[i][0]; v[i].y = p[i][1]; v[i].z = p[i][2];
+        v[i].color = color;
+        v[i].u = pu[i]; v[i].v = pv[i];
+    }
+    o_SetTexture(dev, 0, tex);
+    o_SetVertexShader(dev, 0x0142);       /* XYZ | DIFFUSE | TEX1 */
+    o_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, v, sizeof(CompVert3D));
+}
+
+/* Camera-facing 3D quad for one laser segment. The width is scaled with
+   distance so the beam stays roughly `pixels` wide on screen while still
+   being real 3D geometry with real depth. */
+static void HandDrawBeam3D(void* dev, const float p0[3], const float p1[3],
+                           float pixels, DWORD color)
+{
+    const float u[4] = { 0, 1, 0, 1 };
+    const float v[4] = { 0, 0, 1, 1 };
+    float dir[3], right[3];
+    const float viewF[3] = { 0.0f, 0.0f, 1.0f };
+    float w0, w1, tanY;
+    float corners[4][3];
+
+    if (!dev || !g_whiteTex) return;
+    dir[0] = p1[0] - p0[0];
+    dir[1] = p1[1] - p0[1];
+    dir[2] = p1[2] - p0[2];
+    HandNorm(dir);
+    /* view forward is (0,0,1); beam right is perpendicular to both */
+    HandCross(viewF, dir, right);
+    if (HandLen(right) < 0.001f) {
+        right[0] = 1.0f; right[1] = 0.0f; right[2] = 0.0f;
+    } else {
+        HandNorm(right);
+    }
+    tanY = tanf(g_outFovY * 3.14159265358979323846f / 360.0f);
+    if (tanY < 0.01f) tanY = 0.01f;
+    w0 = pixels * p0[2] * 2.0f * tanY / 480.0f;
+    w1 = pixels * p1[2] * 2.0f * tanY / 480.0f;
+
+    corners[0][0] = p0[0] - right[0]*w0*0.5f;
+    corners[0][1] = p0[1] - right[1]*w0*0.5f;
+    corners[0][2] = p0[2] - right[2]*w0*0.5f;
+    corners[1][0] = p1[0] - right[0]*w1*0.5f;
+    corners[1][1] = p1[1] - right[1]*w1*0.5f;
+    corners[1][2] = p1[2] - right[2]*w1*0.5f;
+    corners[2][0] = p0[0] + right[0]*w0*0.5f;
+    corners[2][1] = p0[1] + right[1]*w0*0.5f;
+    corners[2][2] = p0[2] + right[2]*w0*0.5f;
+    corners[3][0] = p1[0] + right[0]*w1*0.5f;
+    corners[3][1] = p1[1] + right[1]*w1*0.5f;
+    corners[3][2] = p1[2] + right[2]*w1*0.5f;
+    HandDrawQuad3D(dev, corners, u, v, color, g_whiteTex);
+}
+
+/* Build a hand's view-space basis. Positions/orientations come from XrApi,
+   already relative to the head; transform by the head basis. */
+static void HandViewPose(const float* hp, const float* hf, const float* hu,
+                         BOOL isRight, BOOL flip,
+                         float vp[3], float vf[3], float vu[3], float vr[3])
+{
+    float headR[3], rel[3];
+    BOOL noPos = (HandLen(hp) < 0.01f);
+    BOOL noDir = (HandLen(hf) < 0.01f);
+    float d;
+
+    HandCross(g_pose.headU, g_pose.headF, headR);
+    HandNorm(headR);
+
+    if (noPos) {
+        vp[0] = isRight ? 0.22f : -0.22f;
+        vp[1] = -0.16f;
+        vp[2] = 0.45f;
+        if (!g_handLogged) {
+            g_handLogged = TRUE;
+            Log("HAND     no controller hand position; using fallback offsets");
+        }
+    } else {
+        rel[0] = hp[0] - g_pose.headP[0];
+        rel[1] = hp[1] - g_pose.headP[1];
+        rel[2] = hp[2] - g_pose.headP[2];
+        vp[0] = HandDot(rel, headR);
+        vp[1] = HandDot(rel, g_pose.headU);
+        vp[2] = HandDot(rel, g_pose.headF);
+    }
+
+    if (noDir) {
+        vf[0] = 0.0f; vf[1] = 0.0f; vf[2] = 1.0f;
+        vu[0] = 0.0f; vu[1] = 1.0f; vu[2] = 0.0f;
+    } else {
+        vf[0] = HandDot(hf, headR);
+        vf[1] = HandDot(hf, g_pose.headU);
+        vf[2] = HandDot(hf, g_pose.headF);
+        vu[0] = HandDot(hu, headR);
+        vu[1] = HandDot(hu, g_pose.headU);
+        vu[2] = HandDot(hu, g_pose.headF);
+        HandNorm(vf);
+        if (HandLen(vu) < 0.1f) {
+            vu[0] = 0.0f; vu[1] = 1.0f; vu[2] = 0.0f;
+        }
+    }
+
+    if (vp[2] < 0.18f) vp[2] = 0.18f;
+
+    d = HandDot(vu, vf);
+    vu[0] -= vf[0]*d; vu[1] -= vf[1]*d; vu[2] -= vf[2]*d;
+    HandNorm(vu);
+    HandCross(vu, vf, vr);
+    HandNorm(vr);
+    if (flip) {
+        vu[0] = -vu[0]; vu[1] = -vu[1]; vu[2] = -vu[2];
+        vr[0] = -vr[0]; vr[1] = -vr[1]; vr[2] = -vr[2];
+    }
+}
+
+/* A solid 3D rectangular hand: 0.08 x 0.14 x 0.14 m, extending forward from
+   the controller. Six textured faces, depth-tested against the world. */
+static void HandDrawBox(void* dev, const float vp[3], const float vf[3],
+                        const float vu[3], const float vr[3])
+{
+    const float hw = 0.016f, hh = 0.028f, hl = 0.028f, off = 0.023f;
+    const float u[4] = { 0, 1, 0, 1 };
+    const float v[4] = { 0, 0, 1, 1 };
+    const int faces[6][4] = {
+        { 0, 1, 2, 3 },   /* back  */
+        { 4, 5, 6, 7 },   /* front */
+        { 0, 2, 4, 6 },   /* left  */
+        { 1, 3, 5, 7 },   /* right */
+        { 0, 1, 4, 5 },   /* bottom*/
+        { 2, 3, 6, 7 }    /* top   */
+    };
+    float c[3], R[3], U[3], F[3];
+    float corner[8][3];
+    int f, i;
+
+    c[0] = vp[0] + vf[0]*(off + hl);
+    c[1] = vp[1] + vf[1]*(off + hl);
+    c[2] = vp[2] + vf[2]*(off + hl);
+    R[0] = vr[0]*hw; R[1] = vr[1]*hw; R[2] = vr[2]*hw;
+    U[0] = vu[0]*hh; U[1] = vu[1]*hh; U[2] = vu[2]*hh;
+    F[0] = vf[0]*hl; F[1] = vf[1]*hl; F[2] = vf[2]*hl;
+
+    for (i = 0; i < 8; ++i) {
+        const float sr = (i & 1) ? 1.0f : -1.0f;
+        const float su = (i & 2) ? 1.0f : -1.0f;
+        const float sf = (i & 4) ? 1.0f : -1.0f;
+        corner[i][0] = c[0] + R[0]*sr + U[0]*su + F[0]*sf;
+        corner[i][1] = c[1] + R[1]*sr + U[1]*su + F[1]*sf;
+        corner[i][2] = c[2] + R[2]*sr + U[2]*su + F[2]*sf;
+    }
+
+    for (f = 0; f < 6; ++f) {
+        float q[4][3];
+        for (i = 0; i < 4; ++i) {
+            const int n = faces[f][i];
+            q[i][0] = corner[n][0];
+            q[i][1] = corner[n][1];
+            q[i][2] = corner[n][2];
+        }
+        HandDrawQuad3D(dev, q, u, v, 0xFFFFFFFFu, g_handTex);
+    }
+}
+
+/* Continuous 3D beam: one triangle strip sharing a single camera-facing right
+   vector, so segment joints do not gap. Width is scaled per point to keep the
+   on-screen thickness roughly `pixels`. */
+static void HandDrawBeam3DStrip(void* dev, const float* pts, int count,
+                                float pixels, DWORD color)
+{
+    const float viewF[3] = { 0.0f, 0.0f, 1.0f };
+    float dir[3], right[3], tanY;
+    CompVert3D verts[50];
+    int i;
+
+    if (!dev || !g_whiteTex || count < 2 || count > 25) return;
+    dir[0] = pts[(count - 1) * 3 + 0] - pts[0];
+    dir[1] = pts[(count - 1) * 3 + 1] - pts[1];
+    dir[2] = pts[(count - 1) * 3 + 2] - pts[2];
+    HandNorm(dir);
+    HandCross(viewF, dir, right);
+    if (HandLen(right) < 0.001f) {
+        right[0] = 1.0f; right[1] = 0.0f; right[2] = 0.0f;
+    } else {
+        HandNorm(right);
+    }
+    tanY = tanf(g_outFovY * 3.14159265358979323846f / 360.0f);
+    if (tanY < 0.01f) tanY = 0.01f;
+
+    for (i = 0; i < count; ++i) {
+        float z = pts[i * 3 + 2];
+        float w;
+        if (z < 0.05f) z = 0.05f;
+        w = pixels * z * 2.0f * tanY / 480.0f;
+        verts[2*i].x = pts[i*3+0] - right[0]*w*0.5f;
+        verts[2*i].y = pts[i*3+1] - right[1]*w*0.5f;
+        verts[2*i].z = pts[i*3+2] - right[2]*w*0.5f;
+        verts[2*i].color = color;
+        verts[2*i].u = 0.0f;
+        verts[2*i].v = (float)i / (float)(count - 1);
+        verts[2*i+1].x = pts[i*3+0] + right[0]*w*0.5f;
+        verts[2*i+1].y = pts[i*3+1] + right[1]*w*0.5f;
+        verts[2*i+1].z = pts[i*3+2] + right[2]*w*0.5f;
+        verts[2*i+1].color = color;
+        verts[2*i+1].u = 1.0f;
+        verts[2*i+1].v = (float)i / (float)(count - 1);
+    }
+    o_SetTexture(dev, 0, g_whiteTex);
+    o_SetVertexShader(dev, 0x0142);
+    o_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2 * count - 2,
+                      verts, sizeof(CompVert3D));
+}
+
+static void HandMakeProjection(D3DMATRIX8* m, float fovY, float aspect,
+                               float n, float f)
+{
+    const float pi = 3.14159265358979323846f;
+    const float h = 1.0f / tanf(fovY * pi / 360.0f);
+    ZeroMemory(m, sizeof(*m));
+    m->m[0][0] = h / aspect;
+    m->m[1][1] = h;
+    m->m[2][2] = f / (f - n);
+    m->m[2][3] = 1.0f;
+    m->m[3][2] = -(f * n) / (f - n);
+}
+
+static void DrawHandAndLaserWorld(void* dev)
+{
+    float dvp[3], dvf[3], dvu[3], dvr[3];
+    float ovp[3], ovf[3], ovu[3], ovr[3];
+    const int segs = 24;
+    BOOL domRight;
+    CompState st;
+    DWORD savedFvf;
+    void* savedTex = NULL;
+    D3DMATRIX8 view, proj, saveView, saveProj;
+    D3DMATRIX8 world, saveWorld;
+    BOOL haveView = FALSE, haveProj = FALSE, haveWorld = FALSE;
+    int i;
+
+    if (!dev || !InGameplay() || !g_posed || !g_pose.valid) return;
+    if (!g_handTex || !g_whiteTex) return;
+
+    domRight = (g_handedness == 0) ? TRUE : FALSE;
+    if (domRight)
+        HandViewPose(g_pose.rP, g_pose.rF, g_pose.rU, TRUE, g_handFlip,
+                     dvp, dvf, dvu, dvr);
+    else
+        HandViewPose(g_pose.lP, g_pose.lF, g_pose.lU, FALSE, g_handFlip,
+                     dvp, dvf, dvu, dvr);
+
+    if (domRight)
+        HandViewPose(g_pose.lP, g_pose.lF, g_pose.lU, FALSE, FALSE,
+                     ovp, ovf, ovu, ovr);
+    else
+        HandViewPose(g_pose.rP, g_pose.rF, g_pose.rU, TRUE, FALSE,
+                     ovp, ovf, ovu, ovr);
+
+    if ((g_frame % 120) == 0) {
+        float dsx = 0, dsy = 0, osx = 0, osy = 0;
+        BOOL dok = HandProject(dvp, &dsx, &dsy);
+        BOOL ook = HandProject(ovp, &osx, &osy);
+        Log("HAND screen dom %s %.0f,%.0f  off %s %.0f,%.0f  (640x480)",
+            dok ? "ok" : "BEHIND", dsx, dsy, ook ? "ok" : "BEHIND", osx, osy);
+    }
+
+    savedFvf = g_curFvf;
+    CompSaveState(dev, &st);
+    CompSetStates(dev);
+    if (o_GetTexture) o_GetTexture(dev, 0, &savedTex);
+    {
+        /* The 3D HUD model pass may have set a small slot viewport. Draw the
+           hands at the full game resolution. */
+        D3DVIEWPORT8 vp;
+        vp.X = 0; vp.Y = 0; vp.Width = 640; vp.Height = 480;
+        vp.MinZ = 0.0f; vp.MaxZ = 1.0f;
+        o_SetViewport(dev, &vp);
+    }
+    o_SetRenderState(dev, D3DRS_ZENABLE, 1);
+    o_SetRenderState(dev, D3DRS_ZWRITEENABLE, 0);
+    o_SetRenderState(dev, D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+    o_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, 1);
+
+    /* Use the game's own 3D pipeline. The world vertices are already in camera
+       space, so the view is identity; the captured game projection makes our
+       depth values exactly comparable with the world's depth buffer. */
+    ZeroMemory(&view, sizeof(view));
+    view.m[0][0] = view.m[1][1] = view.m[2][2] = view.m[3][3] = 1.0f;
+    world = view;                       /* identity: no leftover model matrix */
+    if (g_haveProj) proj = g_lastProj;
+    else HandMakeProjection(&proj, 65.0f, 4.0f / 3.0f, 0.1f, 80.0f);
+    if (o_GetTransform) {
+        haveView = (o_GetTransform(dev, D3DTS_VIEW, &saveView) == S_OK);
+        haveProj = (o_GetTransform(dev, D3DTS_PROJECTION, &saveProj) == S_OK);
+        haveWorld = (o_GetTransform(dev, D3DTS_WORLD, &saveWorld) == S_OK);
+    }
+    if (o_SetTransform) {
+        o_SetTransform(dev, D3DTS_WORLD, &world);
+        o_SetTransform(dev, D3DTS_VIEW, &view);
+        o_SetTransform(dev, D3DTS_PROJECTION, &proj);
+    }
+    {
+        static int matLog = 0;
+        if (matLog < 1) {
+            void* rt = NULL;
+            void* ds = NULL;
+            if (o_GetRenderTarget) o_GetRenderTarget(dev, &rt);
+            if (o_GetDepthStencilSurface) o_GetDepthStencilSurface(dev, &ds);
+            Log("HAND     3D draw #%d frame %ld: draw %ld idx %ld begin %ld end %ld"
+                "  target=%p gameRT=%p  depth=%p gameDepth=%p",
+                matLog, g_frame, g_drawsThisFrame, g_drawsIDX,
+                g_beginThisFrame, g_endThisFrame, rt, g_gameRTSurf, ds, g_gameDepth);
+            if (rt) ReleaseIUnknown(rt);
+            if (ds) ReleaseIUnknown(ds);
+            ++matLog;
+            if (matLog == 1) {
+                Log("HAND     3D draw: game view %s, projection %s",
+                    haveView ? "read" : "unavailable",
+                    g_haveProj ? "captured" : "built");
+                if (haveView) LogMatrix("HAND view", &saveView);
+                LogMatrix("HAND proj", &proj);
+            }
+        }
+    }
+
+    /* Both hands as solid 3D boxes. Z-write makes the nearest face win.
+       The gun model and muzzle effects are the game's own assets; they will
+       be duplicated onto the hand in a later pass. */
+    o_SetRenderState(dev, D3DRS_ZWRITEENABLE, 1);
+    HandDrawBox(dev, ovp, ovf, ovu, ovr);
+    {
+        float hvp[3];
+        hvp[0] = dvp[0] + dvr[0]*g_handAdj[0] + dvu[0]*g_handAdj[1] + dvf[0]*g_handAdj[2];
+        hvp[1] = dvp[1] + dvr[1]*g_handAdj[0] + dvu[1]*g_handAdj[1] + dvf[1]*g_handAdj[2];
+        hvp[2] = dvp[2] + dvr[2]*g_handAdj[0] + dvu[2]*g_handAdj[1] + dvf[2]*g_handAdj[2];
+        HandDrawBox(dev, hvp, dvf, dvu, dvr);
+    }
+    if (g_partN > 0 && !g_weaponEmpty && !g_needParts)
+        HandDrawCapturedGun(dev, dvp, dvf, dvu, dvr);
+    o_SetRenderState(dev, D3DRS_ZWRITEENABLE, 0);
+
+    /* Laser from the dominant hand. Segmented for depth. */
+    if (!g_zoomOn) {
+        float beam[25 * 3];
+        for (i = 0; i <= segs; ++i) {
+            const float t = (float)i / (float)segs;
+            beam[i*3+0] = dvp[0] + dvf[0]*(0.20f + 30.0f*t);
+            beam[i*3+1] = dvp[1] + dvf[1]*(0.20f + 30.0f*t);
+            beam[i*3+2] = dvp[2] + dvf[2]*(0.20f + 30.0f*t);
+        }
+        HandDrawBeam3DStrip(dev, beam, segs + 1, 6.0f, 0x50FF2020u);
+        HandDrawBeam3DStrip(dev, beam, segs + 1, 2.0f, 0xFFFF3030u);
+    }
+
+    /* Muzzle flash / smoke are the game's own effects; we do not draw our
+       own. g_flashFrames stays as a "shot recently" counter for the pass
+       that will move those effects onto the hand. */
+    if (g_flashFrames > 0) { /* reserved for the game-effect relocation */ }
+
+    if (o_SetTransform) {
+        if (haveWorld) o_SetTransform(dev, D3DTS_WORLD, &saveWorld);
+        if (haveView) o_SetTransform(dev, D3DTS_VIEW, &saveView);
+        if (haveProj) o_SetTransform(dev, D3DTS_PROJECTION, &saveProj);
+    }
+    if (o_SetTexture) o_SetTexture(dev, 0, savedTex);
+    if (savedTex) ReleaseIUnknown(savedTex);
+    CompRestoreState(dev, &st);
+    if (savedFvf) o_SetVertexShader(dev, savedFvf);
+}
+
 static void ReleaseSavedTargets(void);
 static void BindGameRenderTarget(void* dev);
 static void BindBackBuffer(void* dev);
@@ -4303,10 +6136,74 @@ static void ReleaseCompositeResources(void)
     if (g_frameTex)   { ReleaseIUnknown(g_frameTex);   g_frameTex   = NULL; }
     if (g_hudTex)     { ReleaseIUnknown(g_hudTex);     g_hudTex     = NULL; }
     if (g_panelTex)   { ReleaseIUnknown(g_panelTex);   g_panelTex   = NULL; }
+    if (g_handTex)    { ReleaseIUnknown(g_handTex);    g_handTex    = NULL; }
+    if (g_whiteTex)   { ReleaseIUnknown(g_whiteTex);   g_whiteTex   = NULL; }
+    if (g_gunTex)     { ReleaseIUnknown(g_gunTex);     g_gunTex     = NULL; }
+    if (g_clone.tex)  { ReleaseIUnknown(g_clone.tex);  g_clone.tex  = NULL; }
+    g_cloneValid = FALSE;
     g_hudTexW = g_hudTexH = 0;
     g_hudValid = FALSE;
     g_gameRTActive = FALSE;
     g_compositeActive = FALSE;
+}
+
+static void* HandMakeTexture(void* dev, int w, int h, const DWORD* pixels)
+{
+    void* tex = NULL;
+    D3DLOCKED_RECT8 lr;
+    HRESULT hr;
+    int y;
+
+    if (!dev || !pixels || !o_CreateTexture) return NULL;
+    hr = o_CreateTexture(dev, (UINT)w, (UINT)h, 1, 0, D3DFMT_A8R8G8B8,
+                         D3DPOOL_MANAGED, &tex);
+    if (FAILED(hr) || !tex) {
+        Log("HAND     CreateTexture(%dx%d) failed hr=0x%08lX", w, h, hr);
+        return NULL;
+    }
+    if (TexLock(tex, 0, &lr, NULL, 0) != S_OK || !lr.pBits) {
+        Log("HAND     LockRect(%dx%d) failed", w, h);
+        ReleaseIUnknown(tex);
+        return NULL;
+    }
+    for (y = 0; y < h; ++y)
+        memcpy((BYTE*)lr.pBits + (SIZE_T)y * lr.Pitch,
+               pixels + (SIZE_T)y * w, (SIZE_T)w * 4);
+    TexUnlock(tex, 0);
+    return tex;
+}
+
+static void EnsureHandTextures(void* dev)
+{
+    DWORD pix[64 * 64];
+    DWORD white = 0xFFFFFFFF;
+    int x, y;
+
+    if (g_handTex && g_whiteTex) return;
+
+    if (g_handTex)  { ReleaseIUnknown(g_handTex);  g_handTex = NULL; }
+    if (g_whiteTex) { ReleaseIUnknown(g_whiteTex); g_whiteTex = NULL; }
+
+    for (y = 0; y < 64; ++y) {
+        for (x = 0; x < 64; ++x) {
+            int shade = 30 + (63 - y) * 45 / 63;
+            if (y < 6 || y > 57 || x < 6 || x > 57) shade = 15;
+            if (shade > 120) shade = 120;
+            pix[y * 64 + x] = (0xFFu << 24) |
+                              ((DWORD)shade << 16) |
+                              ((DWORD)shade << 8) |
+                               (DWORD)shade;
+        }
+    }
+    g_handTex = HandMakeTexture(dev, 64, 64, pix);
+    g_whiteTex = HandMakeTexture(dev, 1, 1, &white);
+    if (!g_handTex || !g_whiteTex) {
+        Log("HAND     hand/white texture creation failed; laser disabled");
+        if (g_handTex)  { ReleaseIUnknown(g_handTex);  g_handTex = NULL; }
+        if (g_whiteTex) { ReleaseIUnknown(g_whiteTex); g_whiteTex = NULL; }
+    } else {
+        Log("HAND     hand texture 64x64 + white 1x1 ready");
+    }
 }
 
 static BOOL EnsureCompositeResources(void* dev)
@@ -4352,6 +6249,7 @@ static BOOL EnsureCompositeResources(void* dev)
     }
     g_compositeActive = TRUE;
     g_gameRTFirstScene = TRUE;
+    EnsureHandTextures(dev);
     BindGameRenderTarget(dev);
     Log("COMPOSITE active: back buffer %ux%u, game render target 640x480"
         " fmt=%lu", g_bbW, g_bbH, g_bbFormat);
@@ -4574,6 +6472,25 @@ static HRESULT __stdcall hkSetRenderTarget(void* dev, void* rt, void* depth)
     return o_SetRenderTarget(dev, rt, depth);
 }
 
+static HRESULT __stdcall hkClear(void* dev, DWORD count, const D3DRECT8* rects,
+                                 DWORD flags, DWORD color, float z, DWORD stencil)
+{
+    if (g_handDrawnThisFrame) {
+        static int n = 0;
+        if (n++ < 12) {
+            void* rt = NULL;
+            if (o_GetRenderTarget) o_GetRenderTarget(dev, &rt);
+            Log("CLEAR    after hand draw frame %ld: flags=0x%08lX"
+                " color=0x%08lX z=%.3f target=%p gameRT=%p"
+                "  draws=%ld idx=%ld begin=%ld end=%ld",
+                g_frame, flags, color, z, rt, g_gameRTSurf,
+                g_drawsThisFrame, g_drawsIDX, g_beginThisFrame, g_endThisFrame);
+            if (rt) ReleaseIUnknown(rt);
+        }
+    }
+    return o_Clear(dev, count, rects, flags, color, z, stencil);
+}
+
 static void ReleaseSavedTargets(void)
 {
     if (g_savedRT)    { ReleaseIUnknown(g_savedRT);    g_savedRT = NULL; }
@@ -4637,10 +6554,39 @@ static void BindBackBuffer(void* dev)
 static HRESULT __stdcall hkBeginScene(void* dev)
 {
     ++g_beginThisFrame;
+    g_handDrawnThisFrame = FALSE;
+    g_3dIdx = 0;
+    g_tailHead = 0;
+    ReleaseHudBatches();
+    /* A shot aimed at the hand must not move the rendered view: put the
+       mouse/HMD view back before the world is drawn. In VR SteerTick also
+       writes it, but in user-control mode SteerTick is off. */
+    if (g_aimRestore) {
+        SafeWrite(CamAddr(A_YAW),   g_aimSavedA[0]);
+        SafeWrite(CamAddr(A_PITCH), g_aimSavedA[1]);
+        if (g_aimSavedBok) {
+            SafeWrite(CamAddr(B_YAW),   g_aimSavedB[0]);
+            SafeWrite(CamAddr(B_PITCH), g_aimSavedB[1]);
+        }
+        g_aimRestore = FALSE;
+    }
+    if (g_flashFrames > 0) --g_flashFrames;
+    /* The active slot's model is the second-to-last 3D draw. Follow the
+       count so it stays correct across levels, and re-capture on a swap. */
+    WatchWeaponSwap();
+    if (g_3dPrevN > 2 && !g_3dManual)
+        g_3dSel = g_3dPrevN - 2;
     /* Poll first, then steer, then let the probe wiggle on top - so a probe
        experiment always wins over the pose and stays usable while steering. */
     if (XrRunning()) {
-        g_posed = XrPoll(&g_pose) ? TRUE : g_posed;
+        /* In user-control mode the numpad pose is the only source of truth,
+           so ignore incoming 6DOF packets entirely - otherwise a synthetic
+           tester or a live headset keeps moving the head and off-hand. */
+        if (!g_manualRight)
+            g_posed = XrPoll(&g_pose) ? TRUE : g_posed;
+        /* In "0" desktop mode the numpad owns the right hand; re-apply after
+           the poll so the XrApi packet does not overwrite it. */
+        if (g_manualRight) ManualHandApply();
         /* Only drive the camera while the previous frame looked like gameplay.
            In the title, briefing/objective, menus and death screens the game
            owns its own camera and the runtime is in MODE_VR 0. */
@@ -4657,6 +6603,34 @@ static HRESULT __stdcall hkEndScene(void* dev)
 {
     HRESULT hr;
     ++g_endThisFrame;
+    /* Normally the hand/laser pass already ran at the first 3D HUD model draw.
+       Only use this end-of-scene fallback if no HUD/model draw matched. */
+    if (g_compositeActive && InGameplay() && !g_handDrawnThisFrame) {
+        DrawHandAndLaserWorld(dev);
+        g_handDrawnThisFrame = TRUE;
+    }
+    if (g_tailDump) {
+        int n = g_tailHead < 12 ? g_tailHead : 12;
+        int i;
+        Log("TAIL     last %d indexed draws (of %d):", n, g_tailHead);
+        for (i = 0; i < n; ++i) {
+            TailDraw* t = &g_tail[(g_tailHead - n + i) & 15];
+            Log("TAIL     idx %d  vb=%p  numV=%u prim=%u tex=%p",
+                t->idx, t->vb, t->numV, t->prim, t->tex);
+        }
+        g_tailDump = FALSE;
+    }
+    if (g_needParts) {
+        if (!g_weaponVB && g_tailHead > 0) {
+            g_weaponVB = g_tail[(g_tailHead - 1) & 15].vb;
+            Log("HIDE     weapon VB %p; capturing parts next frame", g_weaponVB);
+        } else if (g_weaponVB && g_partN > 0) {
+            g_needParts = FALSE;
+            Log("HIDE     assembled %d part(s) for '%s'",
+                g_partN, ActiveWeaponName());
+        }
+    }
+    g_3dPrevN = g_3dIdx;
     hr = o_EndScene(dev);
     /* Keep the game target bound - the title background is drawn between
        scenes. The back buffer is bound only in Present. */
@@ -4898,14 +6872,17 @@ static void HookDevice(void* dev)
     if (!dev) return;
     void* tmp = NULL;
 
-    /* Clear is not patched - we only need to call it for the sync square.
-       Capture it here rather than assuming the vtable survives a Reset. */
+    /* Clear is used for the sync square and is also probed for clears that
+       happen after the hand pass. */
     {
         void** vtbl = *(void***)dev;
         if (vtbl) {
-            o_Clear = (PFN_Clear)vtbl[VT_DEV_CLEAR];
             /* Read-only slots used by the target-resolution composite. */
             o_GetBackBuffer        = (PFN_GetBackBuffer)vtbl[VT_DEV_GETBACKBUFFER];
+            o_GetStreamSource      = (PFN_GetStreamSource)vtbl[84];
+            o_GetIndices           = (PFN_GetIndices)vtbl[86];
+            o_DrawIndexedPrimitiveUP = (PFN_DrawIndexedPrimitiveUP)vtbl[VT_DEV_DRAWINDEXEDPRIMUP];
+            o_GetTransform         = (PFN_GetTransform)vtbl[VT_DEV_GETTRANSFORM];
             o_CreateTexture        = (PFN_CreateTexture)vtbl[VT_DEV_CREATETEXTURE];
             o_CreateDepthStencilSurface = (PFN_CreateDepthStencilSurface)vtbl[VT_DEV_CREATEDEPTHSTENCIL];
             o_CreateImageSurface   = (PFN_CreateImageSurface)vtbl[VT_DEV_CREATEIMAGESURFACE];
@@ -4916,12 +6893,14 @@ static void HookDevice(void* dev)
             o_SetRenderState       = (PFN_SetRenderState)vtbl[VT_DEV_SETRENDERSTATE];
             o_GetRenderState       = (PFN_GetRenderState)vtbl[VT_DEV_GETRENDERSTATE];
             o_SetTexture           = (PFN_SetTexture)vtbl[VT_DEV_SETTEXTURE];
+            o_GetTexture           = (PFN_GetTexture)vtbl[60];
             o_SetTextureStageState = (PFN_SetTextureStageState)vtbl[VT_DEV_SETTEXTURESTAGESTATE];
             o_GetTextureStageState = (PFN_GetTextureStageState)vtbl[VT_DEV_GETTEXTURESTAGESTATE];
         }
     }
 
     if (PatchSlot(dev, VT_DEV_SETRENDERTARGET, (void*)hkSetRenderTarget, &tmp) && tmp != (void*)hkSetRenderTarget) o_SetRenderTarget = (PFN_SetRenderTarget)tmp;
+    if (PatchSlot(dev, VT_DEV_CLEAR,          (void*)hkClear,          &tmp) && tmp != (void*)hkClear)          o_Clear          = (PFN_Clear)tmp;
     if (PatchSlot(dev, VT_DEV_SETVIEWPORT,     (void*)hkSetViewport,     &tmp) && tmp != (void*)hkSetViewport)     o_SetViewport     = (PFN_SetViewport)tmp;
 
     if (PatchSlot(dev, VT_DEV_SETTRANSFORM,    (void*)hkSetTransform,    &tmp) && tmp != (void*)hkSetTransform) o_SetTransform    = (PFN_SetTransform)tmp;
@@ -4929,6 +6908,7 @@ static void HookDevice(void* dev)
     if (PatchSlot(dev, VT_DEV_BEGINSCENE,      (void*)hkBeginScene,      &tmp) && tmp != (void*)hkBeginScene)    o_BeginScene      = (PFN_BeginScene)tmp;
     if (PatchSlot(dev, VT_DEV_ENDSCENE,        (void*)hkEndScene,        &tmp) && tmp != (void*)hkEndScene)      o_EndScene        = (PFN_EndScene)tmp;
     if (PatchSlot(dev, VT_DEV_DRAWPRIMITIVEUP, (void*)hkDrawPrimitiveUP, &tmp) && tmp != (void*)hkDrawPrimitiveUP) o_DrawPrimitiveUP = (PFN_DrawPrimitiveUP)tmp;
+    if (PatchSlot(dev, VT_DEV_DRAWINDEXEDPRIMUP, (void*)hkDrawIndexedPrimitiveUP, &tmp) && tmp != (void*)hkDrawIndexedPrimitiveUP) o_DrawIndexedPrimitiveUP = (PFN_DrawIndexedPrimitiveUP)tmp;
     if (PatchSlot(dev, VT_DEV_DRAWPRIMITIVE,   (void*)hkDrawPrimitive,   &tmp) && tmp != (void*)hkDrawPrimitive)   o_DrawPrimitive   = (PFN_DrawPrimitive)tmp;
     if (PatchSlot(dev, VT_DEV_DRAWINDEXEDPRIM, (void*)hkDrawIndexedPrim, &tmp) && tmp != (void*)hkDrawIndexedPrim) o_DrawIndexedPrim = (PFN_DrawIndexedPrim)tmp;
     if (PatchSlot(dev, VT_DEV_SETVERTEXSHADER, (void*)hkSetVertexShader, &tmp) && tmp != (void*)hkSetVertexShader) o_SetVertexShader = (PFN_SetVertexShader)tmp;
