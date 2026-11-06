@@ -2174,6 +2174,7 @@ static BOOL InputKeyBlocked(int vk)
 static SHORT WINAPI hkGetAsyncKeyState(int vk)
 {
     ++g_inCalls[IN_GETASYNCKEYSTATE]; ++g_inFrame[IN_GETASYNCKEYSTATE];
+    if (!g_inReal[IN_GETASYNCKEYSTATE]) return 0;
     if (!GameWindowFocused() || InputKeyBlocked(vk)) return 0;
     return ((PFN_GetAsyncKeyState)g_inReal[IN_GETASYNCKEYSTATE])(vk);
 }
@@ -2182,6 +2183,7 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
 {
     BOOL r;
     ++g_inCalls[IN_GETKEYBOARDSTATE]; ++g_inFrame[IN_GETKEYBOARDSTATE];
+    if (!g_inReal[IN_GETKEYBOARDSTATE]) return FALSE;
     r = ((PFN_GetKeyboardState)g_inReal[IN_GETKEYBOARDSTATE])(p);
     if (r && p) {
         /* Focus is the boundary for DESKTOP input. While another window owns
@@ -2256,6 +2258,7 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
 static SHORT WINAPI hkGetKeyState(int vk)
 {
   ++g_inCalls[IN_GETKEYSTATE]; ++g_inFrame[IN_GETKEYSTATE];
+  if (!g_inReal[IN_GETKEYSTATE]) return 0;
   if (!GameWindowFocused() || InputKeyBlocked(vk)) return 0;
   return ((PFN_GetKeyState)g_inReal[IN_GETKEYSTATE])(vk);
 }
@@ -2264,6 +2267,7 @@ static BOOL WINAPI hkGetCursorPos(LPPOINT p)
 {
     BOOL r;
     ++g_inCalls[IN_GETCURSORPOS]; ++g_inFrame[IN_GETCURSORPOS];
+    if (!g_inReal[IN_GETCURSORPOS]) return FALSE;
     r = ((PFN_GetCursorPos)g_inReal[IN_GETCURSORPOS])(p);
     if (r && p) {
         /* The game recentres the cursor and reads it back to get its look
@@ -2311,6 +2315,7 @@ static HWND WINAPI hkGetForegroundWindow(void)
 {
     HWND real;
     ++g_inCalls[IN_GETFOREGROUNDWINDOW]; ++g_inFrame[IN_GETFOREGROUNDWINDOW];
+    if (!g_inReal[IN_GETFOREGROUNDWINDOW]) return g_gameWnd;
     real = ((PFN_GetForegroundWindow)g_inReal[IN_GETFOREGROUNDWINDOW])();
     /* Lie only when we know what to lie with, and only to this one caller -
        the real answer still goes to everyone else in the process. */
@@ -2323,6 +2328,7 @@ static BOOL WINAPI hkSetCursorPos(int x, int y)
     HWND fg = NULL;
 
     ++g_inCalls[IN_SETCURSORPOS]; ++g_inFrame[IN_SETCURSORPOS];
+    if (!g_inReal[IN_SETCURSORPOS]) return FALSE;
     g_lastCursor.x = x; g_lastCursor.y = y; g_cursorKnown = TRUE;
 
     /* Never move the real desktop cursor while another window has focus. The
@@ -2344,6 +2350,7 @@ static BOOL WINAPI hkScreenToClient(HWND h, LPPOINT p)
 {
     BOOL r;
     ++g_inCalls[IN_SCREENTOCLIENT]; ++g_inFrame[IN_SCREENTOCLIENT];
+    if (!g_inReal[IN_SCREENTOCLIENT]) return FALSE;
     r = ((PFN_ScreenToClient)g_inReal[IN_SCREENTOCLIENT])(h, p);
     if (r && p && g_gameWnd && h == g_gameWnd &&
         g_displayScaleX > 0.0f && g_displayScaleY > 0.0f) {
@@ -2358,6 +2365,7 @@ static BOOL WINAPI hkClientToScreen(HWND h, LPPOINT p)
     POINT q;
     BOOL r;
     ++g_inCalls[IN_CLIENTTOSCREEN]; ++g_inFrame[IN_CLIENTTOSCREEN];
+    if (!g_inReal[IN_CLIENTTOSCREEN]) return FALSE;
     if (!p) return ((PFN_ClientToScreen)g_inReal[IN_CLIENTTOSCREEN])(h, p);
     q = *p;
     if (g_gameWnd && h == g_gameWnd) {
@@ -4689,6 +4697,18 @@ static BOOL PatchSlot(void* obj, int index, void* replacement, void** original)
     return TRUE;
 }
 
+/* First-call trace for the device hooks. The device log is flushed after
+   every line, so the last trace line before a Wine crash names the hook that
+   was entered. Bounded so a working session does not spam the log. */
+static void HookTrace(const char* name)
+{
+    static int n = 0;
+    if (n < 64) {
+        ++n;
+        Log("HOOK  %s", name);
+    }
+}
+
 static void NoteCallSite(DWORD type, void* ret)
 {
     const UINT_PTR ida = ToIda(ret);
@@ -4907,6 +4927,8 @@ static float SpriteRoll(void)
 
 static HRESULT __stdcall hkSetTransform(void* dev, DWORD type, const D3DMATRIX8* m)
 {
+    HookTrace("SetTransform");
+    if (!o_SetTransform) { Log("HOOK  SetTransform original is NULL"); return E_FAIL; }
     NoteCallSite(type, _ReturnAddress());
     ++g_xformThisFrame;
     if      (type == D3DTS_VIEW)       { ++g_xfView;  if (m) { g_lastView = *m; g_haveView = TRUE; g_lastViewAt = g_frame; } }
@@ -4941,6 +4963,8 @@ static HRESULT __stdcall hkSetTransform(void* dev, DWORD type, const D3DMATRIX8*
 
 static HRESULT __stdcall hkSetVertexShader(void* dev, DWORD handle)
 {
+    HookTrace("SetVertexShader");
+    if (!o_SetVertexShader) { Log("HOOK  SetVertexShader original is NULL"); return E_FAIL; }
     // In D3D8 an FVF code is passed here directly; a real shader is a handle.
     // D3DFVF_XYZRHW marks pre-transformed vertices, i.e. 2D / HUD drawing.
     if (handle < 0x10000) g_curFvf = handle;   // an FVF code, not a shader handle
@@ -4960,6 +4984,8 @@ static HRESULT __stdcall hkSetVertexShader(void* dev, DWORD handle)
 static HRESULT __stdcall hkDrawPrimitiveUP(void* dev, DWORD prim, UINT count,
                                            const void* data, UINT stride)
 {
+    HookTrace("DrawPrimitiveUP");
+    if (!o_DrawPrimitiveUP) { Log("HOOK  DrawPrimitiveUP original is NULL"); return E_FAIL; }
     ++g_drawsThisFrame; ++g_drawsUP;
     NoteDraw(g_curFvf, stride);
     /* 3D HUD/inventory models arrive as stride-24 XYZ+DIFFUSE+TEX1 UP draws
@@ -5133,6 +5159,8 @@ static HRESULT __stdcall hkDrawIndexedPrimitiveUP(void* dev, DWORD prim,
     UINT minIndex, UINT numVertices, UINT primCount, const void* indexData,
     DWORD indexFormat, const void* vertexData, UINT vertexStride)
 {
+    HookTrace("DrawIndexedPrimitiveUP");
+    if (!o_DrawIndexedPrimitiveUP) { Log("HOOK  DrawIndexedPrimitiveUP original is NULL"); return E_FAIL; }
     ++g_drawsThisFrame; ++g_drawsUP;
     NoteDraw(g_curFvf, vertexStride);
     if (vertexData && vertexStride == 24 && prim == 4 &&
@@ -5212,6 +5240,8 @@ static HRESULT AerDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
 
 static HRESULT __stdcall hkDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
 {
+    HookTrace("DrawPrimitive");
+    if (!o_DrawPrimitive) { Log("HOOK  DrawPrimitive original is NULL"); return E_FAIL; }
     ++g_drawsThisFrame; ++g_drawsVB;
     NoteDraw(g_curFvf, 0);
     /* The inventory / HUD 3D models come through here as expanded triangle
@@ -5997,7 +6027,10 @@ static HRESULT AerDrawIndexed(void* dev, DWORD prim, UINT minIdx, UINT numV,
 
 static HRESULT __stdcall hkDrawIndexedPrim(void* dev, DWORD prim, UINT minIdx,
                                            UINT numV, UINT startIdx, UINT primCount)
-{    /* The world is drawn; the last three primCount=28/numV=34 draws are the
+{
+    HookTrace("DrawIndexedPrimitive");
+    if (!o_DrawIndexedPrim) { Log("HOOK  DrawIndexedPrimitive original is NULL"); return E_FAIL; }
+    /* The world is drawn; the last three primCount=28/numV=34 draws are the
        3D HUD weapon-slot models. Draw the virtual hands/laser just before the
        first of those, so they are in the gameplay layer underneath the HUD
        layer, not after it. From that draw on, everything is HUD/view-model
@@ -7271,6 +7304,8 @@ static void DumpBackBuffer(void* dev)
 
 static HRESULT __stdcall hkSetViewport(void* dev, const D3DVIEWPORT8* vp)
 {
+    HookTrace("SetViewport");
+    if (!o_SetViewport) { Log("HOOK  SetViewport original is NULL"); return E_FAIL; }
     if (g_gameRTActive && vp && g_bbW > 0 && g_bbH > 0) {
         D3DVIEWPORT8 v = *vp;
         if (v.Width > 640 || v.Height > 480) {
@@ -7293,6 +7328,8 @@ static HRESULT __stdcall hkSetViewport(void* dev, const D3DVIEWPORT8* vp)
 
 static HRESULT __stdcall hkSetRenderTarget(void* dev, void* rt, void* depth)
 {
+    HookTrace("SetRenderTarget");
+    if (!o_SetRenderTarget) { Log("HOOK  SetRenderTarget original is NULL"); return E_FAIL; }
     if (g_gameRTActive && (rt != g_gameRTSurf || depth != g_gameDepth)) {
         static int n = 0;
         if (n++ < 4)
@@ -7306,6 +7343,8 @@ static HRESULT __stdcall hkSetRenderTarget(void* dev, void* rt, void* depth)
 static HRESULT __stdcall hkClear(void* dev, DWORD count, const D3DRECT8* rects,
                                  DWORD flags, DWORD color, float z, DWORD stencil)
 {
+    HookTrace("Clear");
+    if (!o_Clear) { Log("HOOK  Clear original is NULL"); return E_FAIL; }
     if (g_handDrawnThisFrame) {
         static int n = 0;
         if (n++ < 12) {
@@ -7384,6 +7423,8 @@ static void BindBackBuffer(void* dev)
 
 static HRESULT __stdcall hkBeginScene(void* dev)
 {
+    HookTrace("BeginScene");
+    if (!o_BeginScene) { Log("HOOK  BeginScene original is NULL"); return E_FAIL; }
     ++g_beginThisFrame;
     g_handDrawnThisFrame = FALSE;
     g_3dIdx = 0;
@@ -7435,6 +7476,8 @@ static HRESULT __stdcall hkBeginScene(void* dev)
 
 static HRESULT __stdcall hkEndScene(void* dev)
 {
+    HookTrace("EndScene");
+    if (!o_EndScene) { Log("HOOK  EndScene original is NULL"); return E_FAIL; }
     HRESULT hr;
     ++g_endThisFrame;
     /* Normally the hand/laser pass already ran at the first 3D HUD model draw.
@@ -7474,6 +7517,8 @@ static HRESULT __stdcall hkEndScene(void* dev)
 
 static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND c, void* d)
 {
+    HookTrace("Present");
+    if (!o_Present) { Log("HOOK  Present original is NULL"); return E_FAIL; }
     /* Re-apply the borderless full-display window every frame. Cheap when it
        is already correct; repairs it when the engine resets it. Done before
        Present so the frame lands in the new client rect. */
@@ -7655,6 +7700,8 @@ static void HookDevice(void* dev);
 
 static HRESULT __stdcall hkReset(void* dev, D3DPRESENT_PARAMETERS8* pp)
 {
+    HookTrace("Reset");
+    if (!o_Reset) { Log("HOOK  Reset original is NULL"); return E_FAIL; }
     Log("");
     Log("RESET  requested %ux%u  windowed=%ld  fmt=%lu  flags=0x%08lX  (frame %ld)",
         pp ? pp->BackBufferWidth : 0, pp ? pp->BackBufferHeight : 0,
@@ -7770,6 +7817,23 @@ static void HookDevice(void* dev)
     if (PatchSlot(dev, VT_DEV_DRAWINDEXEDPRIM, (void*)hkDrawIndexedPrim, &tmp) && tmp != (void*)hkDrawIndexedPrim) o_DrawIndexedPrim = (PFN_DrawIndexedPrim)tmp;
     if (PatchSlot(dev, VT_DEV_SETVERTEXSHADER, (void*)hkSetVertexShader, &tmp) && tmp != (void*)hkSetVertexShader) o_SetVertexShader = (PFN_SetVertexShader)tmp;
     if (PatchSlot(dev, VT_DEV_RESET,           (void*)hkReset,           &tmp) && tmp != (void*)hkReset)         o_Reset           = (PFN_Reset)tmp;
+
+    /* Audit the originals. A zero here is the null call Wine sees after
+       CreateDevice; the first-call trace then names the hook entered. */
+    Log("HOOKS  setrt=%p clear=%p viewport=%p xform=%p present=%p begin=%p end=%p",
+        o_SetRenderTarget, o_Clear, o_SetViewport, o_SetTransform, o_Present,
+        o_BeginScene, o_EndScene);
+    Log("HOOKS  dp=%p dip=%p dpup=%p dipup=%p svs=%p reset=%p",
+        o_DrawPrimitive, o_DrawIndexedPrim, o_DrawPrimitiveUP,
+        o_DrawIndexedPrimitiveUP, o_SetVertexShader, o_Reset);
+    Log("HOOKS  bb=%p tex=%p ds=%p img=%p copy=%p rt=%p zb=%p",
+        o_GetBackBuffer, o_CreateTexture, o_CreateDepthStencilSurface,
+        o_CreateImageSurface, o_CopyRects, o_GetRenderTarget,
+        o_GetDepthStencilSurface);
+    Log("HOOKS  getvp=%p setrs=%p getrs=%p settex=%p gettex=%p setts=%p getts=%p getvb=%p getib=%p",
+        o_GetViewport, o_SetRenderState, o_GetRenderState, o_SetTexture,
+        o_GetTexture, o_SetTextureStageState, o_GetTextureStageState,
+        o_GetStreamSource, o_GetIndices);
 }
 
 static HRESULT __stdcall hkCreateDevice(void* self, UINT adapter, DWORD devType,
