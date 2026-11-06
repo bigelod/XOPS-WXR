@@ -1,0 +1,46 @@
+XOPSVR.exe - XOPS-WXR WinlatorXR launcher
+=========================================
+
+Build (Visual Studio 2022, x86):
+    launcher-xr\build.cmd
+Output: launcher-xr\XOPSVR.exe
+
+Deploy:
+    copy XOPSVR.exe and version.txt next to xops096.exe in the container.
+    The launcher finds xops096.exe next to itself, or up to two folders up.
+
+What it does
+------------
+Play      starts xops096.exe.
+Options   edits config.txt IN THE GAME FOLDER (next to xops096.exe):
+          handedness, Flip hands, haptics on/off, haptics hand,
+          verbose debug, stereo (mono/AER), roll direction.
+          Haptic frame length is preserved but not shown; head roll is
+          always on and cannot be disabled.
+          A legacy config.txt one folder above the game is copied into the
+          game folder on first use.
+
+Update check
+------------
+On startup it fetches version.txt and notes.txt over HTTPS and compares the
+online version with version.txt next to the launcher. If the online one is
+strictly newer it shows the notes in a YES/NO box.
+
+TEMPORARY TEST CHANNEL: the URLs point at Shogo WXR's AutoUpdate folder until
+XOPS-WXR has its own published files. The DLL download step is disabled in
+this build: YES only reports that downloads are off and changes nothing.
+Never point the download at Shogo's CShell.dll.
+
+Everything is appended to XOPSVR_update.log next to the launcher, including
+offline/failed checks and the version comparison.
+
+Release plumbing (later)
+------------------------
+1. Change the URLs in XOPSVR.cpp to the XOPS-WXR AutoUpdate folder.
+2. Add the d3d8.dll download/install: stage version.txt + d3d8.dll, check a
+   minimum size, copy the DLL next to xops096.exe, write version.txt last,
+   restore the old version.txt on failure.
+3. Bump AutoUpdate/version.txt, AutoUpdate/notes.txt and launcher-xr/version.txt
+   together, commit and push.
+
+Do not commit built XOPSVR.exe / .obj / .res files.

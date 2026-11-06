@@ -4461,8 +4461,9 @@ static void PatchProjectionAspect(void)
 // ---------------------------------------------------------------------------
 // Virtual hand / laser config
 //
-// `config.txt` lives one directory above the game, so a game update does not
-// overwrite it. If it is missing, it is created with the defaults.
+// `config.txt` lives in the game folder, next to xops096.exe. For
+// compatibility the old location (one directory above) is still read if the
+// local file does not exist; new files are always created locally.
 //
 //     handedness = right | left
 //     hand_flip  = false | true
@@ -4501,17 +4502,17 @@ static void HandLoadConfig(void)
     if (slash && slash > parent + 2) *(slash + 1) = 0;
     else parent[0] = 0;
 
-    if (parent[0]) _snprintf(path, sizeof(path), "%sconfig.txt", parent);
-    else           _snprintf(path, sizeof(path), "config.txt");
-    path[sizeof(path) - 1] = 0;
-    _snprintf(alt, sizeof(alt), "%sconfig.txt", g_baseDir);
+    if (parent[0]) _snprintf(alt, sizeof(alt), "%sconfig.txt", parent);
+    else           alt[0] = 0;
     alt[sizeof(alt) - 1] = 0;
+    _snprintf(path, sizeof(path), "%sconfig.txt", g_baseDir);
+    path[sizeof(path) - 1] = 0;
 
     f = fopen(path, "r");
-    if (!f) {
-        /* Be forgiving if the owner put it next to the game instead. */
+    if (!f && alt[0]) {
+        /* Read the old parent-folder file if this install predates the move. */
         f = fopen(alt, "r");
-        if (f) _snprintf(path, sizeof(path), "%s", alt);
+        if (f) Log("HAND     config: reading legacy %s (prefer %s)", alt, path);
     }
     if (!f) {
         f = fopen(path, "w");

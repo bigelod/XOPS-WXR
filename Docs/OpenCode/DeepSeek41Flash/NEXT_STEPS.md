@@ -4,8 +4,8 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 09:24:03`, SHA-256
-`107ac4c9fe5aa187e0fa9e85e3810760d12bc2f389c7235f946dd01738e91413`.
+**Last build:** `built Nov  6 2026 09:49:19`, SHA-256
+`53b831374c82e436a037d2e8f591e605bac9dc357d29e2df5b5c89be482e0bad`.
 
 ---
 
@@ -74,13 +74,21 @@ outstanding:
   half. Only attempt once AER is confirmed on device; it is allowed to be
   postponed until after V1.0.
 
-## 7. Launcher (bonus)
+## 7. Launcher - first version done, release plumbing left
 
-Reference: `D:\Daven Bigelow\Documents\GitHub\Shogo-VR-WXR\launcher-xr`.
+`launcher-xr/` now has `XOPSVR.exe` (see `COMPLETED_STEPS.md`): Play, Options
+and the update check work on the PC. What is left for a real release:
 
-- **Play** launches the game; **Options** edits the VR config (handedness,
-  hand flip, haptics, haptic frames, turn speed, verbose debug, later stereo).
-- **Skip auto-update for now**; add it later the same way Shogo does.
+- Replace the temporary **Shogo test URLs** with the XOPS-WXR channel
+  (`AutoUpdate/version.txt`, `notes.txt`) once those are published.
+- Implement the **d3d8.dll download/install** behind the YES answer. It must
+  stage both files, verify a minimum size, install the DLL next to
+  `xops096.exe`, write `version.txt` last, and roll back on any failure -
+  exactly the Shogo order. Never download Shogo's CShell.dll.
+- Release step: put the new `d3d8.dll` in `AutoUpdate/`, rewrite
+  `AutoUpdate/notes.txt`, bump `AutoUpdate/version.txt` and
+  `launcher-xr/version.txt`, then commit/push.
+- Optional: an icon and an updater for `XOPSVR.exe` itself.
 
 ## 8. Separate the mod from the probe
 
@@ -108,7 +116,8 @@ Docs/OpenCode/DeepSeek41Flash/WORKLOG.md          experiment history
 build/build-probe.bat                build/deploy
 tools/start-level.ps1                title -> level (do not auto-run during hand tests)
 E:\tmp\Q3Mods\xops096\xops_wxr_probe.log         runtime log
-E:\tmp\Q3Mods\config.txt                         handedness / haptics / debug / stereo
+E:\tmp\Q3Mods\xops096\config.txt               handedness / haptics / debug / stereo
+launcher-xr\                        XOPSVR.exe source + build script
 D:\Daven Bigelow\Documents\GitHub\HaloCEWXR      stereo reference
 D:\Daven Bigelow\Documents\GitHub\Shogo-VR-WXR   two-hand aim + launcher
 ```

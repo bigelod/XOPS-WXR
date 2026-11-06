@@ -259,10 +259,10 @@ far 80). The hand/laser therefore have to reset **all three** transforms:
 - **Fallback:** if the XrApi tester sends no hand position, a default
   view-space offset is used so the desktop test is still visible.
 
-**Hand config.** `config.txt` is looked up **one directory above the game
-folder** (for example `E:\tmp\Q3Mods\config.txt` when the game is
-`E:\tmp\Q3Mods\xops096`), so a game update does not overwrite it. It is created
-with defaults if missing:
+**Hand config.** `config.txt` lives **in the game folder**, next to
+`xops096.exe` (for example `E:\tmp\Q3Mods\xops096\config.txt`). A legacy copy
+one directory above is still read if the local file is missing; new files are
+created locally. It is created with defaults if missing:
 
 ```
 handedness = right

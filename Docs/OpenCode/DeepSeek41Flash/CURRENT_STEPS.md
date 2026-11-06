@@ -5,8 +5,8 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 09:24:03`, SHA-256
-`107ac4c9fe5aa187e0fa9e85e3810760d12bc2f389c7235f946dd01738e91413`,
+**Current build:** `built Nov  6 2026 09:49:19`, SHA-256
+`53b831374c82e436a037d2e8f591e605bac9dc357d29e2df5b5c89be482e0bad`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---
@@ -115,7 +115,8 @@ Left-handed mode swaps only shoot and fire mode. Walk is gone.
 
 ## 7. Config
 
-`E:\tmp\Q3Mods\config.txt`, one directory above the game:
+`E:\tmp\Q3Mods\xops096\config.txt`, in the game folder next to the EXE (a
+legacy file one level up is still read if the local one is missing):
 
 ```
 handedness = right

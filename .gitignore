@@ -73,3 +73,5 @@ Testing/
 .cache/
 
 Release/
+# Resource compiler output
+*.res

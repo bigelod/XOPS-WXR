@@ -4,8 +4,8 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 09:24:03`, SHA-256
-`107ac4c9fe5aa187e0fa9e85e3810760d12bc2f389c7235f946dd01738e91413`.
+**Last build covered:** `built Nov  6 2026 09:49:19`, SHA-256
+`53b831374c82e436a037d2e8f591e605bac9dc357d29e2df5b5c89be482e0bad`.
 
 ---
 
@@ -143,6 +143,31 @@ pass; `BUG_FIXES.md` will be created from that run.
   between eyes vs 0.033 for mono; depth-dependent 5-12 px shift at 1920.
 - **Still open:** device eye sign / centimetre scale, and SBS. See
   `NEXT_STEPS.md`.
+
+---
+
+## 9. Launcher (Play / Options / update check)
+
+`launcher-xr/` contains a Win32 `XOPSVR.exe` built with `build.cmd`:
+
+- **Play** finds `xops096.exe` next to the launcher (or up to two folders up)
+  and starts it.
+- **Options** edits `config.txt` **in the game folder**: handedness, Flip
+  hands, haptics on/off, haptics hand, verbose debug, stereo (mono/AER) and
+  roll direction. Haptic frame length and head roll are intentionally not
+  exposed; head roll is always on and the frame count is preserved.
+- **Update check** reads `version.txt` and `notes.txt` over HTTPS (WinHTTP),
+  compares by value (same rules as the Shogo launcher), shows the notes in a
+  YES/NO box, and logs to `XOPSVR_update.log`. For now the channel is the
+  **Shogo WXR AutoUpdate URLs** for testing, and the DLL download step is
+  deliberately disabled - YES only reports that downloads are off and writes
+  nothing.
+- A legacy `config.txt` one folder above the game is migrated into the game
+  folder on first use.
+
+Verified on the PC: the update prompt shows Shogo 1.2 against local 0.1, the
+Options dialog saves `E:\tmp\Q3Mods\xops096\config.txt`, and Play launches the
+game, which then reads that same file.
 
 ---
 

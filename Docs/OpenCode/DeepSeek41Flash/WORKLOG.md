@@ -982,3 +982,40 @@ during gameplay, but the summary screen belongs to the game.
 
 Build `built Nov  6 2026 09:24:03`, SHA-256
 `107ac4c9fe5aa187e0fa9e85e3810760d12bc2f389c7235f946dd01738e91413`.
+
+## 2026-11-06 - launcher (Play / Options / update test) and config move
+
+### Launcher
+
+New `launcher-xr/` Win32 app, `XOPSVR.exe` (MSVC x86, no dependencies):
+
+- **Play** finds `xops096.exe` beside the launcher (or up to two folders up)
+  and starts it.
+- **Options** edits `config.txt` in the game folder: handedness, "Flip hands",
+  haptics on/off, haptics hand, verbose debug, stereo (mono/AER), roll
+  direction. Haptic frames are preserved but hidden; head roll is always on
+  and has no checkbox.
+- **Update check** uses the Shogo WXR AutoUpdate `version.txt`/`notes.txt`
+  URLs as a temporary test channel. The version compare is value-based (same
+  rules as Shogo). The prompt is real; the DLL download is deliberately
+  disabled and YES writes nothing.
+- Test log `XOPSVR_update.log` next to the EXE.
+
+Verified on the PC: online 1.2 vs local 0.1 produced the YES/NO prompt with
+Shogo's notes; YES logged "download disabled"; Options saved
+`E:\tmp\Q3Mods\xops096\config.txt`; Play started xops096.exe and the mod then
+logged `HAND config E:\tmp\Q3Mods\xops096\config.txt`.
+
+The real XOPS release plumbing (own URLs + d3d8.dll download/install) is still
+in `NEXT_STEPS.md`; never point the download at Shogo's CShell.dll.
+
+### Config location
+
+`config.txt` moved from one folder above the game into the game folder, next
+to xops096.exe, in both the mod and the launcher. The mod still reads the old
+parent file if the local one is missing; the launcher copies a legacy parent
+file into the game folder once.
+
+Build: mod `built Nov  6 2026 09:49:19`, SHA-256
+`53b831374c82e436a037d2e8f591e605bac9dc357d29e2df5b5c89be482e0bad`.
+Launcher `version.txt` 0.1 (XOPSVR.exe is a build artifact, not committed).
