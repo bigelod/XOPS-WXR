@@ -1,5 +1,12 @@
 ﻿// XOPS-WXR - d3d8 diagnostic probe
 //
+// 1 = Windows-PC dev build: probe keys, verbose log,draw dumps, frame grabs,
+//     hook traces and the diagnostic startup banner.
+// 0 = release: no probe log, no debug keys and no diagnostic draw/grab code.
+#ifndef XOPS_DEV_BUILD
+#define XOPS_DEV_BUILD 1
+#endif
+//
 // A drop-in d3d8.dll proxy that logs everything we need to know about how XOPS
 // drives Direct3D, then forwards every call to the real d3d8.dll.
 //
@@ -509,26 +516,35 @@ static BOOL g_verboseDebug = FALSE;
 
 static void LogV(const char* fmt, va_list ap)
 {
+#if XOPS_DEV_BUILD
     if (!g_log) return;
     vfprintf(g_log, fmt, ap);
     fputc('\n', g_log);
     fflush(g_log);                      // a crash must not cost us the log
+#else
+    (void)fmt; (void)ap;
+#endif
 }
 
 static void Log(const char* fmt, ...)
 {
+#if XOPS_DEV_BUILD
     va_list ap;
     va_start(ap, fmt);
     EnterCriticalSection(&g_lock);
     LogV(fmt, ap);
     LeaveCriticalSection(&g_lock);
     va_end(ap);
+#else
+    (void)fmt;
+#endif
 }
 
 /* Verbose-only logging: snapshots, probes, draw dumps, raw packets and other
    diagnostics. Suppressed unless config.txt has verbose_debug = true. */
 static void LogD(const char* fmt, ...)
 {
+#if XOPS_DEV_BUILD
     va_list ap;
     if (!g_verboseDebug) return;
     va_start(ap, fmt);
@@ -536,6 +552,9 @@ static void LogD(const char* fmt, ...)
     LogV(fmt, ap);
     LeaveCriticalSection(&g_lock);
     va_end(ap);
+#else
+    (void)fmt;
+#endif
 }
 
 // IDA shows addresses against the preferred base (0x400000 for this EXE), so
@@ -2912,6 +2931,10 @@ static void StructDump(UINT_PTR base, int count, const char* name)
    glance and "34.2 deg" means everything. */
 static void WatchDump(const char* why)
 {
+#if !XOPS_DEV_BUILD
+    (void)why;
+    return;
+#endif
     int i;
     LogD("WATCH    %s  [write phase: %s]", why, PhaseName(g_probePhase));
     for (i = 0; i < WATCH_N; ++i) {
@@ -3969,6 +3992,9 @@ static void ProbeSelect(int idx)
 /* Called from BeginScene, once per frame. */
 static void ProbeTick(void)
 {
+#if !XOPS_DEV_BUILD
+    return;
+#endif
     double ph;
     float v;
     static int faults = 0;
@@ -4071,6 +4097,10 @@ static void ProbeClassify(char kind)
 
 static void ProbeKeys(PBYTE p)
 {
+#if !XOPS_DEV_BUILD
+    (void)p;
+    return;
+#endif
     /* Edge-triggered: act on the transition from up to down. */
     static BYTE prev[256];
     int vk;
@@ -4608,10 +4638,12 @@ static void EnsureInit(void)
     _snprintf(g_baseDir, MAX_PATH, "%s", dir);
     g_baseDir[MAX_PATH - 1] = 0;
 
+#if XOPS_DEV_BUILD
     char logPath[MAX_PATH];
     _snprintf(logPath, MAX_PATH, "%sxops_wxr_probe.log", dir);
     logPath[MAX_PATH - 1] = 0;
     g_log = fopen(logPath, "w");
+#endif
 
     g_exeBase = (UINT_PTR)GetModuleHandleA(NULL);
 
@@ -4699,7 +4731,9 @@ static BOOL PatchSlot(void* obj, int index, void* replacement, void** original)
 
 /* First-call trace for the device hooks. The device log is flushed after
    every line, so the last trace line before a Wine crash names the hook that
-   was entered. Bounded so a working session does not spam the log. */
+   was entered. Bounded so a working session does not spam the log. Release
+   builds compile the calls away. */
+#if XOPS_DEV_BUILD
 static void HookTrace(const char* name)
 {
     static int n = 0;
@@ -4708,6 +4742,9 @@ static void HookTrace(const char* name)
         Log("HOOK  %s", name);
     }
 }
+#else
+#define HookTrace(name) ((void)0)
+#endif
 
 static void NoteCallSite(DWORD type, void* ret)
 {
@@ -7219,6 +7256,10 @@ static void CompositeFrame(void* dev)
    D3D window come back black. */
 static void DumpBackBuffer(void* dev)
 {
+#if !XOPS_DEV_BUILD
+    (void)dev;
+    return;
+#endif
     void* bb = NULL;
     void* sys = NULL;
     RECT r;
@@ -7820,6 +7861,7 @@ static void HookDevice(void* dev)
 
     /* Audit the originals. A zero here is the null call Wine sees after
        CreateDevice; the first-call trace then names the hook entered. */
+#if XOPS_DEV_BUILD
     Log("HOOKS  setrt=%p clear=%p viewport=%p xform=%p present=%p begin=%p end=%p",
         o_SetRenderTarget, o_Clear, o_SetViewport, o_SetTransform, o_Present,
         o_BeginScene, o_EndScene);
@@ -7834,6 +7876,7 @@ static void HookDevice(void* dev)
         o_GetViewport, o_SetRenderState, o_GetRenderState, o_SetTexture,
         o_GetTexture, o_SetTextureStageState, o_GetTextureStageState,
         o_GetStreamSource, o_GetIndices);
+#endif
 }
 
 static HRESULT __stdcall hkCreateDevice(void* self, UINT adapter, DWORD devType,

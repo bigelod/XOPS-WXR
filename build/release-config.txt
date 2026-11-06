@@ -1,0 +1,13 @@
+# XOPS-WXR release config
+# In the game folder, next to xops096.exe.
+handedness = right
+hand_flip = false           # false = Quest 3 roll correction; true = old/other-device roll
+haptics = true
+haptics_hand = dominant     # dominant | both | left | right
+haptic_frames = 2           # 1..5
+verbose_debug = false
+stereo = mono               # experimental: aer
+roll = true
+roll_sign = -1              # +1 if the horizon tilts the wrong way
+eye_height = 0.0            # manual render offset, metres, +/-5
+pos_scale = 1.0             # HMD translation gain, 0..2 (1.0 = 1:1)

@@ -1,0 +1,42 @@
+XOPS-WXR - release
+==================
+
+Files
+-----
+d3d8.dll     The mod. Goes next to xops096.exe.
+XOPSVR.exe   Launcher. Goes next to xops096.exe.
+config.txt   Settings. Goes next to xops096.exe.
+version.txt  Launcher local version. Goes next to XOPSVR.exe.
+
+Install
+-------
+1. Install X Operations in WinlatorXR.
+2. Set XOPS to WINDOWED mode. Either use the game's video options, or copy
+   "config - windowed.dat" over "config.dat" in the game folder.
+3. Back up any existing d3d8.dll in the game folder.
+4. Copy d3d8.dll, XOPSVR.exe, config.txt and version.txt next to xops096.exe.
+5. Start XOPSVR.exe, or run xops096.exe directly.
+
+Requirements
+------------
+- Container/display: 1280x960 (native 4:3).
+- DXVK 1.10.1 for D3D8+ (the last DXVK with d3d8.dll).
+- Mono for the first run. AER stereo is experimental.
+
+Controls
+--------
+Left stick move, right stick turn, right stick click recentre,
+left grip two-handed aim, left trigger fire mode, right trigger shoot,
+right grip jump, B reload, A switch, X drop, Y zoom.
+Left-handed mode swaps only shoot and fire mode.
+
+Tuning in config.txt
+--------------------
+pos_scale   HMD translation gain, 1.0 = 1:1; lower it or set 0 if the view
+            moves too far.
+eye_height  Manual vertical render offset in metres (default 0, +/-5).
+roll_sign   -1 default; set +1 if the horizon tilts the wrong way.
+hand_flip   false for Quest 3; true for the old/other-device hand roll.
+
+This is the release build: there is no probe log, no debug keys and no
+draw/frame capture.

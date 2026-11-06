@@ -103,12 +103,19 @@ The launcher's **Options** dialog edits the same file, including **HMD position 
 
 **Build the mod**
 
+Two targets share `src/d3d8probe.cpp`; `XOPS_DEV_BUILD` selects the diagnostics at compile time.
+
 ```bat
 call "<VS2022>\VC\Auxiliary\Build\vcvarsall.bat" x86
-build\build-probe.bat
+
+build\build-dev.bat        REM Windows-PC dev: probe, debug keys, verbose log
+build\build-release.bat    REM release: no probe log, keys, dumps or grabs
 ```
 
-`build\build-probe.bat` builds `out\probe\d3d8.dll`, verifies it, and deploys it to `E:\tmp\Q3Mods\xops096` by default. Pass a different game folder as the first argument if needed.
+- `build-dev.bat` compiles with `XOPS_DEV_BUILD=1` to `out\dev\d3d8.dll` and deploys to `E:\tmp\Q3Mods\xops096` by default. This is the build to use while developing or diagnosing on a Windows PC: it keeps the probe keys, `HOOKS`/`HOOK` trace, verbose log, draw dumps and frame grabs.
+- `build-release.bat` compiles with `XOPS_DEV_BUILD=0` to `out\release\d3d8.dll`, builds `launcher-xr\XOPSVR.exe`, and assembles the `Release\` folder. The release DLL has no probe log, no debug keys and no draw/frame capture.
+- `build\build-probe.bat` is kept as the old dev-build alias.
+- `XOPS_DEV_BUILD` defaults to `1` if a build script does not define it.
 
 **Build the launcher**
 
