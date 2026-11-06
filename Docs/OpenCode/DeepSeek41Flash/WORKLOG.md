@@ -840,3 +840,22 @@ centimetre scale are confirmed on the device; the plan is in `NEXT_STEPS.md`.
 `e2c96caef36c37a697a8cbd8d8f6b8121f0339acbd5fbdedf57f4a40f9752cf7`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 Test config left at `stereo = mono`, `verbose_debug = true`.
+
+### 2026-11-06 - correction: XrApi input while unfocused
+
+The first focus-mute implementation muted **all** synthetic input when the game
+window was not foreground. That broke the normal desktop test workflow: the
+XR UDP Tester holds focus, so shoot / jump / reload / move stopped working
+while turning still worked (turning is camera state written by `SteerTick`,
+not an injected key).
+
+Corrected semantics: unfocused mutes **physical desktop** input only
+(`GetKeyboardState` is emptied, `GetAsyncKeyState`/`GetKeyState` return 0,
+cursor delta forced to zero, `ProbeKeys` and `ManualHandKeys` skipped).
+`StickKeys` and `VrInputKeys` still inject the runtime's sticks, triggers and
+buttons into the emptied array.
+
+Verified with the synthetic feeder and Notepad deliberately in the foreground:
+the feeder's right trigger fired (`HAPTIC ... hand=both`), and a physical `0`
+sent to Notepad did **not** log `HAND user control ON` (log count unchanged).
+The earlier apparent leak was a failed `SetForegroundWindow`, not the probe.

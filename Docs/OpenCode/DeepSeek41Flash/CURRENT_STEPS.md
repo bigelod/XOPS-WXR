@@ -21,10 +21,12 @@ This file is the live "where we are right now and what is next".
 - **Two-handed aim:** hold the **left grip**; the gun stays on the dominant
   hand and points at the off hand. Both controllers buzz on firing while it
   is held. No config key.
-- **Input boundary:** while the game window lacks focus it receives no input
-  at all (keyboard, mouse, sticks, VR buttons, debug keys). In VR mode the
-  physical A/B/X/Y keys are always swallowed, and the arrows are swallowed
-  while `MODE_VR = 1`. Manual PC mode (`0`) is exempt.
+- **Input boundary:** while the game window lacks focus, **physical desktop
+  input** is muted (keyboard, mouse, debug keys), but **XrApi input still
+  arrives** - the runtime / UDP Tester normally holds focus while it drives
+  the game. In VR mode the physical A/B/X/Y keys are always swallowed, and
+  the arrows are swallowed while `MODE_VR = 1`. Manual PC mode (`0`) is exempt
+  from the reserved-key rule (and is itself muted while unfocused).
 - **Verbose logging** behind `verbose_debug` (default false); errors and
   state changes always log.
 - **Manual/user mode (`0`):** ignores incoming 6DOF, installs a default pose
@@ -232,8 +234,9 @@ The live list is `NEXT_STEPS.md`. Immediate order:
 - Reuse the game's models and effects; do not invent replacements.
 - Only `0` remains from the old number keys; numpads, `J/K/N/T/Q/E` are ours.
 - `SetCursorPos` must never move the real cursor when the game is unfocused.
-- **No input may cross between windows:** unfocused means mute, debug keys
-  included.
+- **No physical input may cross between windows:** unfocused means mute for
+  desktop keys/mouse and debug keys. XrApi/runtime input still reaches the
+  game, because the tester normally holds focus.
 - **A/B/X/Y and (in `MODE_VR=1`) the arrows are never taken from the physical
   keyboard in VR mode;** manual PC mode (`0`) is the exception.
 - `verbose_debug = false` ships; diagnostics never replace errors/state.

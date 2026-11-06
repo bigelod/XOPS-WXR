@@ -2183,10 +2183,13 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
     ++g_inCalls[IN_GETKEYBOARDSTATE]; ++g_inFrame[IN_GETKEYBOARDSTATE];
     r = ((PFN_GetKeyboardState)g_inReal[IN_GETKEYBOARDSTATE])(p);
     if (r && p) {
-        /* Focus is the input boundary. While another window owns the desktop
-           the game keeps running (g_noPause), but it must receive nothing:
-           no keyboard, mouse, stick or debug key, and no synthetic VR input.
-           Otherwise typing in chat would walk, shoot and toggle probe modes. */
+        /* Focus is the boundary for DESKTOP input. While another window owns
+           the keyboard and mouse the game keeps running (g_noPause), but no
+           physical key, button or cursor movement may cross between windows.
+           XrApi input is not desktop input: the runtime/ UDP Tester may hold
+           focus while it drives the game, so StickKeys/VrInputKeys still run
+           below and inject their keys into the emptied array. Debug keys stay
+           muted (ProbeKeys). */
         g_inputMuted = !GameWindowFocused();
         if (g_inputMuted) ZeroMemory(p, 256);
 
@@ -3808,14 +3811,6 @@ static void StickKeys(PBYTE p)
 {
     int pressed = 0;
 
-    /* Unfocused: no stick input, but keep the edge state in step so a button
-       held across the focus change does not recentre on return. */
-    if (g_inputMuted) {
-        g_prevRecentreBtn = (g_posed && g_pose.valid &&
-                             XrButton(&g_pose, XRB_R_STICK)) ? TRUE : FALSE;
-        return;
-    }
-
     if (!g_stickMove || !g_posed || !g_pose.valid) return;
     if (!InGameplay()) return;      /* never move the player in a menu/screen */
     if (!g_vrExclusive) return;     /* desktop test mode: no synthetic input */
@@ -3866,17 +3861,6 @@ static void VrInputKeys(PBYTE p)
 {
     int vk;
     g_twoHanded = FALSE;
-    /* Unfocused: no trigger, stick or button may fire. Sync the edge table so
-       nothing that was pressed in the background counts as a new press when
-       focus returns, and drop any queued key pulses. */
-    if (g_inputMuted) {
-        int i;
-        for (i = 0; i < 256; ++i) g_pulseVk[i] = 0;
-        if (g_posed && g_pose.valid)
-            for (i = 0; i < 24; ++i)
-                g_prevVrBtn[i] = XrButton(&g_pose, i) ? 1 : 0;
-        return;
-    }
     if (!g_posed || !g_pose.valid || !InGameplay()) return;
     if (!g_vrExclusive) return;     /* desktop test mode: no synthetic input */
 

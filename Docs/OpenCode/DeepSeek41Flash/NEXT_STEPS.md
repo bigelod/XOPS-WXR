@@ -53,14 +53,16 @@ the V1.0 path.
 
 ### Input gating (owner, 6 Nov)
 
-1. **When the game window does not have focus, the game receives no input at
-   all** - keyboard, mouse, sticks, VR buttons, and every debug key. The game
-   may keep running (`g_noPause`), but nothing crosses between windows.
-   - Zero the `GetKeyboardState` array, return 0 from
-     `GetAsyncKeyState`/`GetKeyState`, keep the cursor delta at zero, and skip
-     all synthetic VR/stick/debug injection.
-   - Sync the edge trackers so a key/button held across the focus change is
-     not seen as a new press on return.
+1. **When the game window does not have focus, physical desktop input is
+   muted** - keyboard, mouse and every debug key. XrApi/runtime input is
+   **not** desktop input and must keep working: the UDP Tester normally holds
+   focus while it drives the game (this is the 6 Nov correction; muting the
+   synthetic keys broke shoot/jump/reload/move with the tester focused).
+   - Zero the physical `GetKeyboardState` array, return 0 from
+     `GetAsyncKeyState`/`GetKeyState`, and keep the cursor delta at zero.
+   - Still run `StickKeys`/`VrInputKeys` so the runtime's sticks, triggers and
+     buttons are injected into the emptied array.
+   - `ProbeKeys` and `ManualHandKeys` stay muted; debug keys need focus.
 2. **A B X Y are never accepted from the physical keyboard in VR mode**
    (any screen), because WinlatorXR sends those for the controller buttons.
 3. **Arrow keys are not accepted while `MODE_VR = 1`**, for the same reason.
