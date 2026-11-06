@@ -859,3 +859,60 @@ Verified with the synthetic feeder and Notepad deliberately in the foreground:
 the feeder's right trigger fired (`HAPTIC ... hand=both`), and a physical `0`
 sent to Notepad did **not** log `HAND user control ON` (log count unchanged).
 The earlier apparent leak was a failed `SetForegroundWindow`, not the probe.
+
+## 2026-11-06 - hand_flip default inverted for Quest 3
+
+Quest 3 hand data arrives 180 degrees rolled relative to the other headsets;
+HWXR, Shogo WXR and IMVR all carry a fix for it. The old default
+(`hand_flip = false`, no roll) therefore looked upside down on Quest 3.
+
+The config meaning is now inverted:
+
+- `hand_flip = false` (**default**) applies the 180-degree roll correction -
+  the Quest 3 layout.
+- `hand_flip = true` recreates the old, uncorrected gun roll for devices other
+  than a Quest 3.
+
+Internally `g_handFlip` now means "apply the correction" and defaults TRUE;
+the config parse inverts the value. The startup line reports both:
+
+```
+HAND  config ...  hand_flip=false  (roll: Quest 3 corrected)
+```
+
+Only the dominant hand/gun is rolled (up and right negated about forward);
+the off-hand is unchanged. The PC test's `config.txt` has `hand_flip = false`,
+so the Quest 3 roll is what the desktop now previews (the synthetic tester
+sends standard quaternions, so the PC image looks rolled; real Quest 3 data
+is rolled the other way and the correction brings it upright).
+
+Build `built Nov  6 2026 06:14`, SHA-256
+`8271cf6f99da7273e788e3bc13592ff3099c8023b4f00a5a9f58eb4a6da5267d`.
+
+### 2026-11-06 - finger and thumb slabs on the virtual hands
+
+The bare palm box gave no readable roll/pitch. Following the
+`Docs/general_wxr/SixDOFinatorCalibration` hand markings, the hand is now a
+palm box plus:
+
+- four white finger slabs, fanned outward and staggered in length
+  (1.9/2.3/2.2/1.8 cm), sitting toward the back of the hand so they stay
+  visible above the gun grip;
+- one thumb slab on the inner side (right hand -> -right, left hand ->
+  +right), angled forward and inward.
+
+The palm keeps the dark glove texture; fingers and thumb use the white texture
+so their direction reads at a glance. `HandDrawBoxBasis` is the shared
+six-face box helper. Verified with the exact SixDOFinator
+`SamplePoseData.txt` packet: the off hand shows the white fan clearly and the
+thumb side is correct for the left hand; the dominant hand's fingers sit
+around the gun grip. `.` grabs the frame pair for inspection.
+
+Build `built Nov  6 2026 06:26`, SHA-256
+`2b539140707e1b256a0a2687438a35e288bb4d69e6f82322f89be71ef4f8ea92`.
+
+Test hand placement is **data, not code**: to bring the hands forward for a
+clear look, `SamplePoseData.txt` is copied and the two hand `z` values are
+made 0.10 m more negative (OpenXR forward is -Z). The mod's fallback pose is
+unchanged; editing it would change shipping behaviour for a test preference.
+The scratch feeder for this is `%TEMP%\opencode\xr_feeder_forward.py`.

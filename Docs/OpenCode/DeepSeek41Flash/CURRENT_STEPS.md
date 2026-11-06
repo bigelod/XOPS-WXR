@@ -12,7 +12,8 @@ This file is the live "where we are right now and what is next".
 - `d3d8.dll` proxy at the container resolution; 640x480 game render target
   composited to the back buffer (native 4:3, no FOV change).
 - Centre-square HUD (text + panels), ammo, STATE colours, RELOADING/DEAD.
-- Both VR hands as depth-tested 3D boxes at their XrApi poses.
+- Both VR hands as depth-tested 3D boxes at their XrApi poses, with four
+  fanned white finger slabs and an angled thumb so the hand's angles read.
 - Dominant-hand laser, depth-tested, from the hand.
 - **Hand aim:** while firing, the game's shot is aimed at the laser endpoint,
   and the view is restored before the world is drawn.
@@ -187,7 +188,7 @@ Game log: `E:\tmp\Q3Mods\xops096\xops_wxr_probe.log`.
 
 ```
 handedness = right
-hand_flip = false
+hand_flip = false           # false = Quest 3 roll (default); true = old/other-device roll
 haptics = true
 haptics_hand = dominant
 haptic_frames = 2
@@ -210,9 +211,9 @@ HAPTIC fires=N dur=F frames hand=both|left|right ...
 TAIL  idx N  vb=0x... numV=.. prim=.. tex=0x...
 ```
 
-Last built/deployed (XrApi input while unfocused + stereo experiment):
-`built Nov  6 2026 05:59:03`, SHA-256
-`f5cc9688be65beb193290fea45a04b6750af6954a2b80d94ed1a1819c1ccdbb9`.
+Last built/deployed (Quest 3 hand roll + finger/thumb slabs):
+`built Nov  6 2026 06:26:56`, SHA-256
+`2b539140707e1b256a0a2687438a35e288bb4d69e6f82322f89be71ef4f8ea92`.
 
 ## 8. Next steps
 

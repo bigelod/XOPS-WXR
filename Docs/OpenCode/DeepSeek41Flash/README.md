@@ -271,9 +271,18 @@ hand_flip = false
 
 `handedness` selects the dominant hand for the laser and the initial
 shoot/fire-mode trigger swap (`N` still toggles both in-session).
-`hand_flip` rotates the dominant virtual hand/gun 180 degrees around its
-**roll/forward axis only** - not pitch or yaw - matching the HWXR/Shogo
-convention. The off-hand stays unflipped.
+`hand_flip` controls the 180-degree roll of the dominant virtual hand/gun
+around its **roll/forward axis only** - not pitch or yaw. The default is now
+the **Quest 3 layout**: `hand_flip = false` applies the roll correction
+(Quest 3 hand data arrives 180 degrees rolled relative to other headsets;
+HWXR, Shogo WXR and IMVR all hit this). Set `hand_flip = true` to recreate
+the old, uncorrected gun roll on devices other than a Quest 3. The off-hand
+stays unflipped.
+
+The hand mesh is a dark palm box with four small **white fanned finger slabs**
+and an angled **thumb slab**, SixDOFinator-calibration style: their direction
+and the thumb side make roll/pitch/yaw obvious at a glance without a full
+glove model.
 
 The game's own 3D HUD weapon-slot draws are **indexed** draws and are left
 untouched; only the stride-28 2D `DrawPrimitiveUP` HUD set is replaced. The

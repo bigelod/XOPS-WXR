@@ -1159,7 +1159,7 @@ static HPEN    g_panelBorderPen   = NULL;
 static void*   g_handTex   = NULL;
 static void*   g_whiteTex  = NULL;
 static int     g_handedness = 0;     /* 0 = right, 1 = left */
-static BOOL    g_handFlip   = FALSE; /* 180-degree roll of the hand model */
+static BOOL    g_handFlip   = TRUE;  /* TRUE = apply the Quest 3 roll correction */
 
 /* Haptics. The outbound packet carries, per hand, a vibration DURATION in
    frames - not an amplitude - and the runtime only stores values greater than
@@ -4462,7 +4462,11 @@ static void PatchProjectionAspect(void)
 //     handedness = right | left
 //     hand_flip  = false | true
 //
-// hand_flip is a 180-degree roll of the virtual hand/gun only, not pitch/yaw.
+// Quest 3 hand data arrives 180 degrees rolled relative to the other headsets
+// (HWXR, Shogo WXR and IMVR all hit this). The default therefore APPLIES the
+// roll correction: hand_flip = false is the Quest 3 layout. Set hand_flip =
+// true to recreate the old, uncorrected gun roll on devices other than a
+// Quest 3. Only the dominant hand/gun is rolled, not pitch or yaw.
 // ---------------------------------------------------------------------------
 static char* HandTrim(char* s)
 {
@@ -4509,8 +4513,8 @@ static void HandLoadConfig(void)
         if (f) {
             fputs("# XOPS-WXR virtual hand / laser\n", f);
             fputs("# handedness: right (default) or left\n", f);
-            fputs("# hand_flip: false (default) or true"
-                  " - 180-degree roll of the hand/gun\n", f);
+            fputs("# hand_flip: false (default) = Quest 3 hand roll (corrected);\n", f);
+            fputs("#            true = recreate the old/uncorrected roll on other devices\n", f);
             fputs("handedness = right\n", f);
             fputs("hand_flip = false\n", f);
             fputs("# haptics: buzz on firing, from the magazine counter\n", f);
@@ -4530,7 +4534,7 @@ static void HandLoadConfig(void)
             Log("HAND     could not create %s (err %lu)", path, GetLastError());
         }
         g_handedness = 0;
-        g_handFlip = FALSE;
+        g_handFlip = TRUE;      /* Quest 3 roll correction applied by default */
         g_leftHanded = 0;
         g_haptics = TRUE;
         g_hapticHand = 0;
@@ -4558,8 +4562,12 @@ static void HandLoadConfig(void)
             else if (!_stricmp(val, "right") || !strcmp(val, "0"))
                 g_handedness = 0;
         } else if (!_stricmp(key, "hand_flip")) {
-            g_handFlip = (!_stricmp(val, "true") || !_stricmp(val, "yes") ||
-                          !strcmp(val, "1")) ? TRUE : FALSE;
+            /* Inverted on purpose: false (default) APPLIES the Quest 3 roll
+               correction; true reproduces the old roll on other devices. */
+            const BOOL oldRoll = (!_stricmp(val, "true") ||
+                                  !_stricmp(val, "yes") ||
+                                  !strcmp(val, "1")) ? TRUE : FALSE;
+            g_handFlip = oldRoll ? FALSE : TRUE;
         } else if (!_stricmp(key, "haptics")) {
             g_haptics = (!_stricmp(val, "true") || !_stricmp(val, "yes") ||
                          !strcmp(val, "1")) ? TRUE : FALSE;
@@ -4587,8 +4595,10 @@ static void HandLoadConfig(void)
     /* Dominant hand also selects which trigger shoots. The in-session N key
        can still toggle this, but the config is the startup authority. */
     g_leftHanded = (g_handedness == 1) ? 1 : 0;
-    Log("HAND     config %s  handedness=%s  hand_flip=%s", path,
-        g_handedness ? "left" : "right", g_handFlip ? "true" : "false");
+    Log("HAND     config %s  handedness=%s  hand_flip=%s  (roll: %s)", path,
+        g_handedness ? "left" : "right",
+        g_handFlip ? "false" : "true",
+        g_handFlip ? "Quest 3 corrected" : "old / other device");
     Log("HAPTIC   %s  hand=%s  frames=%d", g_haptics ? "on" : "off",
         g_hapticHand == 1 ? "both" : g_hapticHand == 2 ? "left" :
         g_hapticHand == 3 ? "right" : "dominant", g_hapticFrames);
@@ -6380,12 +6390,13 @@ static void HandViewPose(const float* hp, const float* hf, const float* hu,
     }
 }
 
-/* A solid 3D rectangular hand: 0.08 x 0.14 x 0.14 m, extending forward from
-   the controller. Six textured faces, depth-tested against the world. */
-static void HandDrawBox(void* dev, const float vp[3], const float vf[3],
-                        const float vu[3], const float vr[3])
+/* A box in the hand's own basis. Used for the palm and for the small finger
+   and thumb slabs. Six textured faces, depth-tested against the world. */
+static void HandDrawBoxBasis(void* dev, const float c[3], const float vf[3],
+                             const float vu[3], const float vr[3],
+                             float hw, float hh, float hl, DWORD color,
+                             void* tex)
 {
-    const float hw = 0.016f, hh = 0.028f, hl = 0.028f, off = 0.023f;
     const float u[4] = { 0, 1, 0, 1 };
     const float v[4] = { 0, 0, 1, 1 };
     const int faces[6][4] = {
@@ -6396,13 +6407,10 @@ static void HandDrawBox(void* dev, const float vp[3], const float vf[3],
         { 0, 1, 4, 5 },   /* bottom*/
         { 2, 3, 6, 7 }    /* top   */
     };
-    float c[3], R[3], U[3], F[3];
+    float R[3], U[3], F[3];
     float corner[8][3];
     int f, i;
 
-    c[0] = vp[0] + vf[0]*(off + hl);
-    c[1] = vp[1] + vf[1]*(off + hl);
-    c[2] = vp[2] + vf[2]*(off + hl);
     R[0] = vr[0]*hw; R[1] = vr[1]*hw; R[2] = vr[2]*hw;
     U[0] = vu[0]*hh; U[1] = vu[1]*hh; U[2] = vu[2]*hh;
     F[0] = vf[0]*hl; F[1] = vf[1]*hl; F[2] = vf[2]*hl;
@@ -6424,7 +6432,95 @@ static void HandDrawBox(void* dev, const float vp[3], const float vf[3],
             q[i][1] = corner[n][1];
             q[i][2] = corner[n][2];
         }
-        HandDrawQuad3D(dev, q, u, v, 0xFFFFFFFFu, g_handTex);
+        HandDrawQuad3D(dev, q, u, v, color, tex);
+    }
+}
+
+/* A palm with four finger slabs and one thumb slab. The fingers and thumb are
+   deliberately small and blocky: they exist so the roll/pitch/yaw of the hand
+   is obvious at a glance, the way SixDOFinator's calibration hands are. */
+static void HandDrawBox(void* dev, const float vp[3], const float vf[3],
+                        const float vu[3], const float vr[3], BOOL isRight)
+{
+    const float hw = 0.016f, hh = 0.028f, hl = 0.028f, off = 0.023f;
+    float c[3];
+    int i;
+
+    c[0] = vp[0] + vf[0]*(off + hl);
+    c[1] = vp[1] + vf[1]*(off + hl);
+    c[2] = vp[2] + vf[2]*(off + hl);
+
+    /* Palm. */
+    HandDrawBoxBasis(dev, c, vf, vu, vr, hw, hh, hl, 0xFFFFFFFFu, g_handTex);
+
+    /* Four fingers: thin slabs forward of the palm, fanned slightly outward
+       and with staggered lengths, so their direction is readable even when
+       foreshortened. They sit toward the back of the hand so they stay
+       visible above a grip. */
+    {
+        const float lens[4] = { 0.019f, 0.023f, 0.022f, 0.018f };
+        for (i = 0; i < 4; ++i) {
+            const float sideOff = (-1.5f + (float)i) * 0.0082f;
+            float base[3], ff[3], fu[3], fr[3], fc[3], d, len;
+
+            base[0] = c[0] + vf[0]*hl + vr[0]*sideOff + vu[0]*0.010f;
+            base[1] = c[1] + vf[1]*hl + vr[1]*sideOff + vu[1]*0.010f;
+            base[2] = c[2] + vf[2]*hl + vr[2]*sideOff + vu[2]*0.010f;
+
+            ff[0] = vf[0] + vr[0]*sideOff*4.0f;
+            ff[1] = vf[1] + vr[1]*sideOff*4.0f;
+            ff[2] = vf[2] + vr[2]*sideOff*4.0f;
+            HandNorm(ff);
+
+            fu[0] = vu[0]; fu[1] = vu[1]; fu[2] = vu[2];
+            d = fu[0]*ff[0] + fu[1]*ff[1] + fu[2]*ff[2];
+            fu[0] -= ff[0]*d; fu[1] -= ff[1]*d; fu[2] -= ff[2]*d;
+            HandNorm(fu);
+            HandCross(fu, ff, fr);
+            HandNorm(fr);
+
+            len = lens[i];
+            fc[0] = base[0] + ff[0]*(len + 0.001f);
+            fc[1] = base[1] + ff[1]*(len + 0.001f);
+            fc[2] = base[2] + ff[2]*(len + 0.001f);
+
+            HandDrawBoxBasis(dev, fc, ff, fu, fr,
+                             0.0034f, 0.0038f, len,
+                             0xFFF4F4F4u, g_whiteTex);
+        }
+    }
+
+    /* Thumb: on the inner side (right hand -> -right, left hand -> +right),
+       angled forward and inward. */
+    {
+        const float side = isRight ? -1.0f : 1.0f;
+        float tc[3], tf[3], tu[3], tr[3], len, d;
+
+        tc[0] = c[0] + vr[0]*side*(hw + 0.004f)
+                     + vu[0]*0.004f + vf[0]*(hl*0.18f);
+        tc[1] = c[1] + vr[1]*side*(hw + 0.004f)
+                     + vu[1]*0.004f + vf[1]*(hl*0.18f);
+        tc[2] = c[2] + vr[2]*side*(hw + 0.004f)
+                     + vu[2]*0.004f + vf[2]*(hl*0.18f);
+
+        tf[0] = vf[0]*0.72f - vr[0]*side*0.69f;
+        tf[1] = vf[1]*0.72f - vr[1]*side*0.69f;
+        tf[2] = vf[2]*0.72f - vr[2]*side*0.69f;
+        len = sqrtf(tf[0]*tf[0] + tf[1]*tf[1] + tf[2]*tf[2]);
+        if (len > 0.001f) { tf[0] /= len; tf[1] /= len; tf[2] /= len; }
+        else              { tf[0] = vf[0]; tf[1] = vf[1]; tf[2] = vf[2]; }
+
+        tu[0] = vu[0]; tu[1] = vu[1]; tu[2] = vu[2];
+        d = tu[0]*tf[0] + tu[1]*tf[1] + tu[2]*tf[2];
+        tu[0] -= tf[0]*d; tu[1] -= tf[1]*d; tu[2] -= tf[2]*d;
+        len = sqrtf(tu[0]*tu[0] + tu[1]*tu[1] + tu[2]*tu[2]);
+        if (len > 0.001f) { tu[0] /= len; tu[1] /= len; tu[2] /= len; }
+        else              { tu[0] = vu[0]; tu[1] = vu[1]; tu[2] = vu[2]; }
+        HandCross(tu, tf, tr);
+        HandNorm(tr);
+
+        HandDrawBoxBasis(dev, tc, tf, tu, tr,
+                         0.0050f, 0.0050f, 0.013f, 0xFFE8E8E8u, g_whiteTex);
     }
 }
 
@@ -6618,13 +6714,13 @@ static void DrawHandAndLaserWorld(void* dev)
        The gun model and muzzle effects are the game's own assets; they will
        be duplicated onto the hand in a later pass. */
     o_SetRenderState(dev, D3DRS_ZWRITEENABLE, 1);
-    HandDrawBox(dev, ovp, ovf, ovu, ovr);
+    HandDrawBox(dev, ovp, ovf, ovu, ovr, !domRight);
     {
         float hvp[3];
         hvp[0] = dvp[0] + dvr[0]*g_handAdj[0] + dvu[0]*g_handAdj[1] + dvf[0]*g_handAdj[2];
         hvp[1] = dvp[1] + dvr[1]*g_handAdj[0] + dvu[1]*g_handAdj[1] + dvf[1]*g_handAdj[2];
         hvp[2] = dvp[2] + dvr[2]*g_handAdj[0] + dvu[2]*g_handAdj[1] + dvf[2]*g_handAdj[2];
-        HandDrawBox(dev, hvp, dvf, dvu, dvr);
+        HandDrawBox(dev, hvp, dvf, dvu, dvr, domRight);
     }
     if (g_partN > 0 && !g_weaponEmpty && !g_needParts)
         HandDrawCapturedGun(dev, dvp, dvf, dvu, dvr);
