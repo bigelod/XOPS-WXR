@@ -2211,10 +2211,12 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
            deliberately exempt, so A/B/X/Y/arrows work there. */
         if (g_vrExclusive) {
             p['A'] = 0; p['B'] = 0; p['X'] = 0; p['Y'] = 0;
-            if (InGameplay()) {
-                p[VK_UP] = 0; p[VK_DOWN] = 0;
-                p[VK_LEFT] = 0; p[VK_RIGHT] = 0;
-            }
+            /* Block the arrow keys in VR at all times. WinlatorXR maps the
+               left stick to arrow keys, and XOPS binds up/down to weapon
+               swaps, so allowing them through in a menu still changes the
+               weapon. Other desktop keys stay available for flat menus. */
+            p[VK_UP] = 0; p[VK_DOWN] = 0;
+            p[VK_LEFT] = 0; p[VK_RIGHT] = 0;
         }
 
         /* Which keys are down decides whether this interval counts as moving
@@ -3764,10 +3766,16 @@ static void VrExclusiveKeys(PBYTE p)
     /* Unfocused: input is already muted, and synthetic keys must not appear
        either. */
     if (g_inputMuted) return;
-    /* Only gameplay is VR-exclusive. MODE_VR is 0 on the title, objective,
-       menus, death and victory screens, and desktop input must always pass
-       through there. */
-    if (!g_vrExclusive || !InGameplay()) return;
+    /* Only gameplay is fully VR-exclusive. MODE_VR is 0 on the title,
+       objective, menus, death and victory screens, and desktop input must
+       pass through there - except the arrow keys, which WinlatorXR maps the
+       left stick to and XOPS uses for weapon swaps. */
+    if (!g_vrExclusive) return;
+    if (!InGameplay()) {
+        p[VK_UP] = 0; p[VK_DOWN] = 0;
+        p[VK_LEFT] = 0; p[VK_RIGHT] = 0;
+        return;
+    }
     for (vk = 0; vk < 256; ++vk) {
         if (vk == VK_ESCAPE) continue;       /* the one way out */
         p[vk] = 0;

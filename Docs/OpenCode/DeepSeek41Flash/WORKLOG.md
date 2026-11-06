@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  6 2026 14:45:41`, SHA-256
-`06364bc1ffed8bc56c580c4395405ef312d3c795b01adf42b646390659efb59d`.
+Current dev build: `built Nov  6 2026 15:14:55`, SHA-256
+`add51605a989213493e7867ffa30f1e56ebe3d574b5ec9afd867a9f66c7a249f`.
 Release build: 279,552 bytes, SHA-256
-`782bcb094ec5f4118e5f6377b1d6ea0dfa8e2910786d3ff3f15275ba42444a87`.
+`3e59780b79c6f75146069fd7e366244a1f7400959e42a317113d0dde85721414`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1244,3 +1244,7 @@ Release build: 279,552 bytes, SHA-256
 - Open: AER works in-game but crashes on the transition back to a menu. Need
   the probe log and Winelog from that transition to see whether it is the
   `AerDraw*` path, `RESET`, or the runtime's MODE_3D switch.
+- Arrow-key weapon swaps: WinlatorXR maps the left stick to arrow keys, and
+  XOPS binds up/down to weapon swaps. The mod now blocks **all** arrow keys
+  whenever `g_vrExclusive` is on - in gameplay and in the flat menu screen -
+  while leaving other desktop keys available for menus.
