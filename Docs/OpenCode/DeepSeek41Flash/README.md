@@ -1,7 +1,8 @@
 # XOPS-WXR - OpenCode / DeepSeek V4.1 Flash handover
 
-**Session date:** 5 Nov 2026.
-**Read this first, then `WORKLOG.md` for what changed in this pass.**
+**Session date:** 5-6 Nov 2026.
+**Read this first, then `COMPLETED_STEPS.md` for what is done, `NEXT_STEPS.md`
+for what is left, and `WORKLOG.md` for the experiment history.**
 
 This folder is the third agent's working notes. The second agent's folder,
 `Docs/ClaudeCode/`, remains the **most accurate long-form record** of the
@@ -11,7 +12,7 @@ discard its code and its protocol claims.
 
 Evidence tags are the project's own: `[spec]`, `[runtime]`, `[general]`,
 `[derived]`, `[code]`, `[device]`, `[unverified]`. Nothing in this folder is
-`[device]` unless it says so, and the owner has not seen this build yet.
+`[device]` unless it says so; the build is PC-verified, not device-verified.
 
 ---
 
@@ -438,22 +439,15 @@ comfort (needs the Quest 3 and a real pose stream) or the final placement of the
 
 ## 4. Order of work from here
 
-1. **Desktop verification of the composite, window, sync pixel and FOV is
-   done**. Re-run section 3 after any change to those paths.
-2. **Stage 1 on the device**: unmodified XOPS flat in a WinlatorXR container,
-   then this DLL. Record the container resolution, WineD3D/DXVK choice, and
-   the exact `d3d8.dll` override steps. Milestone 1 is still not started.
-3. **3D HUD slot placement** - the replacement text is in the centre square,
-   but the game's indexed 3D weapon-slot models are still at their own draw
-   positions. Decide whether to move them with the text or leave the game's
-   slots where they are.
-4. **Eye height** - try writing Y at `ENDSCENE` (the probe's phase key `2`)
-   before hunting a separate field.
-5. **Roll** - `CopyRects` to an off-screen surface, rotate, draw; the frame is
-   not lockable.
-6. **F-7 decoupled aim** - run the IDA xref test on `0x0048C3BC` and
-   `0x0048E0B4` first. This is the project's largest remaining risk.
-7. **Separate the mod from the probe** once the above stabilises.
+The live list is `NEXT_STEPS.md`. In short, what remains is per-weapon tuning
+persistence, the off-hand support pose in two-handed aim, muzzle mapping, the
+3D HUD slot placement decision, the first Quest 3 device pass (then
+`BUG_FIXES.md`), AER device sign/scale and the deferred SBS experiment, and
+the optional launcher.
+
+Desktop verification of the composite, window, sync pixel, FOV, HUD, hands,
+weapon clone, haptics, input boundary and AER is already done and recorded in
+`COMPLETED_STEPS.md`.
 
 ---
 

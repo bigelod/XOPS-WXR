@@ -1,46 +1,82 @@
 # XOPS-WXR — CURRENT STEPS / handover
 
 **Date:** 6 Nov 2026, DeepSeek V4.1 Flash session.
-**Read with:** `README.md` (architecture), `WORKLOG.md` (history),
-`NEXT_STEPS.md` (the live plan, including stereo and the launcher).
-This file is the live "where we are right now and what is next".
+**Read with:** `COMPLETED_STEPS.md` (what is done), `NEXT_STEPS.md` (what is
+left), `WORKLOG.md` (history), `README.md` (long-form architecture).
+This file is the current state and how the pieces fit.
+
+**Current build:** `built Nov  6 2026 06:41:06`, SHA-256
+`74931a59f64cc9a559c1e49d14261881eba296c010832f174402cd76f82a057a`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---
 
-## 1. What works
+## 1. State in one paragraph
 
-- `d3d8.dll` proxy at the container resolution; 640x480 game render target
-  composited to the back buffer (native 4:3, no FOV change).
-- Centre-square HUD (text + panels), ammo, STATE colours, RELOADING/DEAD.
-- Both VR hands as depth-tested 3D boxes at their XrApi poses, with four
-  short, chunky glove-textured finger slabs and a thick angled thumb.
-- Dominant-hand laser, depth-tested, from the hand.
-- **Hand aim:** while firing, the game's shot is aimed at the laser endpoint,
-  and the view is restored before the world is drawn.
-- **Haptics:** one short pulse per shot from the magazine counter, 2 frames
-  (SHOGO-matched), dominant hand by default.
-- **Two-handed aim:** hold the **left grip**; the gun stays on the dominant
-  hand and points at the off hand. Both controllers buzz on firing while it
-  is held. No config key.
-- **Input boundary:** while the game window lacks focus, **physical desktop
-  input** is muted (keyboard, mouse, debug keys), but **XrApi input still
-  arrives** - the runtime / UDP Tester normally holds focus while it drives
-  the game. In VR mode the physical A/B/X/Y keys are always swallowed, and
-  the arrows are swallowed while `MODE_VR = 1`. Manual PC mode (`0`) is exempt
-  from the reserved-key rule (and is itself muted while unfocused).
-- **Verbose logging** behind `verbose_debug` (default false); errors and
-  state changes always log.
-- **Manual/user mode (`0`):** ignores incoming 6DOF, installs a default pose
-  for both hands, centres the cursor once, and drives the right hand with
-  `E` + numpad (rotate) / `E` + numpad (move). `N` = attach, `J/K` = hunt.
-- **Game weapon model cloned onto the dominant hand:**
-  - The inventory model is captured from the game's own indexed draws.
-  - It is frozen after capture (no constant spin).
-  - It follows weapon swaps, drops, pickups and empty slots.
-  - Grenade is scaled to 1/3 and mapped vertical.
-- **Per-weapon hand offset (`Q` + numpad, `T` saves it).**
+The `d3d8.dll` proxy runs XOPS at the container resolution with a native
+640x480, 4:3 composite and no FOV change. Head tracking writes the camera;
+both hands are visible and depth-tested; the dominant hand carries the cloned
+game weapon and a laser; the replacement HUD is in the centre square.
+Haptics, two-handed aim, the input focus boundary, verbose logging, the
+Quest 3 hand-roll default and the chunkier calibration hand are implemented
+and PC-verified. AER stereo is implemented as an experiment; mono is the
+default. Device testing is the next real milestone.
 
-## 1a. VR controller mapping (owner, 6 Nov)
+---
+
+## 2. How the frame is assembled
+
+1. `CreateDevice`/`Reset` ask for the desktop/container back buffer.
+2. The game draws into a dedicated **640x480 render target** (not the back
+   buffer), which keeps its native FOV and 3D weapon-slot models intact.
+   The target stays bound outside `Present`, so title/demo draws between
+   scenes also land in it.
+3. `Present` binds the real back buffer, draws the 640x480 texture at native
+   4:3, then the GDI-rendered HUD/panel textures and the sync square.
+4. The sync square is 10x10 at `(0,0)`: red echoes `HMD_SYNC`; blue is the AER
+   eye flag (0 outside AER).
+
+`hkSetViewport` maps larger viewports back into the 640x480 target and
+`hkSetRenderTarget` keeps the game there. On a 4:3 container (1280x960) the
+native frame fills it with no bars or crop.
+
+## 3. Camera, hands and the weapon clone
+
+- The camera lives in the game's own globals; `SteerTick` composes head pose,
+  recentre and right-stick yaw. Cluster A is the render copy, cluster B is
+  what movement reads; both are written.
+- Hand pose is converted from XrApi into view space by `HandViewPose`, then
+  drawn as boxes in the game's 3D pass. The hand is a palm plate with four
+  chunky finger slabs and an angled thumb.
+- **Weapon capture:** the inventory weapon arrives as a group of indexed
+  draws sharing one vertex buffer. The primary weapon is the last contiguous
+  VB group; each draw is one submesh. Parts are copied (verts + indices +
+  texture + axis mapping + scale) and **frozen**; the original HUD copy is
+  left untouched. Swaps/drops/pickups trigger a recapture through the
+  player-struct watcher.
+- **Textures:** weapon UVs can be negative atlas offsets, so stage 0 uses
+  `D3DTADDRESS_WRAP`.
+- **Two-handed aim:** while the left grip is held, the dominant hand's basis
+  is rebuilt to point at the off hand (`HandTwoHandedAim`); the gun, laser and
+  hand-aim shot all use it. Haptics buzz both hands.
+- **AER stereo:** the engine CPU-bakes the world and submits it, so eye
+  separation is applied by copying each draw's vertices and shifting x
+  (`AerDrawPrimitive` in cm, `AerDrawIndexed` in m), one eye per frame.
+  `stereo = mono | aer`; `mono` ships.
+
+## 4. Input, haptics, logging
+
+- **Focus boundary:** unfocused means physical keyboard/mouse and debug keys
+  are muted; XrApi sticks/triggers/buttons are still injected. In VR mode
+  physical A/B/X/Y are always swallowed and arrows are swallowed while
+  `MODE_VR = 1`; manual PC mode (`0`) is exempt.
+- **Haptics:** outbound fields 1-2 are a per-hand duration in frames; a shot
+  sends a 2-frame pulse, decayed before sending. Both hands while two-handed
+  aim is held.
+- **Logging:** `Log()` is always on for errors/state; `LogD()` is gated by
+  `verbose_debug` (default false, true on this test PC).
+
+## 5. VR controller mapping (owner, 6 Nov)
 
 | Input | Action |
 |---|---|
@@ -55,177 +91,46 @@ This file is the live "where we are right now and what is next".
 | X | Drop weapon |
 | Y | Zoom (toggle) |
 
-- **Walk is gone** (the left grip used to send `TAB`).
-- Left-handed mode swaps only shoot and fire mode; every other button is the
-  same.
+Left-handed mode swaps only shoot and fire mode. Walk is gone.
 
-## 2. The weapon-model discovery (important)
+## 6. Manual / debug keys
 
-The inventory weapon is drawn at the end of the frame as a group of indexed
-draws. The group **shares one vertex buffer**; each draw is one submesh with
-its own texture/UV range.
+- `0` toggle manual PC mode (default pose, XrApi ignored; cursor centred once).
+- `E` + numpad: pitch/yaw/roll; with `E`, numpad also moves the hand.
+- `Q` + numpad: slide the hand box; `T` saves the per-weapon offset.
+- `J/K` previous/next draw (hunt), `N` attach.
+- `V` draw dump, `H` HUD scale, `F` window fit, `M` target res.
+- `.` grab two consecutive composited frames (`xops_frame_<n>.bmp`).
+- Verbose-only keys and probe keys are muted while the game is unfocused.
 
-Examples measured with the `TAIL` dump:
+## 7. Config
 
-```
-MAC 10:   vb=0AA74660  numV=115  prim=2,45,4,4,2  tex=0407B4F0   (5 parts)
-another:  vb=0AA745A0  numV=93   prim=18,46        tex=0407A990   (2 parts)
-AUG:      vb=0C743020  numV=133  prim=...          tex=0A69E8F0   (1 part)
-```
-
-Rules:
-
-- The **primary weapon** is the last contiguous run of draws sharing a VB.
-- The **secondary weapon** is the previous VB group.
-- The number of parts varies (1, 2, 5, ...), so fixed `N-2`/`N-3` indices are
-  wrong. `N` also changes with level/inventory.
-- The game mesh routine's call site is `IDA 0x0042A335`, but many world props
-  (cans) use it too, so it is **not** a unique weapon signature.
-
-### Model object layout (from disassembly at 0x0042A335)
-
-```
-[esi+0x04]  FVF
-[esi+0x24]  device
-[esi+0x28]  vertex buffer   <- model vertices
-[esi+0x2C]  stride
-[esi+0x30]  ? (base vertex)
-[esi+0x3C]  index buffer    <- model indices
-[esi+0x48]  submesh array
-[esi+0x50]  draw-entry array (0x14 bytes each)
-[esi+0x54]  entry count
-[esi+0x58]  submesh count
-[esi+0x0C]  flags (bit 0x10 = indexed path)
-```
-
-The indexed draw entry has `+04` base vertex, `+08` index count, `+0C/+10`
-min/max index.
-
-### Vertex format
-
-- Stride **20** = `XYZ + TEX1`: u,v at floats **3,4**.
-- Stride **24** = `XYZ + DIFFUSE + TEX1`: u,v at floats **4,5**.
-- Stride **28** = `XYZRHW + DIFFUSE + TEX1`: u,v at floats **5,6**.
-
-`CaptureGunModel` chooses the UV offset by stride.
-
-### The black-texture bug (AUG / M1 / GLOCK18 / MK23)
-
-The AUG log showed:
-
-```
-HIDE model fmt: stride=20 fvf=0x0144 uv0 -0.667, 0.181 uv1 -0.667, 0.231 tex=0A69E8F0
-```
-
-The UVs are **negative** (texture atlas offsets). The composite sets
-`D3DTSS_ADDRESSU/V = CLAMP`, so the sample lands on the black edge.
-
-**Fix applied in source but NOT yet built/deployed:**
-`HandDrawCapturedGun` now sets `D3DTADDRESS_WRAP` for stage 0 before drawing
-the part. Rebuild and retest AUG/M1/Glock18/MK23.
-
-## 3. Capture pipeline (current code)
-
-- `RecaptureWeapon()` (weapon change/pickup/sanity) clears all parts,
-  releases their textures, sets `g_needParts`, `g_weaponVB = NULL`.
-- At `EndScene`, if a capture is pending and `g_weaponVB` is null, take the
-  **last tail draw's VB** and remember it; the primary weapon is the last VB
-  group.
-- On the following frame, every indexed draw with that VB is captured as a
-  part (verts + indices + texture + axis mapping + scale).
-- At `EndScene`, if parts were captured, `g_needParts = FALSE`; they are
-  drawn frozen from then on.
-- `HandDrawCapturedGun` loops the parts and draws each with its own texture.
-- The original HUD copy is left untouched.
-
-## 4. Empty / drop / pickup logic
-
-`WatchWeaponSwap()` reads the player struct (`0x48DF00 + idx*0x50`).
-The custom HUD primary rule is `active = sel ? w1 : w0` (0 = "None").
-
-- The slot fields can lie briefly during a swap, so `g_weaponEmpty` requires
-  `active == 0` **and** total ammo `cur0+cur1+res0+res1 == 0`, sustained for
-  10 frames (`g_emptyCount`).
-- **Drop latch:** any transition of a slot from non-zero to 0 (a deliberate
-  drop, or the grenade emptying to NONE) sets `g_dropLatch`. While latched,
-  the model is cleared and **no capture is attempted**; the latch clears only
-  when a slot gains a weapon or the player switches to a non-empty slot.
-  This prevents a transient NONE from capturing a world can.
-- **Ammo sanity:** skipped while latched; otherwise if the hand is marked
-  empty but any slot has ammo, force a recapture (`HIDE sanity: ammo ...`).
-
-## 5. Manual controls
-
-- `0` — toggle user-control mode. ON: default hand pose, cursor centred once,
-  XrApi ignored. OFF: XrApi resumes.
-- `E` + numpad 8/5 — pitch; 4/6 — yaw; 7/9 — roll.
-- `E` + numpad 8/5/4/6/7/9 — move the hand (up/down/left/right/back/fwd).
-- `Q` + numpad — slide the **hand box only** relative to the gun.
-- `T` — save the hand offset for the current weapon (logged with its name).
-- `J` — previous draw (hunt), `K` — next draw (hunt), `N` — attach.
-- `V` — draw-order dump; `H` — HUD scale; `F` — fit window; `M` — target res.
-
-## 6. Per-weapon tuning
-
-- `g_gunScaleMul`: 1/3 for names starting `GREN`, 0.75 for `MAC*`, else 1.
-- `g_gunVertical`: true for `GREN`, mapping the long axis to hand-up.
-- `g_handAdj[3]`: per-weapon hand offset, table `g_handAdjTable[32][3]`.
-  Currently in memory only — **not persisted to config yet**.
-
-## 7. Build / test
-
-Build + deploy:
-
-```
-powershell -File build\build-probe.bat
-```
-
-or the agent helper `deploy-probe.bat`. Deploy target:
-`E:\tmp\Q3Mods\xops096\d3d8.dll`.
-Game log: `E:\tmp\Q3Mods\xops096\xops_wxr_probe.log`.
-
-**Config is `E:\tmp\Q3Mods\config.txt`** (one directory above the game):
+`E:\tmp\Q3Mods\config.txt`, one directory above the game:
 
 ```
 handedness = right
 hand_flip = false           # false = Quest 3 roll (default); true = old/other-device roll
 haptics = true
-haptics_hand = dominant
-haptic_frames = 2
-verbose_debug = true     # this test PC; ship with false
-stereo = mono            # experimental: aer
+haptics_hand = dominant     # dominant | both | left | right
+haptic_frames = 2           # 1..5
+verbose_debug = true        # this test PC; ship with false
+stereo = mono               # experimental: aer
 ```
 
-Useful log lines (most need `verbose_debug = true`):
+`xops_wxr_steer.ini` still carries the settled steering facts (`yawSign`,
+`pitchSign`, `cluster`, `leftHanded`, `turnSpeed`, `hudVisualScale`,
+`patchAspect`).
+
+## 8. Build / test
 
 ```
-HIDE  weapon VB 0x...; capturing parts next frame
-HIDE  model fmt: stride=.. fvf=0x.... uv0 .. .. uv1 .. .. tex=0x....
-HIDE  part N: <verts> v <indices> i tex=0x...
-HIDE  assembled N part(s) for '<weapon>'
-HIDE  current weapon NONE: hands only
-HIDE  sanity: ammo ... with empty hand - showing weapon
-HAND  saved adj '<weapon>' (id N): x y z
-HAND  two-handed aim ON: dom x y z  off x y z  aim x y z
-HAPTIC fires=N dur=F frames hand=both|left|right ...
-TAIL  idx N  vb=0x... numV=.. prim=.. tex=0x...
+call "<VS2022>\VC\Auxiliary\Build\vcvarsall.bat" x86
+build\build-probe.bat                 REM builds + deploys to E:\tmp\Q3Mods\xops096
 ```
 
-Last built/deployed (chunky glove-textured hands):
-`built Nov  6 2026 06:41:06`, SHA-256
-`74931a59f64cc9a559c1e49d14261881eba296c010832f174402cd76f82a057a`.
-
-## 8. Next steps
-
-The live list is `NEXT_STEPS.md`. Immediate order:
-
-1. Persist `g_handAdjTable` and per-weapon scale in `config.txt`.
-2. Off-hand pose/offset in two-handed aim.
-3. Per-weapon muzzle mapping.
-4. Device test checklist (NEXT_STEPS section 5).
-5. **Experimental:** true stereo, SBS first with AER fallback, using
-   HaloCEWXR. May be postponed until after V1.0.
-6. **Bonus:** custom EXE launcher (Shogo `launcher-xr`), auto-update later.
+The script wipes `out\probe`, refuses a non-x86 compiler, and verifies the
+deployed DLL with SHA-256. Line 1 of `xops_wxr_probe.log` is the build stamp -
+check it before interpreting any report.
 
 ## 9. Standing rules
 
@@ -235,11 +140,9 @@ The live list is `NEXT_STEPS.md`. Immediate order:
 - Reuse the game's models and effects; do not invent replacements.
 - Only `0` remains from the old number keys; numpads, `J/K/N/T/Q/E` are ours.
 - `SetCursorPos` must never move the real cursor when the game is unfocused.
-- **No physical input may cross between windows:** unfocused means mute for
-  desktop keys/mouse and debug keys. XrApi/runtime input still reaches the
-  game, because the tester normally holds focus.
-- **A/B/X/Y and (in `MODE_VR=1`) the arrows are never taken from the physical
-  keyboard in VR mode;** manual PC mode (`0`) is the exception.
+- No physical input crosses between windows; XrApi input still does.
+- A/B/X/Y and (in `MODE_VR=1`) the arrows are never taken from the physical
+  keyboard in VR mode; manual PC mode is the exception.
 - `verbose_debug = false` ships; diagnostics never replace errors/state.
 - Normalise every quaternion on ingest; freeze on the last good pose.
 - Never commit XOPS's own data files or binaries.
