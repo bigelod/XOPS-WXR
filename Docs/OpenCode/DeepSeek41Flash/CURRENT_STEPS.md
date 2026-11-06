@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 18:07:10`, SHA-256
-`89579240c173ff4d6027b4cd66a9dbb023eae3d7036352b72e320f3566db826f`,
+**Current build:** `built Nov  6 2026 18:19:57`, SHA-256
+`bb8a2f709add941f23a4723f1a71586800255474d010db1ed94e785a0ebfcb43`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 Release build: 283,136 bytes, SHA-256
-`56ff4c7c8e99d40f0d7f9435c357a417a87642217b5868a67e38fa8fa6737226`.
+`4fa2a83fef7b19b67ab09c908001ac8dab4e8bfd6e0ba27da190c0e7bd652ac0`.
 
 ---
 
@@ -24,12 +24,12 @@ hands). The dominant hand carries the cloned game weapon and an always-on
 laser. Every level start makes the current HMD XYZ and yaw the new origin, and
 a right-stick click does the same. Haptics, two-handed aim, the input focus
 boundary, verbose logging and the Quest 3 hand-roll default are implemented.
-Gameplay and the AER floating menu take **no physical keyboard or mouse**
-except ESC and the PC-only `0`. AER stereo is implemented as an experiment; in
-AER the runtime stays `MODE_VR=1` for the whole run, `MODE_3D` drops to mono on
-the title/menu/death/objective/victory screens, and those screens are drawn as
-a floating panel in the centre third with a hand laser pointer. Mono is the
-default. Device testing is the next real milestone.
+Gameplay and the floating non-VR panel take **no physical keyboard or mouse**
+except ESC and the PC-only `0`. AER stereo is implemented as an experiment. In
+both mono and AER the runtime stays `MODE_VR=1` for the whole run; `MODE_3D`
+drops to mono on the title/menu/death/objective/victory screens, and those
+screens are drawn as a floating panel in the centre third with a hand laser
+pointer. Mono is the default. Device testing is the next real milestone.
 
 ---
 
@@ -46,10 +46,10 @@ default. Device testing is the next real milestone.
    4:3 (rotated as a 2D sprite by the head roll), then the GDI-rendered
    HUD/panel textures and the sync square. The HUD and sync pixel are drawn
    after the sprite, so they stay fixed.
-   In **AER**, the non-gameplay screens are drawn at one third size in the
-   centre cell of a 3x3 grid instead (`VrMenuPanel`/`CompositeFrame`), with
-   the dominant-hand laser pointer dot on top. Mono runs keep the full-frame
-   menu because the runtime presents its own flat panel under `MODE_VR=0`.
+   In every stereo mode, the non-gameplay screens are drawn at one third size
+   in the centre cell of a 3x3 grid instead (`VrMenuPanel`/`CompositeFrame`),
+   with the dominant-hand laser pointer dot on top. `MODE_VR` stays 1 there;
+   only `MODE_3D` drops to mono.
 4. The sync square is 10x10 at `(0,0)`: red echoes `HMD_SYNC`; blue is the AER
    eye flag (0 outside AER).
 
@@ -92,7 +92,7 @@ native frame fills it with no bars or crop.
 - **AER stereo:** the engine CPU-bakes the world and submits it, so eye
   separation is applied by copying each draw's vertices and shifting x
   (`AerDrawPrimitive` and `AerDrawIndexed`, both camera-space metres), one eye
-  per frame. In AER the runtime stays `MODE_VR=1` for the whole run; menus,
+  per frame. `MODE_VR` stays `1` for the whole run in mono and AER; menus,
   death, objective and victory keep `MODE_3D=0` (mono) and are drawn as the
   centre-third panel. `stereo = mono | aer`; `mono` ships.
 - **Level-start recentre:** `LevelActive()` (the game's mission/result/player
@@ -120,22 +120,20 @@ native frame fills it with no bars or crop.
 
 - **Focus boundary:** unfocused means physical keyboard/mouse and debug keys
   are muted; XrApi sticks/triggers/buttons are still injected.
-- **VR input isolation:** in gameplay and on the AER floating menu, *all*
+- **VR input isolation:** in gameplay and on the floating non-VR panel, *all*
   physical keyboard and mouse input is removed from `GetKeyboardState`, and
   the window procedure also swallows the corresponding `WM_KEY*`/`WM_MOUSE*`
   messages. Only `ESC` (the way out) and `0` (PC-only manual mode) survive.
-  A/B/X/Y and the arrow keys are swallowed in VR on every screen. Single
-  desktop keys still work on the mono menu screens, where the runtime owns the
-  flat panel.
+  A/B/X/Y and the arrow keys are swallowed in VR on every screen.
 - **Left stick as arrows:** WinlatorXR currently maps the left stick to the
   arrow keys rather than the XrApi analog fields. Those raw arrow presses are
   read before the filter and translated to W/A/S/D, so the stick moves the
   player instead of swapping weapons.
-- **AER menu pointer:** in AER menus the dominant hand's ray hits a 1 m plane,
-  is mapped onto the centre-third panel, and is published through
-  `GetCursorPos` in the game's 640x480 UI space. Right trigger injects the
-  left mouse button and posts `WM_LBUTTONDOWN`/`WM_LBUTTONUP`; a screen-space
-  dot is drawn at the same point.
+- **Floating-panel pointer:** on any non-gameplay screen the dominant hand's
+  ray hits a 1 m plane, is mapped onto the centre-third panel, and is published
+  through `GetCursorPos` in the game's 640x480 UI space. Right trigger injects
+  the left mouse button and posts `WM_LBUTTONDOWN`/`WM_LBUTTONUP`; a
+  screen-space dot is drawn at the same point.
 - **Laser:** always on. `Y` toggles the game's zoom and no longer hides the
   laser.
 - **Haptics:** outbound fields 1-2 are a per-hand duration in frames; a shot
@@ -223,14 +221,13 @@ interpreting any report.
 ## 9. Standing rules
 
 - Do not change the game's FOV/projection; native 4:3.
-- Mono: `MODE_VR=0` on title/menu/death/victory; desktop input works there.
-- AER: `MODE_VR=1` for the whole run; `MODE_3D=0` (mono) on
-  title/menu/death/objective/victory, `MODE_3D=2` only in gameplay.
+- `MODE_VR=1` for the whole run in mono and AER; `MODE_3D=0` (mono) on
+  title/menu/death/objective/victory, `MODE_3D=2` only in AER gameplay.
 - Reuse the game's models and effects; do not invent replacements.
 - Only `0` remains from the old number keys; numpads, `J/K/N/T/Q/E` are ours.
 - `SetCursorPos` must never move the real cursor when the game is unfocused.
 - No physical input crosses between windows; XrApi input still does.
-- In gameplay and the AER floating menu, no physical key or mouse button
+- In gameplay and on the floating non-VR panel, no physical key or mouse button
   reaches the game except `ESC` and `0`; A/B/X/Y and arrows are swallowed in
   VR on every screen. Manual PC mode is the exception.
 - `verbose_debug = false` ships; diagnostics never replace errors/state.

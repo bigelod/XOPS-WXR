@@ -2185,13 +2185,12 @@ static BOOL GameWindowFocused(void)
 }
 
 /* True when the non-VR screens are being shown as the floating centre-third
-   panel. That only happens in AER, where MODE_VR stays 1 for the whole run and
-   only MODE_3D drops to mono. Mono runs send MODE_VR 0 in menus and let the
-   runtime present its own flat panel, so they must keep desktop input. */
+   panel. MODE_VR now stays 1 for the whole run in mono as well as AER, so every
+   non-gameplay screen uses the panel and the hand laser pointer. Only MODE_3D
+   changes between gameplay and the flat screens. */
 static BOOL VrMenuPanel(void)
 {
-    return (g_vrExclusive && g_stereoMode == STEREO_AER && !InGameplay())
-               ? TRUE : FALSE;
+    return (g_vrExclusive && !InGameplay()) ? TRUE : FALSE;
 }
 
 /* Keys WinlatorXR injects for the controller, so the physical key must never
@@ -2210,9 +2209,8 @@ static BOOL InputKeyBlocked(int vk)
         return TRUE;
     /* In gameplay the physical keyboard and mouse are not the game's input at
        all. ESC stays as the one way out, and 0 is the PC-only switch back to
-       desktop mode. The AER menu panel is the same: it is driven by the laser
-       pointer, so physical keyboard/mouse would only fight it. Mono menus
-       (MODE_VR 0) keep the desktop input the runtime owns. */
+       desktop mode. The floating non-VR panel is the same: it is driven by the
+       laser pointer, so physical keyboard/mouse would only fight it. */
     if (InGameplay() || VrMenuPanel())
         return vk != VK_ESCAPE && vk != '0';
     return FALSE;
@@ -2324,11 +2322,10 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
                the weapon. */
             p[VK_UP] = 0; p[VK_DOWN] = 0;
             p[VK_LEFT] = 0; p[VK_RIGHT] = 0;
-            /* Gameplay and the AER floating menu are VR-only surfaces. Strip
-               the whole physical keyboard/mouse, then add our synthetic keys
-               below. ESC stays as the way out and 0 as the PC-only switch
-               back to desktop input. Mono menus keep desktop input because
-               the runtime owns the mouse there. */
+            /* Gameplay and the floating non-VR panel are VR-only surfaces.
+               Strip the whole physical keyboard/mouse, then add our synthetic
+               keys below. ESC stays as the way out and 0 as the PC-only
+               switch back to desktop input. */
             if (InGameplay() || VrMenuPanel()) {
                 for (k = 0; k < 256; ++k)
                     if (k != VK_ESCAPE && k != '0') p[k] = 0;
@@ -2350,7 +2347,7 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
         StickKeys(p);          /* left stick -> movement */
         ManualHandKeys(p);     /* numpad right hand, 0 mode only */
         VrInputKeys(p);        /* buttons, two-hand grip, shoot, zoom, edges */
-        MenuPointerKeys(p);    /* AER menu panel: trigger -> left click */
+        MenuPointerKeys(p);    /* floating panel: trigger -> left click */
         /* Fire state for the muzzle flash, and the hand-aim shot. In VR the
            trigger sets LButton above; in user mode it is the real mouse. */
         g_fireHeld = (p[VK_LBUTTON] & 0x80) ? TRUE : FALSE;
@@ -2402,10 +2399,10 @@ static BOOL WINAPI hkGetCursorPos(LPPOINT p)
         *p = g_lastCursor;
         return TRUE;
     }
-    /* AER menu panel: the dominant hand is the mouse. Publish its hit point on
-       the 640x480 panel in the screen coordinates the game would get from the
-       real cursor, so its own GetCursorPos -> ScreenToClient path produces the
-       logical panel coordinate. */
+    /* Floating non-VR panel: the dominant hand is the mouse. Publish its hit
+       point on the 640x480 panel in the screen coordinates the game would get
+       from the real cursor, so its own GetCursorPos -> ScreenToClient path
+       produces the logical panel coordinate. */
     if (VrMenuPanel()) {
         float mx, my;
         POINT q;
@@ -2487,7 +2484,7 @@ static BOOL WINAPI hkSetCursorPos(int x, int y)
 
     ++g_inCalls[IN_SETCURSORPOS]; ++g_inFrame[IN_SETCURSORPOS];
     if (!g_inReal[IN_SETCURSORPOS]) return FALSE;
-    /* VR gameplay and the AER menu panel: swallow the recentre call and
+    /* VR gameplay and the floating panel: swallow the recentre call and
        remember the position so hkGetCursorPos returns it verbatim. The real
        desktop cursor must not move. */
     if (g_vrExclusive && (InGameplay() || VrMenuPanel())) {
@@ -3763,9 +3760,10 @@ static BOOL g_prevRecentreBtn = FALSE;
 // head and the hand. ESC is the one exception - it is how you get back to the
 // menu and out of the game.
 //
-// Menus are the opposite case: there the player needs ordinary input, and
-// MODE_VR 0 hands mouse control back to the runtime anyway. So suppression
-// has to be gated on being in gameplay, and we can tell:
+// Menus are the opposite case: the player needs the laser-pointer mouse, not
+// a physical keyboard. MODE_VR now stays 1 on menus too, and the mod owns the
+// pointer, so the whole desktop input is suppressed there as well. Suppression
+// is gated on gameplay or the floating panel; manual PC mode (0) exempts it.
 //
 //   in gameplay  XOPS calls SetTransform 0 times per frame
 //   title/menu   it calls it 25-35 times
@@ -3954,11 +3952,10 @@ static void VrExclusiveKeys(PBYTE p)
     p[VK_UP] = 0; p[VK_DOWN] = 0;
     p[VK_LEFT] = 0; p[VK_RIGHT] = 0;
 
-    /* Gameplay and the AER menu panel are VR-only: the game loses the whole
-       physical keyboard and mouse, then our synthetic keys are added back by
-       StickKeys/VrInputKeys/MenuPointerKeys. ESC stays as the one way out and
-       0 as the PC-only switch back to desktop input. Mono menu screens keep
-       the desktop input the runtime owns (MODE_VR 0). */
+    /* Gameplay and the floating non-VR panel are VR-only: the game loses the
+       whole physical keyboard and mouse, then our synthetic keys are added
+       back by StickKeys/VrInputKeys/MenuPointerKeys. ESC stays as the one way
+       out and 0 as the PC-only switch back to desktop input. */
     if (!InGameplay() && !VrMenuPanel()) return;
     for (vk = 0; vk < 256; ++vk) {
         if (vk == VK_ESCAPE || vk == '0') continue;
@@ -4063,10 +4060,10 @@ static void VrInputKeys(PBYTE p)
         if (g_pulseVk[vk]) { p[vk] |= 0x80; --g_pulseVk[vk]; }
 }
 
-/* AER menu panel: the dominant hand's laser-pointer ray drives the game's
-   mouse. The position is published through GetCursorPos; this adds the click.
-   The trigger is edge-triggered and held for three frames because the game
-   polls GetKeyboardState once per frame. */
+/* Floating non-VR panel: the dominant hand's laser-pointer ray drives the
+   game's mouse. The position is published through GetCursorPos; this adds the
+   click. The trigger is edge-triggered and held for three frames because the
+   game polls GetKeyboardState once per frame. */
 static void MenuPointerKeys(PBYTE p)
 {
     LPARAM lp;
@@ -4499,7 +4496,7 @@ static void ProbeKeys(PBYTE p)
                 Log("INPUT    %s",
                     g_vrExclusive
                       ? "VR input only - desktop keys/mouse suppressed in"
-                        " GAMEPLAY; MODE_VR 0 screens always keep desktop input"
+                        " GAMEPLAY and on the floating menus"
                       : "desktop keyboard/mouse enabled for manual tests;"
                         " VR steering and synthetic input are paused");
                 Log("INPUT    (last frame: %ld SetTransform, %ld indexed, %ld UP"
@@ -4932,8 +4929,8 @@ static void EnsureInit(void)
         LogD("XR       ; recentres, [ ] flip the signs, ' cycles DOF, ` cluster,");
         LogD("XR       1 toggles left stick W/A/S/D, N toggles handedness.");
         LogD("XR       0 enables desktop keyboard/mouse for manual tests;");
-        LogD("XR       MODE_VR 0 screens (title/objective/menu/death/victory)");
-        LogD("XR       always keep desktop input regardless of that toggle.");
+        LogD("XR       MODE_VR stays 1 on menus too - the non-VR screens are");
+        LogD("XR       the centre-third floating panel with the hand pointer.");
         LogD("WINDOW   borderless full-display fit is ON - F toggles it.");
         LogD("SYNC     the red square is drawn last in the frame once a packet");
         LogD("SYNC     has arrived; its value is HMD_SYNC echoed verbatim.");
@@ -4944,10 +4941,12 @@ static void EnsureInit(void)
             g_desktopW, g_desktopH);
         LogD("RESOLUTION M toggles it; the replacement HUD is drawn as a D3D");
         LogD("RESOLUTION texture in the centre square. J saves a back-buffer BMP.");
-        /* IMVR sends a first frame with zero haptics and MODE_VR=0 to awaken
-           the runtime. The mode is only learned from an outbound packet, and
-           the first Present can be a frame or more away. */
-        XrSendFrame(0.0f, 0.0f, XR_VR_OFF, XR_3D_MONO,
+        /* IMVR sends a first frame with zero haptics to awaken the runtime.
+           MODE_VR stays 1 for the whole run (menus included), so the very
+           first packet already enters VR. The mode is only learned from an
+           outbound packet, and the first Present can be a frame or more
+           away. */
+        XrSendFrame(0.0f, 0.0f, XR_VR_ON, XR_3D_MONO,
                     g_outFovX, g_outFovY);
     } else {
         Log("XR       client FAILED to start: %s", XrLastError());
@@ -5302,8 +5301,8 @@ static HRESULT __stdcall hkDrawPrimitiveUP(void* dev, DWORD prim, UINT count,
 
     /* In gameplay the original 2D HUD is replaced by the texture HUD drawn in
        CompositeFrame(). Its 2D layer is all stride-28 UP; the 3D weapon-slot
-       models are indexed draws and stay visible. Menus/death/victory are
-       MODE_VR 0 and keep their own HUD. */
+       models are indexed draws and stay visible. Menus/death/victory are not
+       gameplay and keep their own HUD. */
     if (g_customHud && g_compositeActive && g_hudValid && HudShouldDraw() &&
         g_curFvf == 0x0144 && stride == 28) {
         static long hud2d = 0;
@@ -6879,10 +6878,10 @@ static void HandViewPose(const float* hp, const float* hf, const float* hu,
     }
 }
 
-/* AER menu panel pointer. The dominant hand's aim ray is intersected with a
-   plane one metre in front of the head, then mapped onto the centre third of
-   the 640x480 frame (the floating panel). Returns the game's logical panel
-   coordinate, or FALSE when the ray misses the panel. */
+/* Floating non-VR panel pointer. The dominant hand's aim ray is intersected
+   with a plane one metre in front of the head, then mapped onto the centre
+   third of the 640x480 frame (the floating panel). Returns the game's logical
+   panel coordinate, or FALSE when the ray misses the panel. */
 static BOOL MenuPointerPos(float* x, float* y)
 {
     float vp[3], vf[3], vu[3], vr[3];
@@ -7488,8 +7487,9 @@ static void CompositeFrame(void* dev)
        is the honest way to keep the FOV unchanged.
        Opt-in experiment (`patchAspect 1`): the projection aspect is widened
        to the container, and the frame is stretched full-window instead.
-       AER menu panel: MODE_VR stays 1 on the non-VR screens, so the flat game
-       frame is shown as a floating panel in the centre third of the view. */
+       Floating non-VR panel: MODE_VR stays 1 on the non-VR screens in every
+       stereo mode, so the flat game frame is shown as a floating panel in the
+       centre third of the view. */
     if (menuPanel) {
         gw = (int)g_bbW / 3;
         gh = (int)g_bbH / 3;
@@ -7501,7 +7501,7 @@ static void CompositeFrame(void* dev)
         {
             static int panelLog = 0;
             if (panelLog++ == 0)
-                Log("COMPOSITE AER menu panel: %ux%u -> %dx%d at %d,%d"
+                Log("COMPOSITE floating panel: %ux%u -> %dx%d at %d,%d"
                     " (centre third)", g_bbW, g_bbH, gw, gh, gx, gy);
         }
     } else if (g_projPatched) {
@@ -7865,7 +7865,8 @@ static HRESULT __stdcall hkBeginScene(void* dev)
         }
         /* Only drive the camera while the previous frame looked like gameplay.
            In the title, briefing/objective, menus and death screens the game
-           owns its own camera and the runtime is in MODE_VR 0. */
+           owns its own camera; MODE_VR stays 1 but only MODE_3D and the
+           composite panel change there. */
         if (InGameplay()) SteerTick();
     }
     if (g_probePhase == PHASE_BEGINSCENE) ProbeTick();
@@ -8029,41 +8030,34 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
        frame it is about to receive. */
     if (XrRunning()) {
         float hapL = 0.0f, hapR = 0.0f;
-        /* Game state: MODE_VR 1 in gameplay, 0 on the title, briefing,
-           objective, menus, death and victory screens. Keep sending the packet
-           in both states, or the stream cannot be turned back on. */
+        /* MODE_VR stays 1 for the whole run in mono as well as AER, following
+           HWXR. The game state only chooses MODE_3D and whether CompositeFrame
+           shows gameplay or the centre-third panel. Keep sending the packet
+           every frame; the runtime only re-reads its mode from a packet. */
         const BOOL gameplay = InGameplay();
-        const int gameVr = gameplay ? XR_VR_ON : XR_VR_OFF;
-        static int lastGameVr = -1;
-        if (gameVr != lastGameVr) {
-            Log("XR       MODE_VR -> %d  (%s)  last frame: %ld xforms,"
-                " %ld indexed, %ld UP",
-                gameVr,
-                gameVr ? "in-game: immersive, pose stream on"
-                       : (g_stereoMode == STEREO_AER
-                              ? "menu: runtime stays MODE_VR=1, MODE_3D=0"
-                              : "title/objective/menu/death: flat, runtime mouse"),
+        static int lastGameplay = -1;
+        if ((int)gameplay != lastGameplay) {
+            Log("XR       screen -> %s  (MODE_VR=1, MODE_3D=%d)  last frame:"
+                " %ld xforms, %ld indexed, %ld UP",
+                gameplay ? "gameplay" : "menu/objective/death/victory",
+                (g_stereoMode == STEREO_AER && gameplay)
+                    ? XR_3D_AER : XR_3D_MONO,
                 g_lastXforms, g_lastIndexed, g_lastUP);
-            StateLog("MODE_VR");
-            lastGameVr = gameVr;
+            StateLog("SCREEN");
+            lastGameplay = (int)gameplay;
         }
-        /* HWXR keeps MODE_VR=1 for the whole run and only toggles MODE_3D.
-           Switching MODE_VR 1->0 while AER is active is the transition that
-           kills the runtime, so in AER the runtime stays in VR even on the
-           title/menu; only MODE_3D drops to mono there. */
         {
-            const int sendVr =
-                (g_stereoMode == STEREO_AER) ? XR_VR_ON : gameVr;
             /* Haptics ride in the first two fields: a duration in frames, per
                hand. Updated from the magazine counter, gameplay only. */
             HapticTick(gameplay, &hapL, &hapR);
-            /* AER only exists in gameplay; menus stay mono so their 2D UI is
-               not alternated between eyes. SBS is not implemented yet. */
+            /* AER only exists in gameplay; the non-VR screens stay mono so
+               their 2D UI is not alternated between eyes. SBS is not
+               implemented yet. */
             const int mode3d =
                 (g_stereoMode == STEREO_AER && gameplay)
                     ? XR_3D_AER : XR_3D_MONO;
             if (!gameplay) g_eyeRight = FALSE;
-            XrSendFrame(hapL, hapR, sendVr, mode3d, g_outFovX, g_outFovY);
+            XrSendFrame(hapL, hapR, XR_VR_ON, mode3d, g_outFovX, g_outFovY);
             if (g_stereoMode == STEREO_AER && gameplay) {
                 if ((g_frame % 120) == 0)
                     LogD("STEREO   AER eye=%s  ipd=%.3f m  mode3d=%d",

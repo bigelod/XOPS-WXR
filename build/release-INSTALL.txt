@@ -34,12 +34,12 @@ In gameplay all physical keyboard/mouse input is ignored except ESC and 0.
 If the WinlatorXR left stick is mapped to the arrow keys, the mod turns those
 presses into movement, so they cannot change weapons.
 
-AER menus
----------
-With stereo = aer the runtime stays in VR on menus; the flat screen appears as
-a floating panel in the centre of the view. Point the dominant hand at it and
-use the right trigger as left click. AER itself is off on menus, death,
-objective and victory screens.
+Floating menus (mono and AER)
+-----------------------------
+The runtime stays in VR for the whole run. The title, menus, objective, death
+and victory screens appear as a floating panel in the centre of the view. Point
+the dominant hand at it and use the right trigger as left click. In AER those
+screens stay mono; AER is only active in gameplay.
 
 Tuning in config.txt
 --------------------

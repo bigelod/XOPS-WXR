@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 18:07:10`, SHA-256
-`89579240c173ff4d6027b4cd66a9dbb023eae3d7036352b72e320f3566db826f`.
+**Last build:** `built Nov  6 2026 18:19:57`, SHA-256
+`bb8a2f709add941f23a4723f1a71586800255474d010db1ed94e785a0ebfcb43`.
 Release: 283,136 bytes, SHA-256
-`56ff4c7c8e99d40f0d7f9435c357a417a87642217b5868a67e38fa8fa6737226`.
+`4fa2a83fef7b19b67ab09c908001ac8dab4e8bfd6e0ba27da190c0e7bd652ac0`.
 
 ---
 
@@ -80,11 +80,12 @@ outstanding:
   reproject helpers are now 1:1 metres (the non-indexed `*100` centimetre
   assumption was removed with the height work), so there is no scale left to
   tune; one-line sign if needed.
-- **AER menus:** the runtime now stays `MODE_VR=1` for the whole run and only
-  `MODE_3D` drops to 0. Confirm the title/menu/death/objective/victory screens
-  appear as the centre-third floating panel, AER is visibly off there, and the
-  hand laser pointer + right-trigger click select menu items. This also tests
-  whether the old `MODE_VR 1 -> 0` crash is gone.
+- **Menus (mono and AER):** the runtime now stays `MODE_VR=1` for the whole
+  run and only `MODE_3D` drops to 0. Confirm the title/menu/death/objective/
+  victory screens appear as the centre-third floating panel in both stereo
+  modes, AER is visibly off there, and the hand laser pointer + right-trigger
+  click select menu items. This also tests whether the old `MODE_VR 1 -> 0`
+  crash is gone.
 - **SBS is deferred.** It needs a double-width game target and a double-width
   container/window so each eye keeps 4:3. Plan: duplicate every world/model
   draw into two viewports with the existing eye shift, draw the HUD per half,

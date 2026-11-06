@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  6 2026 18:07:10`, SHA-256
-`89579240c173ff4d6027b4cd66a9dbb023eae3d7036352b72e320f3566db826f`.
+Current dev build: `built Nov  6 2026 18:19:57`, SHA-256
+`bb8a2f709add941f23a4723f1a71586800255474d010db1ed94e785a0ebfcb43`.
 Release build: 283,136 bytes, SHA-256
-`56ff4c7c8e99d40f0d7f9435c357a417a87642217b5868a67e38fa8fa6737226`.
+`4fa2a83fef7b19b67ab09c908001ac8dab4e8bfd6e0ba27da190c0e7bd652ac0`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1249,7 +1249,7 @@ Release build: 283,136 bytes, SHA-256
   whenever `g_vrExclusive` is on - in gameplay and in the flat menu screen -
   while leaving other desktop keys available for menus.
 
-### 2026-11-06 - hands anchored, level-start recentre, full VR input isolation, AER menu panel
+### 2026-11-06 - hands anchored, level-start recentre, full VR input isolation, floating menu panel
 
 Device report: hands rose and fell with physical head height, rolled with the
 head, arrows still swapped weapons, Y still hid the laser, and some levels shot
@@ -1269,20 +1269,20 @@ wrong. Changes:
   and resuming leaves `LevelActive` true, so it does not recentre on every
   pause. The current HMD XYZ and yaw become the new `0,0,0` / zero-yaw origin
   against the player model. Right-stick click still recentres at any time.
-- **Full VR input isolation:** in gameplay and on the AER menu panel, all
+- **Full VR input isolation:** in gameplay and on the floating non-VR panel, all
   physical keys/mouse are stripped from `GetKeyboardState`, and the window
   procedure now also swallows `WM_KEY*`/`WM_MOUSE*`. Only `ESC` and `0`
-  survive. A/B/X/Y and arrows are swallowed in VR on every screen. Mono menus
-  keep single desktop keys because the runtime owns the flat panel.
+  survive. A/B/X/Y and arrows are swallowed in VR on every screen. Mono and AER
+  menus behave the same: the panel owns the pointer, not the desktop mouse.
 - The raw arrow keys from WinlatorXR's left-stick mapping are captured before
   the filter and translated to W/A/S/D. This makes the current layout move the
   player and guarantees the arrows can never reach the weapon-swap binding.
 - Laser gate removed: it always draws. Y only toggles zoom.
-- AER now keeps `MODE_VR=1` for the whole run (HWXR model); only `MODE_3D`
-  toggles 2 <-> 0. Non-gameplay screens in AER are drawn at one third size in
-  the centre of the view, with a dominant-hand laser pointer published through
-  `GetCursorPos` and right-trigger click (both `VK_LBUTTON` and posted
-  `WM_LBUTTONDOWN`/`WM_LBUTTONUP`).
+- `MODE_VR=1` is now sent for the whole run in **mono and AER** (HWXR model);
+  only `MODE_3D` toggles 2 <-> 0. Every non-gameplay screen is drawn at one
+  third size in the centre of the view, with a dominant-hand laser pointer
+  published through `GetCursorPos` and right-trigger click (both `VK_LBUTTON`
+  and posted `WM_LBUTTONDOWN`/`WM_LBUTTONUP`). AER itself is off there.
 - AER -> menu crash was not reproduced in the supplied Wine log: the log ended
   with `MODE_VR -> 0`, two menu frames and a clean `SHUTDOWN`, no Wine page
-  fault. Keeping `MODE_VR=1` may avoid it; needs a device run.
+  fault. Keeping `MODE_VR=1` in both modes may avoid it; needs a device run.

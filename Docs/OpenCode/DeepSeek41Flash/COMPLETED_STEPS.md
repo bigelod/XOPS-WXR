@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 18:07:10`, SHA-256
-`89579240c173ff4d6027b4cd66a9dbb023eae3d7036352b72e320f3566db826f`.
+**Last build covered:** `built Nov  6 2026 18:19:57`, SHA-256
+`bb8a2f709add941f23a4723f1a71586800255474d010db1ed94e785a0ebfcb43`.
 Release: 283,136 bytes, SHA-256
-`56ff4c7c8e99d40f0d7f9435c357a417a87642217b5868a67e38fa8fa6737226`.
+`4fa2a83fef7b19b67ab09c908001ac8dab4e8bfd6e0ba27da190c0e7bd652ac0`.
 
 ---
 
@@ -90,7 +90,8 @@ Release: 283,136 bytes, SHA-256
 - Game's 2D HUD suppressed in gameplay **only when the custom HUD is valid**
   (texture failure falls back to the game HUD); crosshair draws removed.
 - Title, briefing, menus, objective, death and victory keep the game's own 2D
-  UI (`MODE_VR 0`). The custom HUD is **gameplay-only**, so the death
+  UI, now shown as the centre-third floating panel with `MODE_VR` still 1 and
+  `MODE_3D=0`. The custom HUD is **gameplay-only**, so the death
   summary/stats screen is not covered by it.
 - The game's spinning **3D weapon-slot HUD is hidden** while the custom text
   HUD is active; the text HUD is the only slot display. The capture and tail
@@ -130,17 +131,17 @@ Release: 283,136 bytes, SHA-256
   two-handed aim; left trigger fire mode; right trigger shoot; right grip jump;
   B reload; A switch; X drop; Y zoom (toggle). Left-handed mode swaps only
   shoot and fire mode. **The laser is always on**; Y no longer hides it.
-- **VR input isolation:** in gameplay and on the AER floating menu, *all*
+- **VR input isolation:** in gameplay and on the floating non-VR panel, *all*
   physical keyboard and mouse input is removed from `GetKeyboardState`, and the
   window procedure swallows the corresponding `WM_KEY*`/`WM_MOUSE*` messages.
   Only `ESC` (the way out) and `0` (PC-only manual mode) survive. This fixes
-  the arrow-key -> weapon-swap leak through either input path. Mono menu
-  screens keep single desktop keys because the runtime owns the flat panel.
+  the arrow-key -> weapon-swap leak through either input path. Mono and AER
+  menus behave the same: there is no desktop input while the panel is up.
 - **Left-stick-as-arrows fallback:** WinlatorXR currently maps the left stick
   to the arrow keys. Those raw presses are captured before the filter and
   translated to W/A/S/D, so the stick moves the player instead of swapping
   weapons. Mapping the stick to the analog XrApi left stick remains cleaner.
-- **AER menu laser pointer:** the dominant hand's ray is intersected with a 1 m
+- **Floating-panel laser pointer:** the dominant hand's ray is intersected with a 1 m
   plane, mapped onto the centre-third panel, published through `GetCursorPos`
   in 640x480 UI space, and clicked with the right trigger (`VK_LBUTTON` plus
   posted `WM_LBUTTONDOWN`/`WM_LBUTTONUP`). A screen-space dot marks the same
@@ -195,13 +196,13 @@ Release: 283,136 bytes, SHA-256
 
 - **AER is implemented and desktop-verified.** `stereo = aer` opts in;
   `mono` is the shipping default.
-- **Runtime stays `MODE_VR=1` for the whole run in AER**, following HWXR. Only
-  `MODE_3D` toggles: `2` in gameplay, `0` on title/menu/death/objective/
-  victory. This avoids the `MODE_VR 1 -> 0` transition that killed the runtime
-  on device.
-- **Non-VR screens become a floating panel** in AER: the game's 640x480 frame
-  is drawn at one third size in the centre cell of a 3x3 grid, with a
-  dominant-hand laser pointer and right-trigger click.
+- **Runtime stays `MODE_VR=1` for the whole run in mono and AER**, following
+  HWXR. Only `MODE_3D` toggles: `2` in AER gameplay, `0` on title/menu/death/
+  objective/victory and throughout mono. This avoids the `MODE_VR 1 -> 0`
+  transition that killed the runtime on device.
+- **Non-VR screens become a floating panel** in every stereo mode: the game's
+  640x480 frame is drawn at one third size in the centre cell of a 3x3 grid,
+  with a dominant-hand laser pointer and right-trigger click.
 - The camera is CPU-baked, so AER works by **reprojecting each draw**: both the
   non-indexed world path and the indexed model path shift x by `-d` in metres.
   (Both are camera-space metres: the projection is near 0.1 / far 80 and the

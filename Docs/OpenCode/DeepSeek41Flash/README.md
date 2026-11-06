@@ -206,7 +206,8 @@ texture drawn inside the D3D frame does. The HUD texture is only re-uploaded
 when the player values or the size change. The game's 2D HUD is suppressed in
 gameplay only when the custom HUD texture is valid, so a texture failure falls
 back to the game's own HUD instead of a blank screen. Menus/title/objective/
-death/victory keep their own 2D UI (`MODE_VR 0`).
+death/victory keep their own 2D UI, now presented as the centre-third floating
+panel with `MODE_VR` still 1 and `MODE_3D=0`.
 
 **HUD values and layout.** From the player struct (`0x48DF00 + index*0x50`):
 health word `+0x04` (FINE `>=0x50`, CAUTION `>=0x28`, DANGER `>0`, DEAD
@@ -331,11 +332,10 @@ the head still drives the view, so the zoom is head-tracked.
 
 **Steering is on by default.** `3` is only a debug toggle now. Input defaults
 to **VR-only**; `0` enables desktop keyboard/mouse for manual tests without a
-headset or fake XrApi data, and pauses synthetic VR input.
-**Mono `MODE_VR 0` screens keep desktop input** (title, objective, menus,
-death, victory) regardless of that toggle. **In gameplay and on the AER
-floating menu, everything is swallowed except `ESC` and `0`**, through both
-`GetKeyboardState` and the window procedure. A/B/X/Y and the arrows are
+headset or fake XrApi data, and pauses synthetic VR input. **In gameplay and on
+the floating non-VR panel, everything is swallowed except `ESC` and `0`**,
+through both `GetKeyboardState` and the window procedure. Mono and AER menus
+behave the same. A/B/X/Y and the arrows are
 swallowed in VR on every screen. WinlatorXR's left-stick-as-arrow mapping is
 captured before the filter and translated to W/A/S/D.
 
@@ -446,23 +446,23 @@ from the wrong yaw/height. The fixes:
   edge, before `SteerTick` writes the camera, so the captured yaw is the
   untouched spawn yaw. The current HMD XYZ and yaw become the new origin
   against the player model. The right-stick click does the same at any time.
-- Gameplay and the AER floating menu strip **all** physical keyboard/mouse
+- Gameplay and the floating non-VR panel strip **all** physical keyboard/mouse
   input from `GetKeyboardState` and swallow the matching `WM_KEY*`/`WM_MOUSE*`
   messages. Only `ESC` and `0` survive. A/B/X/Y and arrows are blocked in VR on
   every screen. WinlatorXR's left-stick-as-arrows presses are translated to
   W/A/S/D so movement works and the arrows cannot swap weapons.
 - The laser is always drawn; `Y` is zoom only.
-- AER keeps `MODE_VR=1` for the whole run (HWXR model) and toggles only
-  `MODE_3D` (2 in gameplay, 0 on menus/death/objective/victory). Those non-VR
-  screens are drawn as a floating panel in the centre third of the view, with
-  a dominant-hand laser pointer published through `GetCursorPos` and a
-  right-trigger click.
+- `MODE_VR` stays `1` for the whole run in mono and AER (HWXR model) and only
+  `MODE_3D` toggles (2 in AER gameplay, 0 on menus/death/objective/victory and
+  throughout mono). Those non-VR screens are drawn as a floating panel in the
+  centre third of the view, with a dominant-hand laser pointer published
+  through `GetCursorPos` and a right-trigger click.
 
 ### What is still not built
 
 **Desktop-verified now:** target-resolution composite, replacement HUD,
 borderless window, exact sync pixel, real FOV, `MODE_VR` state, render-side
-6DOF/eye height, recentre, input isolation, AER and the AER menu panel.
+6DOF/eye height, recentre, input isolation, AER and the floating menu panel.
 **Still not built:** decoupled aim. **Device-verified:** startup, injection,
 DXVK export, AER in gameplay. **Device follow-up still open:** the items in
 `NEXT_STEPS.md` section 4.
@@ -538,10 +538,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 18:07:10`, SHA-256
-`89579240c173ff4d6027b4cd66a9dbb023eae3d7036352b72e320f3566db826f`,
+Current handover build: `built Nov  6 2026 18:19:57`, SHA-256
+`bb8a2f709add941f23a4723f1a71586800255474d010db1ed94e785a0ebfcb43`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 283,136 bytes,
-SHA-256 `56ff4c7c8e99d40f0d7f9435c357a417a87642217b5868a67e38fa8fa6737226`.
+SHA-256 `4fa2a83fef7b19b67ab09c908001ac8dab4e8bfd6e0ba27da190c0e7bd652ac0`.
 
 ---
 
