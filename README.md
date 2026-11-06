@@ -52,18 +52,20 @@ Left-handed mode (`handedness = left`) swaps only **Shoot** and **Fire mode**.
 - X Operations, the **`xops096.exe`** build (game files are not included).
 - [WinlatorXR](https://github.com/WinlatorXR/WinlatorXR) on a standalone headset.
 - Container resolution **1280×960** (native 4:3). DXVK + Turnip recommended.
+- XOPS set to **Windowed** mode. The mod turns the window borderless and full-display; the game's own fullscreen mode is not used.
 
 **Install**
 
 1. Install X Operations in WinlatorXR.
-2. Back up any existing `d3d8.dll` in the game folder.
-3. Copy these files into the game folder, next to `xops096.exe`:
+2. Set XOPS to **Windowed** mode (video options, or copy `config - windowed.dat` over `config.dat` in the game folder).
+3. Back up any existing `d3d8.dll` in the game folder.
+4. Copy these files into the game folder, next to `xops096.exe`:
    - `d3d8.dll` — the mod
    - `XOPSVR.exe` — the launcher
    - `config.txt` — settings
    - `version.txt` — the launcher's local version
-4. Start `XOPSVR.exe` (or run `xops096.exe` directly).
-5. In the headset, use **mono** for the first run. AER stereo is experimental.
+5. Start `XOPSVR.exe` (or run `xops096.exe` directly).
+6. In the headset, use **mono** for the first run. AER stereo is experimental.
 
 **Config**
 
@@ -88,6 +90,7 @@ The launcher's **Options** dialog edits the same file, including **HMD position 
 **Quick checks**
 
 - The first line of `xops_wxr_probe.log` must show the build you installed. A stale `d3d8.dll` is otherwise invisible.
+- If the game exits before the first frame on device, confirm XOPS is in **Windowed** mode and that the log shows `windowed 1`. Fullscreen startup is not supported on WinlatorXR yet.
 - If the view moves too far when you move your head, lower `pos_scale` (or set it to `0` to disable translation) in Options.
 - If the horizon rolls the wrong way, set `roll_sign = +1`.
 - If the hands are rolled on a non-Quest-3 headset, set `hand_flip = true`.
