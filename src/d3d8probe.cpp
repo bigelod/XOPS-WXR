@@ -3053,7 +3053,7 @@ static float g_yawSign    = 1.0f;
    the evidence; a toggle history is not. */
 static float g_pitchSign  = -1.0f;
 static int   g_cluster    = CLU_BOTH;
-static float g_posScale   = 1.0f;   /* engine units per metre; ~1 [derived] */
+static float g_posScale   = 0.1f;   /* gain on HMD translation; 0.1 = cautious start */
 /* Render-side eye height: the game re-clamps its camera Y every frame, so
    the head's vertical offset is applied to the world draws instead.
    `eye_height` is a manual float offset (default 0, clamped +/-5) added to
@@ -3245,9 +3245,10 @@ static void SteerTick(void)
        log rather than guessed from screenshots. `tracked` is the clamped HMD
        rise/fall, `manual` is the eye_height calibration, `total` the offset. */
     if ((g_frame % 30) == 0) {
-        float tracked = g_posScale * g_pose.headP[1];
+        float tracked = g_pose.headP[1];
         if (tracked >  1.0f) tracked =  1.0f;
         if (tracked < -1.0f) tracked = -1.0f;
+        tracked *= g_posScale;
         LogD("EYE      hmdY=%+.3f tracked=%+.3f manual=%+.3f total=%+.3f",
              g_pose.headP[1], tracked, g_eyeHeight, tracked + g_eyeHeight);
     }
@@ -4482,9 +4483,10 @@ static void HandLoadConfig(void)
             fputs("# eye_height: render-side vertical head offset; the game clamps\n", f);
             fputs("# its own camera Y every frame, so this is applied to the world draws.\n", f);
             fputs("eye_height = 0.0\n", f);
-            fputs("# pos_scale: gain on tracked HMD translation (x/y/z), 1.0 = 1:1.\n", f);
-            fputs("# Lower it if head movement shifts the render too far in-game.\n", f);
-            fputs("pos_scale = 1.0\n", f);
+            fputs("# pos_scale: gain on tracked HMD translation (x/y/z).\n", f);
+            fputs("# 0.1 is the cautious start; 1.0 = 1:1. Lower it if moving\n", f);
+            fputs("# the head at all breaks the render.\n", f);
+            fputs("pos_scale = 0.1\n", f);
             fclose(f);
             Log("HAND     created %s with defaults", path);
         } else {
@@ -4502,7 +4504,7 @@ static void HandLoadConfig(void)
         g_roll = TRUE;
         g_rollSign = -1.0f;
         g_eyeHeight = 0.0f;
-        g_posScale = 1.0f;
+        g_posScale = 0.1f;
         return;
     }
 
@@ -4820,20 +4822,20 @@ static void CameraOffset(float out[3])
     p[1] = g_pose.headP[1];
     p[2] = g_pose.headP[2];
 
+    /* A player switching between sitting and standing moves well under a
+       metre. Clamp the raw tracked height before applying the gain, so
+       lowering `pos_scale` does not silently loosen the physical limit. */
+    if (p[1] >  1.0f) p[1] =  1.0f;
+    if (p[1] < -1.0f) p[1] = -1.0f;
+
     out[0] = g_posScale * (p[0]*r[0] + p[1]*r[1] + p[2]*r[2]);
     out[1] = g_posScale * (p[0]*g_pose.headU[0] + p[1]*g_pose.headU[1]
                            + p[2]*g_pose.headU[2]);
     out[2] = g_posScale * (p[0]*g_pose.headF[0] + p[1]*g_pose.headF[1]
                            + p[2]*g_pose.headF[2]);
 
-    /* A player switching between sitting and standing moves well under a
-       metre. Clamp the tracked part so bad pose data (or a badly placed
-       recentre) cannot throw the view through the floor or ceiling; the
-       manual `eye_height` calibration is added on top and keeps its own
-       wider limit. */
-    if (out[1] >  1.0f) out[1] =  1.0f;
-    if (out[1] < -1.0f) out[1] = -1.0f;
-
+    /* `eye_height` is a manual calibration added after the gain so it keeps
+       its own wider limit. */
     out[1] += g_eyeHeight;
     if (out[1] >  5.0f) out[1] =  5.0f;
     if (out[1] < -5.0f) out[1] = -5.0f;

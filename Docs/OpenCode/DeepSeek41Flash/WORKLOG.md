@@ -1043,9 +1043,9 @@ position was never going to hold the head's rise/fall. It is now **visual
 only**:
 
 - `CameraOffset()` rotates `headP` into the camera's own axes and returns the
-  offset in metres. HMD Y is clamped to ±1 m; `eye_height` is a separate
-  manual float (default 0, ±5); `pos_scale` scales the tracked translation
-  (default 1.0, 0..2).
+  offset in metres. HMD Y is clamped to ±1 m **before** the gain; `eye_height`
+  is a separate manual float (default 0, ±5); `pos_scale` scales the tracked
+  translation (default **0.1**, 0..2).
 - `AerDrawPrimitive` and the stride-20 `AerDrawIndexed` path copy the world
   vertices and shift them opposite the eye on x/y/z. Hands, gun and laser stay
   in the head frame. Game position writes (Y and both horizontals) are gone;
@@ -1073,6 +1073,20 @@ only**:
 - Old command, for contrast: the pre-fix build logged `dy=-50.000` for a
   0.5 m feed and threw the view through the level.
 
-Build: `built Nov  6 2026 10:55:35`, SHA-256
-`119074900cf3c1dda3ec4ac9ccb101b5c13ae9944b208fe194a8271cdecd15ae`,
+### Follow-up: shipping gain reduced to 0.1
+
+The owner tested the 1:1 build on device and found the render broke as soon as
+the HMD moved off `0,0,0`, so the shipping gain is now **0.1**:
+
+- `pos_scale` default 0.1 (range 0..2; `0` disables translation entirely).
+- The ±1 m HMD-height clamp is applied to the **raw** height before the gain,
+  so lowering the gain does not loosen the physical limit.
+- `eye_height` is still added after the gain so it keeps its ±5 m range.
+
+Verified at 0.1: constant 0.8 m feed logs `tracked=+0.080` and the world draw
+shifts `dy=-0.080`; the right-stick click still drops `hmdY` and `tracked` to
+0.000. Raise the gain only after 0.1 is stable on hardware.
+
+Build: `built Nov  6 2026 11:09:06`, SHA-256
+`d6852fc74c1aba51ba064a7bedc2cbfc2893a5b5246ebd1b1b604e5e135c561a`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).

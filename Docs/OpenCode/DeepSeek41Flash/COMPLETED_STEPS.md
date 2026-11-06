@@ -4,8 +4,8 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 10:55:35`, SHA-256
-`119074900cf3c1dda3ec4ac9ccb101b5c13ae9944b208fe194a8271cdecd15ae`.
+**Last build covered:** `built Nov  6 2026 11:09:06`, SHA-256
+`d6852fc74c1aba51ba064a7bedc2cbfc2893a5b5246ebd1b1b604e5e135c561a`.
 
 ---
 
@@ -51,20 +51,22 @@ pass; `BUG_FIXES.md` will be created from that run.
   position**. Instead `CameraOffset()` rotates the head's `headP` into the
   camera frame and the world vertex copies are shifted opposite the eye in
   `AerDrawPrimitive`/`AerDrawIndexed`; hands, gun and laser stay in the head
-  frame. The offset is 1:1 in **metres** on both the indexed (stride 20) and
-  non-indexed (stride 20/24) world paths - the old `*100` centimetre
-  assumption on the non-indexed path was the cause of the view flying through
-  floors and ceilings and is gone. HMD Y is clamped to **±1 m** (far more than
-  a sit/stand change needs); `eye_height` is a separate manual float offset
-  (default `0`, clamped ±5) and `pos_scale` is a gain on the tracked
-  translation (default `1.0`, 0..2). A **right-stick click** calls
+  frame. Both world paths are camera-space **metres** - the old `*100`
+  centimetre assumption on the non-indexed path was the cause of the view
+  flying through floors and ceilings and is gone. HMD Y is clamped to **±1 m**
+  (far more than a sit/stand change needs) *before* the gain; `pos_scale` is
+  the gain on the tracked translation (default **0.1** as a cautious start;
+  1.0 = 1:1, range 0..2); `eye_height` is a separate manual float offset
+  (default `0`, clamped ±5). A **right-stick click** calls
   `SteerRecentre()`, so the current HMD height becomes the flat game player
   height (`0`). Head yaw is still written to both camera clusters, so
   stick-forward follows the head. This is visual-only and does **not** add
   collision: standing or leaning into geometry can still clip, and the
   intended mitigation is lowering `pos_scale`, not solving world collisions.
-  Verified with a ±1 m sine feed (log `dy` tracks `hmdY` 1:1, clamped at
-  ±1.000) and a constant 0.8 m re-zero (0.000 -> 0.800 -> click -> 0.000).
+  Verified with a ±1 m sine feed at `pos_scale = 1.0` (log `dy` tracked `hmdY`
+  1:1, clamped at ±1.000) and a constant 0.8 m re-zero (0.000 -> 0.800 ->
+  click -> 0.000). The shipped gain is now **0.1** because the owner found
+  that even 1:1 broke the render whenever the HMD left `0,0,0`.
 
 ## 3. HUD
 

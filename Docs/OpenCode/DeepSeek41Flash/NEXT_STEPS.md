@@ -4,8 +4,8 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 10:55:35`, SHA-256
-`119074900cf3c1dda3ec4ac9ccb101b5c13ae9944b208fe194a8271cdecd15ae`.
+**Last build:** `built Nov  6 2026 11:09:06`, SHA-256
+`d6852fc74c1aba51ba064a7bedc2cbfc2893a5b5246ebd1b1b604e5e135c561a`.
 
 ---
 
@@ -50,8 +50,10 @@ outstanding:
   and textures, haptics feel, tracking latency/judder.
 - **6DOF / eye height:** crouch and stand and confirm the render follows the
   head without moving the player. Confirm the right-stick click re-zeroes the
-  current height, and that the default `pos_scale = 1.0` feels 1:1. If it is
-  still too strong, lower `pos_scale` rather than changing the draw code.
+  current height. The shipping gain is `pos_scale = 0.1`; raise it toward 1.0
+  only after 0.1 is confirmed stable on device. If 0.1 still breaks the
+  render, lower it again or set it to 0 to disable translation; do not change
+  the draw code.
 - **Roll:** tilt the head and confirm the world tilts the correct way and the
   HUD stays fixed. The default is `roll_sign = -1`; if it is inverted on
   device, set `+1`. If the black corners are visible in the lenses, note it

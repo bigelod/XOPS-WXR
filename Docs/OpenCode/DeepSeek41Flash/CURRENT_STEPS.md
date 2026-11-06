@@ -5,8 +5,8 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 10:55:35`, SHA-256
-`119074900cf3c1dda3ec4ac9ccb101b5c13ae9944b208fe194a8271cdecd15ae`,
+**Current build:** `built Nov  6 2026 11:09:06`, SHA-256
+`d6852fc74c1aba51ba064a7bedc2cbfc2893a5b5246ebd1b1b604e5e135c561a`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---
@@ -81,7 +81,7 @@ native frame fills it with no bars or crop.
   rotates `headP` into the camera frame and the draw copies shift the world
   opposite the eye in all three axes. Hands/gun/laser stay in the head frame.
   HMD Y is clamped ±1 m, `eye_height` adds a manual float offset (default 0,
-  ±5) and `pos_scale` scales the tracked translation (default 1.0, 0..2).
+  ±5) and `pos_scale` scales the tracked translation (default 0.1, 0..2).
   Right-stick click recentres, making the current elevation the new 0. Both
   paths are 1:1 metres; the old non-indexed `*100` was removed.
 
@@ -146,7 +146,7 @@ stereo = mono               # experimental: aer
 roll = true                 # rotate the world sprite with head tilt
 roll_sign = -1              # default; +1 if the device horizon tilts the wrong way
 eye_height = 0.0            # manual render-side vertical offset, metres, +/-5
-pos_scale = 1.0             # gain on tracked HMD translation, 0..2 (1.0 = 1:1)
+pos_scale = 0.1             # gain on tracked HMD translation, 0..2 (1.0 = 1:1)
 ```
 
 `xops_wxr_steer.ini` still carries the settled steering facts (`yawSign`,

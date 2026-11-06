@@ -268,7 +268,7 @@ created locally. It is created with defaults if missing:
 handedness = right
 hand_flip = false
 eye_height = 0.0
-pos_scale = 1.0
+pos_scale = 0.1
 ```
 
 `handedness` selects the dominant hand for the laser and the initial
@@ -283,8 +283,10 @@ stays unflipped.
 
 `eye_height` is a **manual float** vertical render offset in metres (default
 `0`, clamped ±5); `pos_scale` is the gain on the tracked HMD translation
-(default `1.0`, 0..2). Lower `pos_scale` if the 1:1 head movement still feels
-too strong on device. The right-stick click re-zeroes the current HMD height.
+(default **0.1**, 0..2; 1.0 = 1:1). The cautious 0.1 start exists because any
+1:1 movement broke the render on the owner's test; raise it only after 0.1 is
+stable, and set it to 0 to disable translation entirely. The right-stick
+click re-zeroes the current HMD height.
 `config.txt` also holds `haptics`, `haptics_hand`, `haptic_frames`,
 `verbose_debug`, `stereo`, `roll` and `roll_sign`; the full list is in
 `CURRENT_STEPS.md`.
@@ -402,17 +404,19 @@ exempt. Informative logging is behind `verbose_debug` (default false) in
 its camera Y every frame, so the HMD translation is no longer written to the
 player. `CameraOffset()` rotates the head's `headP` into the camera frame and
 the world draw copies are shifted opposite the eye in all three axes; the
-hands, gun and laser already live in the head frame and do not move. The
-offset is **1:1 metres** on both the indexed and non-indexed world paths - the
-non-indexed `*100` was a centimetre assumption and threw the view through
-floors and ceilings. HMD Y is clamped to ±1 m; `eye_height` is a manual float
-offset (default 0, ±5) and `pos_scale` is a gain (default 1.0, 0..2). A
+hands, gun and laser already live in the head frame and do not move. Both
+world paths are camera-space **metres** - the non-indexed `*100` was a
+centimetre assumption and threw the view through floors and ceilings. HMD Y is
+clamped to ±1 m before the gain; `pos_scale` is that gain (default **0.1**;
+1.0 = 1:1, 0..2) and `eye_height` is a manual float offset (default 0, ±5). A
 **right-stick click** recentres and makes the current HMD height the new zero
 (flat game player height). Head yaw is still written to both camera clusters,
 so stick-forward follows the head. All debug keys now require manual PC mode
 (`0`), which WinlatorXR does not map by default. Verified with a ±1 m sine
-feed (`dy` tracks `hmdY` 1:1, clamps at ±1.000), a constant 0.8 m re-zero
-(0.000 -> 0.800 -> click -> 0.000), and an F-before-0 / F-after-0 key test.
+feed at `pos_scale = 1.0` (`dy` tracked `hmdY` 1:1, clamped at ±1.000), a
+constant 0.8 m re-zero (0.000 -> 0.800 -> click -> 0.000), and an
+F-before-0 / F-after-0 key test. The shipped 0.1 gain is deliberate: 1:1
+still broke the render whenever the HMD moved off `0,0,0`.
 
 ### What is still not built
 
@@ -493,8 +497,8 @@ deployed copy with SHA-256 (`match=True`). The DLL is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 10:55:35`, SHA-256
-`119074900cf3c1dda3ec4ac9ccb101b5c13ae9944b208fe194a8271cdecd15ae`,
+Current handover build: `built Nov  6 2026 11:09:06`, SHA-256
+`d6852fc74c1aba51ba064a7bedc2cbfc2893a5b5246ebd1b1b604e5e135c561a`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---
