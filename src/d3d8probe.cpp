@@ -1775,20 +1775,12 @@ static void HudUploadPanels(void* dev, int w, int h)
     TexUnlock(g_panelTex, 0);
 }
 
-static BOOL PlayerDead(void)
-{
-    int result = -999;
-    if (!g_exeBase) return FALSE;
-    if (!SafeReadInt(g_exeBase + (0x490A48 - 0x400000), &result))
-        return FALSE;
-    return result == 2;
-}
-
-/* Gameplay, plus the death screen: keep the new HUD up so its STATE reads
-   DEAD instead of dropping back to the game's own HUD for the final frames. */
+/* Gameplay only. The death/victory result screen (mission result != 0) must
+   keep the game's own 2D UI: the custom HUD used to stay up there and cover
+   the stats/summary panel. */
 static BOOL HudShouldDraw(void)
 {
-    return InGameplay() || PlayerDead();
+    return InGameplay();
 }
 
 static BOOL UpdateHudTexture(void* dev)

@@ -5,8 +5,8 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 09:12:29`, SHA-256
-`2cc5662fcf8d04f93585b0e0e6e739dfa25d3ffaf3ba265b3edf21ec3e9cb179`,
+**Current build:** `built Nov  6 2026 09:24:03`, SHA-256
+`107ac4c9fe5aa187e0fa9e85e3810760d12bc2f389c7235f946dd01738e91413`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---

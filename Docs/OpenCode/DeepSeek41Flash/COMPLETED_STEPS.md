@@ -4,8 +4,8 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 09:12:29`, SHA-256
-`2cc5662fcf8d04f93585b0e0e6e739dfa25d3ffaf3ba265b3edf21ec3e9cb179`.
+**Last build covered:** `built Nov  6 2026 09:24:03`, SHA-256
+`107ac4c9fe5aa187e0fa9e85e3810760d12bc2f389c7235f946dd01738e91413`.
 
 ---
 
@@ -55,7 +55,8 @@ pass; `BUG_FIXES.md` will be created from that run.
 - Game's 2D HUD suppressed in gameplay **only when the custom HUD is valid**
   (texture failure falls back to the game HUD); crosshair draws removed.
 - Title, briefing, menus, objective, death and victory keep the game's own 2D
-  UI (`MODE_VR 0`).
+  UI (`MODE_VR 0`). The custom HUD is **gameplay-only**, so the death
+  summary/stats screen is not covered by it.
 - 3D weapon-slot models are left untouched (where to place them is still an
   open decision, see `NEXT_STEPS.md`).
 

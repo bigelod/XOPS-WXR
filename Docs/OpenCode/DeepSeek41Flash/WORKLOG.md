@@ -970,3 +970,15 @@ owner confirmed it was fixed.
 
 Build `built Nov  6 2026 09:12:29`, SHA-256
 `2cc5662fcf8d04f93585b0e0e6e739dfa25d3ffaf3ba265b3edf21ec3e9cb179`.
+
+### 2026-11-06 - custom HUD no longer covers the death summary
+
+`HudShouldDraw()` used to be `InGameplay() || PlayerDead()`, so after dying the
+custom HUD stayed up and the game's 2D HUD stayed suppressed, covering the
+post-death stats panel. It is now **gameplay only**: on mission result != 0
+(death or victory) the custom HUD stops and the game's own 2D UI draws
+normally. A health-driven `DEAD` state is still shown if the player dies
+during gameplay, but the summary screen belongs to the game.
+
+Build `built Nov  6 2026 09:24:03`, SHA-256
+`107ac4c9fe5aa187e0fa9e85e3810760d12bc2f389c7235f946dd01738e91413`.

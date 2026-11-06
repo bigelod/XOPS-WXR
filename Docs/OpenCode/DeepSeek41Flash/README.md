@@ -216,12 +216,11 @@ green-to-yellow, DANGER orange, DEAD red). Right cluster: selected weapon name
 (`MP5SD` etc.) with the other slot's name below it; either reads white `None`
 when its slot is empty.
 
-**Death and reload status.** `HudShouldDraw()` is true during gameplay **or**
-when the mission result is 2 (death). In the latter case `HudVals.dead` forces
-the STATE readout to `DEAD`, so the last custom-HUD frames never say `FINE`
-while the game is switching to its death screen. The game's own 2D HUD is
-suppressed while the custom HUD is valid, death screen included. The byte just
-before the player struct (`base - 1`) is the game's action state:
+**Death and reload status.** `HudShouldDraw()` is **gameplay only**. On death
+and victory (mission result != 0) the custom HUD stops and the game's own 2D
+UI is no longer suppressed, so the death summary/stats screen is visible. If
+health reaches 0 during gameplay the STATE readout still shows `DEAD`. The byte
+just before the player struct (`base - 1`) is the game's action state:
 `3 = RELOADING`, `5 = CHANGING`; the HUD draws that word centred above the
 panels in a larger status font. Font sizes were reduced slightly for VR:
 big = region height `/ 10`, status = big `* 7/5`.
