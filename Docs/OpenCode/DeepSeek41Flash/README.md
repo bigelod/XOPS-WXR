@@ -30,9 +30,9 @@ WinlatorXR and no build has been verified on the Quest 3.**
 | Window / sync pixel / FOV | **implemented and desktop-verified** |
 | Replacement HUD | **implemented**: target-resolution D3D texture in the centre square, desktop-verified |
 | Decoupled aim (F-7) | not started - the hardest remaining problem |
-| Height / crouch | blocked: the game re-clamps Y every frame `[device, run 13]` |
-| Roll | plan settled (rotate the rendered frame), not implemented |
-| Stereo | out of scope until mono is device-verified |
+| Height / crouch | **render-side 6DOF implemented**: `CameraOffset` shifts the world draws; right-stick click re-zeroes; game position is not written |
+| Roll | **implemented**: the rendered sprite rotates; hands/HUD stay fixed |
+| Stereo | AER experiment implemented; mono is the default until device-verified |
 
 ### The camera addresses, as inherited
 
@@ -267,6 +267,8 @@ created locally. It is created with defaults if missing:
 ```
 handedness = right
 hand_flip = false
+eye_height = 0.0
+pos_scale = 1.0
 ```
 
 `handedness` selects the dominant hand for the laser and the initial
@@ -279,17 +281,27 @@ HWXR, Shogo WXR and IMVR all hit this). Set `hand_flip = true` to recreate
 the old, uncorrected gun roll on devices other than a Quest 3. The off-hand
 stays unflipped.
 
+`eye_height` is a **manual float** vertical render offset in metres (default
+`0`, clamped ±5); `pos_scale` is the gain on the tracked HMD translation
+(default `1.0`, 0..2). Lower `pos_scale` if the 1:1 head movement still feels
+too strong on device. The right-stick click re-zeroes the current HMD height.
+`config.txt` also holds `haptics`, `haptics_hand`, `haptic_frames`,
+`verbose_debug`, `stereo`, `roll` and `roll_sign`; the full list is in
+`CURRENT_STEPS.md`.
+
 The hand mesh is a compact dark palm plate with four **short, chunky finger
 slabs** and a thick **thumb slab** angled outward from its own side, all using
 the same glove texture and black outlines, SixDOFinator-calibration style:
 their direction and the thumb side make roll/pitch/yaw obvious at a glance.
 
-The game's own 3D HUD weapon-slot draws are **indexed** draws and are left
-untouched; only the stride-28 2D `DrawPrimitiveUP` HUD set is replaced. The
-crosshair's four UP line draws at `(317..323, 237..243)` are removed. **Still
-open:** the 3D slot models are not moved into the centre square; they remain at
-their own draw positions, and the replacement text is centred independently.
-That is the next HUD placement pass.
+The game's own 3D HUD weapon-slot draws are **indexed** draws. They are now
+**hidden** while the custom HUD is active: the text HUD is the only slot
+display, and the player swaps weapons to see what they carry. The capture and
+tail recording still run before the draw is skipped, so the VR hand's cloned
+weapon model continues to load on spawn, swap, drop and pickup. Toggle the
+custom HUD off (`K`) to bring the game's own spinning slots back for
+comparison. The stride-28 2D `DrawPrimitiveUP` HUD set is replaced and the
+crosshair's four UP line draws at `(317..323, 237..243)` are removed.
 
 `J` saves the composited back buffer to `xops_frame_<n>.bmp` next to the DLL
 (the only reliable desktop inspection - window captures come back black).
@@ -386,13 +398,29 @@ swallowed and the arrows are swallowed in gameplay, with manual PC mode (`0`)
 exempt. Informative logging is behind `verbose_debug` (default false) in
 `config.txt`; errors and state changes always log.
 
+**Render-side 6DOF + eye height + debug-key lock (6 Nov).** The game re-clamps
+its camera Y every frame, so the HMD translation is no longer written to the
+player. `CameraOffset()` rotates the head's `headP` into the camera frame and
+the world draw copies are shifted opposite the eye in all three axes; the
+hands, gun and laser already live in the head frame and do not move. The
+offset is **1:1 metres** on both the indexed and non-indexed world paths - the
+non-indexed `*100` was a centimetre assumption and threw the view through
+floors and ceilings. HMD Y is clamped to ±1 m; `eye_height` is a manual float
+offset (default 0, ±5) and `pos_scale` is a gain (default 1.0, 0..2). A
+**right-stick click** recentres and makes the current HMD height the new zero
+(flat game player height). Head yaw is still written to both camera clusters,
+so stick-forward follows the head. All debug keys now require manual PC mode
+(`0`), which WinlatorXR does not map by default. Verified with a ±1 m sine
+feed (`dy` tracks `hmdY` 1:1, clamps at ±1.000), a constant 0.8 m re-zero
+(0.000 -> 0.800 -> click -> 0.000), and an F-before-0 / F-after-0 key test.
+
 ### What is still not built
 
 **Desktop-verified now:** target-resolution composite, replacement HUD,
-borderless window, exact sync pixel, real FOV, `MODE_VR` state.
-**Still not built:** eye height, roll, decoupled aim, moving the 3D slot models
-into the centre square. **Not device-verified:** nothing has run on the Quest 3
-yet. See section 4.
+borderless window, exact sync pixel, real FOV, `MODE_VR` state, render-side
+6DOF/eye height, recentre.
+**Still not built:** decoupled aim. **Not device-verified:** nothing has run on
+the Quest 3 yet. See section 4.
 
 ---
 
@@ -417,11 +445,12 @@ or FOV path.
    - `COMPOSITE native 4:3: <w>x<h> -> <gw>x<gh> at <x>,<y> (bars 0,0)` on
      1280x960;
    - `HUD textures ... (text + panels)` once the level starts.
-5. **Expect** the game world to fill the 4:3 container with the default FOV and
-   the 3D weapon-slot models visible in the game's own slots. In gameplay the
-   left cluster shows current ammo, remaining ammo and `STATE`, and the right
-   cluster shows the selected weapon with the other slot below it.
-   Title/menu/objective/death/victory keep their own 2D UI.
+5. **Expect** the game world to fill the 4:3 container with the default FOV.
+   The game's spinning 3D weapon-slot models are **hidden**; the centre-square
+   text HUD is the only slot display (left cluster: current ammo, remaining
+   ammo and `STATE`; right cluster: selected weapon and the other slot). The
+   weapon still appears in the VR hand. Title/menu/objective/death/victory
+   keep their own 2D UI.
 6. Press `J` in gameplay: `xops_frame_<n>.bmp` appears next to the DLL. Open
    it to inspect the exact frame; window captures of the D3D surface come back
    black on this box. `K` toggles the custom HUD off/on for comparison.
@@ -429,10 +458,10 @@ or FOV path.
    when a packet is arriving, matching the tester's sync field.
 
 **What this proves:** the game renders into a native 640x480 target, so the
-default FOV and the 3D weapon-slot models are preserved; the replacement HUD is
-resolution-independent in the centre square. **What it does not prove:** headset
-comfort (needs the Quest 3 and a real pose stream) or the final placement of the
-3D slot models relative to the centre HUD.
+default FOV is preserved and the cloned weapon model still loads for the VR
+hand; the replacement HUD is resolution-independent in the centre square.
+**What it does not prove:** headset comfort (needs the Quest 3 and a real pose
+stream).
 
 ---
 
@@ -440,13 +469,12 @@ comfort (needs the Quest 3 and a real pose stream) or the final placement of the
 
 The live list is `NEXT_STEPS.md`. In short, what remains is per-weapon tuning
 persistence, the off-hand support pose in two-handed aim, muzzle mapping, the
-3D HUD slot placement decision, the first Quest 3 device pass (then
-`BUG_FIXES.md`), AER device sign/scale and the deferred SBS experiment, and
-the optional launcher.
+first Quest 3 device pass (then `BUG_FIXES.md`), AER device sign and the
+deferred SBS experiment, and the optional launcher.
 
 Desktop verification of the composite, window, sync pixel, FOV, HUD, hands,
-weapon clone, haptics, input boundary and AER is already done and recorded in
-`COMPLETED_STEPS.md`.
+weapon clone, haptics, input boundary, render-side 6DOF/height and AER is
+already done and recorded in `COMPLETED_STEPS.md`.
 
 ---
 
@@ -465,8 +493,8 @@ deployed copy with SHA-256 (`match=True`). The DLL is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 00:04:41`, SHA-256
-`ef596da3b33c4928e68f5a7b0da9d6903be4cb08d0df54607372301565932c2d`,
+Current handover build: `built Nov  6 2026 10:55:35`, SHA-256
+`119074900cf3c1dda3ec4ac9ccb101b5c13ae9944b208fe194a8271cdecd15ae`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---

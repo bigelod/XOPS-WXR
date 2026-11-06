@@ -5,8 +5,8 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 09:49:19`, SHA-256
-`53b831374c82e436a037d2e8f591e605bac9dc357d29e2df5b5c89be482e0bad`,
+**Current build:** `built Nov  6 2026 10:55:35`, SHA-256
+`119074900cf3c1dda3ec4ac9ccb101b5c13ae9944b208fe194a8271cdecd15ae`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---
@@ -19,8 +19,10 @@ both hands are visible and depth-tested; the dominant hand carries the cloned
 game weapon and a laser; the replacement HUD is in the centre square.
 Haptics, two-handed aim, the input focus boundary, verbose logging, the
 Quest 3 hand-roll default and the chunkier calibration hand are implemented
-and PC-verified. AER stereo is implemented as an experiment; mono is the
-default. Device testing is the next real milestone.
+and PC-verified. The HMD's 6DOF translation (including height) is applied to
+the world draws at render time, so it is visual only; a right-stick click
+makes the current HMD height the new zero. AER stereo is implemented as an
+experiment; mono is the default. Device testing is the next real milestone.
 
 ---
 
@@ -28,7 +30,9 @@ default. Device testing is the next real milestone.
 
 1. `CreateDevice`/`Reset` ask for the desktop/container back buffer.
 2. The game draws into a dedicated **640x480 render target** (not the back
-   buffer), which keeps its native FOV and 3D weapon-slot models intact.
+   buffer), which keeps its native FOV. The game's own spinning 3D
+   weapon-slot HUD is hidden at draw time, but its capture/tail records still
+   run so the VR hand's cloned weapon model loads normally.
    The target stays bound outside `Present`, so title/demo draws between
    scenes also land in it.
 3. `Present` binds the real back buffer, draws the 640x480 texture at native
@@ -70,8 +74,16 @@ native frame fills it with no bars or crop.
   pixel are fixed. No scaling; black sprite corners are accepted.
 - **AER stereo:** the engine CPU-bakes the world and submits it, so eye
   separation is applied by copying each draw's vertices and shifting x
-  (`AerDrawPrimitive` in cm, `AerDrawIndexed` in m), one eye per frame.
-  `stereo = mono | aer`; `mono` ships.
+  (`AerDrawPrimitive` and `AerDrawIndexed`, both camera-space metres), one eye
+  per frame. `stereo = mono | aer`; `mono` ships.
+- **Render-side 6DOF / eye height:** the game clamps its camera Y every frame,
+  so `SteerTick` writes only yaw/pitch and never position. `CameraOffset()`
+  rotates `headP` into the camera frame and the draw copies shift the world
+  opposite the eye in all three axes. Hands/gun/laser stay in the head frame.
+  HMD Y is clamped ±1 m, `eye_height` adds a manual float offset (default 0,
+  ±5) and `pos_scale` scales the tracked translation (default 1.0, 0..2).
+  Right-stick click recentres, making the current elevation the new 0. Both
+  paths are 1:1 metres; the old non-indexed `*100` was removed.
 
 ## 4. Input, haptics, logging
 
@@ -91,6 +103,7 @@ native frame fills it with no bars or crop.
 |---|---|
 | Left stick | Move |
 | Right stick L/R | Turn L / R |
+| Right stick click | Recentre (current HMD height becomes 0) |
 | Left grip (held) | Two-handed aim |
 | Left trigger | Fire mode |
 | Right trigger | Shoot |
@@ -103,6 +116,10 @@ native frame fills it with no bars or crop.
 Left-handed mode swaps only shoot and fire mode. Walk is gone.
 
 ## 6. Manual / debug keys
+
+**All debug keys below are locked behind `0`.** While VR input is active only
+`0` is accepted; WinlatorXR does not map `0`, so the device cannot trigger them
+by accident. Pressing `0` turns manual PC mode on and unlocks the rest.
 
 - `0` toggle manual PC mode (default pose, XrApi ignored; cursor centred once).
 - `E` + numpad: pitch/yaw/roll; with `E`, numpad also moves the hand.
@@ -128,6 +145,8 @@ verbose_debug = true        # this test PC; ship with false
 stereo = mono               # experimental: aer
 roll = true                 # rotate the world sprite with head tilt
 roll_sign = -1              # default; +1 if the device horizon tilts the wrong way
+eye_height = 0.0            # manual render-side vertical offset, metres, +/-5
+pos_scale = 1.0             # gain on tracked HMD translation, 0..2 (1.0 = 1:1)
 ```
 
 `xops_wxr_steer.ini` still carries the settled steering facts (`yawSign`,

@@ -1019,3 +1019,60 @@ file into the game folder once.
 Build: mod `built Nov  6 2026 09:49:19`, SHA-256
 `53b831374c82e436a037d2e8f591e605bac9dc357d29e2df5b5c89be482e0bad`.
 Launcher `version.txt` 0.1 (XOPSVR.exe is a build artifact, not committed).
+
+## 2026-11-06 - render-side 6DOF / eye height, weapon-slot HUD, debug-key lock
+
+### Weapon-slot HUD
+
+The game's spinning 3D weapon-slot models are now skipped at draw time when
+the custom text HUD is active. The capture and tail recording still run
+**before** the skip, so the VR hand's cloned weapon model still loads; verified
+`HIDE assembled 1 part(s) for 'MP5SD'`. `K` restores the game's slots.
+
+### Debug-key lock
+
+Every debug/probe key now requires manual PC mode. `ProbeKeys` ignores all
+keys except `0` while `g_vrExclusive` is set, so a WinlatorXR session (which
+does not map `0`) cannot trigger them. Verified: `F` before `0` did nothing;
+after `0` it logged `WINDOW fit-to-display: off`.
+
+### 6DOF and eye height
+
+The game re-clamps its own camera Y every frame, so writing the player
+position was never going to hold the head's rise/fall. It is now **visual
+only**:
+
+- `CameraOffset()` rotates `headP` into the camera's own axes and returns the
+  offset in metres. HMD Y is clamped to ±1 m; `eye_height` is a separate
+  manual float (default 0, ±5); `pos_scale` scales the tracked translation
+  (default 1.0, 0..2).
+- `AerDrawPrimitive` and the stride-20 `AerDrawIndexed` path copy the world
+  vertices and shift them opposite the eye on x/y/z. Hands, gun and laser stay
+  in the head frame. Game position writes (Y and both horizontals) are gone;
+  yaw/pitch writes remain, so stick-forward still follows the head.
+- Right-stick click calls `SteerRecentre()` (moved before the stick-move/steer
+  gates so it always fires). This makes the current HMD height the new zero.
+- **Root cause of the "through the floor/ceiling" jump:** the non-indexed
+  world path multiplied the offset by 100 as if its vertices were centimetres.
+  The projection is near 0.1 / far 80 and the player's own Y is ~1.9, so it is
+  camera-space **metres**. The `*100` is removed (and the same mistake in the
+  AER eye shift). A 1 m head move now shifts the world 1 m, not 100 m.
+- Added a status line, a few times a second:
+  `EYE hmdY=... tracked=... manual=... total=...`.
+
+### Tests
+
+- ±1 m sine, 6 s period, right-stick pulse at 14 s. Log `dy` tracked `hmdY`
+  1:1 (`hmdY=-0.931` -> `dy=+0.931`); the ±1 m clamp held while the recentre
+  offset pushed `hmdY` past ±1.5.
+- Constant-height re-zero: 0.000 -> 0.800 -> right-stick click ->
+  0.000 and stayed at 0.000. `STEER recentre requested by the right stick
+  click` appears in the log before it.
+- Debug-key lock: `F` before `0` did nothing; `F` after `0` toggled the
+  window.
+- Old command, for contrast: the pre-fix build logged `dy=-50.000` for a
+  0.5 m feed and threw the view through the level.
+
+Build: `built Nov  6 2026 10:55:35`, SHA-256
+`119074900cf3c1dda3ec4ac9ccb101b5c13ae9944b208fe194a8271cdecd15ae`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).

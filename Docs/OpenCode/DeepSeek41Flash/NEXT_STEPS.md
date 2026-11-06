@@ -4,8 +4,8 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 09:49:19`, SHA-256
-`53b831374c82e436a037d2e8f591e605bac9dc357d29e2df5b5c89be482e0bad`.
+**Last build:** `built Nov  6 2026 10:55:35`, SHA-256
+`119074900cf3c1dda3ec4ac9ccb101b5c13ae9944b208fe194a8271cdecd15ae`.
 
 ---
 
@@ -37,14 +37,7 @@ secondary). What is missing is the support hand:
   effect draws to the dominant hand's muzzle point.
 - **Reuse the game's effects**; do not author new ones.
 
-## 4. Decide the 3D HUD slot models
-
-The replacement text/panels are in the centre square, but the game's own
-indexed 3D weapon-slot models are still at their native bottom-right draws.
-Decide whether to move them with the HUD or leave them where the game puts
-them. This is a design choice, not a bug.
-
-## 5. Quest 3 device pass
+## 4. Quest 3 device pass
 
 PC testing has covered the feature set so far. The first device pass is still
 outstanding:
@@ -55,18 +48,23 @@ outstanding:
   A/B/X/Y and arrow blocking, `MODE_VR` screens, both hands and their angles,
   laser and hand-aim, two-handed aim, weapon clone across swaps/drops/pickups
   and textures, haptics feel, tracking latency/judder.
+- **6DOF / eye height:** crouch and stand and confirm the render follows the
+  head without moving the player. Confirm the right-stick click re-zeroes the
+  current height, and that the default `pos_scale = 1.0` feels 1:1. If it is
+  still too strong, lower `pos_scale` rather than changing the draw code.
 - **Roll:** tilt the head and confirm the world tilts the correct way and the
   HUD stays fixed. The default is `roll_sign = -1`; if it is inverted on
   device, set `+1`. If the black corners are visible in the lenses, note it
   for the stereo pass.
 - After this run, create `BUG_FIXES.md` from the device findings.
 
-## 6. Stereo
+## 5. Stereo
 
 - **AER is implemented and desktop-verified**; `stereo = aer` opts in.
-- On device, confirm the **eye sign** (flip if depth looks inverted) and the
-  **centimetre scale** in the two reproject helpers and the hand-pass view.
-  Both are one-line values.
+- On device, confirm the **eye sign** (flip if depth looks inverted). Both
+  reproject helpers are now 1:1 metres (the non-indexed `*100` centimetre
+  assumption was removed with the height work), so there is no scale left to
+  tune; one-line sign if needed.
 - **SBS is deferred.** It needs a double-width game target and a double-width
   container/window so each eye keeps 4:3. Plan: duplicate every world/model
   draw into two viewports with the existing eye shift, draw the HUD per half,
@@ -74,7 +72,7 @@ outstanding:
   half. Only attempt once AER is confirmed on device; it is allowed to be
   postponed until after V1.0.
 
-## 7. Launcher - first version done, release plumbing left
+## 6. Launcher - first version done, release plumbing left
 
 `launcher-xr/` now has `XOPSVR.exe` (see `COMPLETED_STEPS.md`): Play, Options
 and the update check work on the PC. What is left for a real release:
@@ -90,18 +88,16 @@ and the update check work on the PC. What is left for a real release:
   `launcher-xr/version.txt`, then commit/push.
 - Optional: an icon and an updater for `XOPSVR.exe` itself.
 
-## 8. Separate the mod from the probe
+## 7. Separate the mod from the probe
 
 `src/d3d8probe.cpp` is still one translation unit containing the probe,
 steering, HUD, hands and capture. Once the above settles, split the shipped
 mod from the diagnostic hooks so a release build carries no probe machinery.
 
-## 9. Lower-priority / not requested recently
+## 8. Lower-priority / not requested recently
 
-- **Eye height:** the game re-clamps Y every frame; try writing Y at ENDSCENE
-  before hunting a separate field.
 - **Floating zoom scope** (HWXR Halo style) instead of the simple zoom toggle.
-- **Removing the probe's debug key set** from release builds (covered by 8).
+- **Removing the probe's debug key set** from release builds (covered by 7).
 
 ---
 

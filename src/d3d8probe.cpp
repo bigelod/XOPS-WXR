@@ -3054,6 +3054,11 @@ static float g_yawSign    = 1.0f;
 static float g_pitchSign  = -1.0f;
 static int   g_cluster    = CLU_BOTH;
 static float g_posScale   = 1.0f;   /* engine units per metre; ~1 [derived] */
+/* Render-side eye height: the game re-clamps its camera Y every frame, so
+   the head's vertical offset is applied to the world draws instead.
+   `eye_height` is a manual float offset (default 0, clamped +/-5) added to
+   the tracked head rise/fall. */
+static float g_eyeHeight  = 0.0f;
 
 /* VR controller mapping (owner, 5 Nov 2026). Right-handed: left trigger =
    fire mode, right trigger = shoot. Left-handed swaps only those two; every
@@ -3077,20 +3082,6 @@ static BOOL  g_haveRef    = FALSE;
 static float g_refYaw     = 0.0f;
 static float g_refYawB    = 0.0f;
 static float g_refPos[3]  = {0,0,0};   /* horiz1, Y, horiz2 - for the log */
-
-/* The head offset we applied last frame, so this frame can apply only the
-   difference. Without this, writing position cancels the game's own
-   movement. */
-static BOOL  g_havePrevHead = FALSE;
-static float g_prevHeadP[3] = {0,0,0};
-
-/* Height-clamp detection. Run 13 moved the head 1.4 m vertically and the
-   game's Y moved 0.028, because XOPS re-clamps the player to the ground every
-   frame - so a delta written in BeginScene is undone before the next one. */
-static BOOL  g_wroteY       = FALSE;
-static float g_yBeforeWrite = 0.0f;
-static float g_yWriteWanted = 0.0f;
-static int   g_yClamped     = 0;    /* consecutive frames the write was undone */
 
 static XrPose g_pose;
 static BOOL   g_posed     = FALSE;
@@ -3198,12 +3189,6 @@ static void SteerRecentre(void)
     if (SafeRead(CamAddr(A_H2), &v)) g_refPos[2] = v;
     g_haveRef = TRUE;
     g_turnYaw = 0.0f;
-    /* Start the delta chain from where the head is now, so recentring never
-       produces one large jump. */
-    g_prevHeadP[0] = g_pose.valid ? g_pose.headP[0] : 0.0f;
-    g_prevHeadP[1] = g_pose.valid ? g_pose.headP[1] : 0.0f;
-    g_prevHeadP[2] = g_pose.valid ? g_pose.headP[2] : 0.0f;
-    g_havePrevHead = g_pose.valid ? TRUE : FALSE;
     Log("STEER    recentred. yaw A %.4f rad (%.1f deg)  B %.4f, position"
         " h1=% .3f Y=% .3f h2=% .3f",
         g_refYaw, g_refYaw * 57.2957795f, g_refYawB,
@@ -3250,64 +3235,23 @@ static void SteerTick(void)
         SafeWrite(CamAddr(B_PITCH), pitch);
     }
 
-    /* Did last frame's height write survive? If the game clamps the player to
-       the ground it will not, and no amount of writing will raise the view. */
-    if (g_dofMode >= DOF_HEIGHT && g_wroteY) {
-        float now;
-        if (SafeRead(CamAddr(A_Y), &now)) {
-            const float kept = now - g_yBeforeWrite;
-            if (g_yWriteWanted != 0.0f) {
-                if ((float)fabs(kept) < 0.25f * (float)fabs(g_yWriteWanted))
-                    ++g_yClamped;
-                else if (g_yClamped > 0) --g_yClamped;
-            }
-        }
+    /* The HMD translation (including Y) is applied at render time in
+       CameraOffset(); writing the game's position here is deliberately gone.
+       The game clamps Y and fights the head, so the view offset is produced
+       from the copy of the world draws instead. The HMD yaw is still written
+       to the player orientation above, so stick-forward follows the head. */
+
+    /* Height diagnostic, a few times a second: the sine test is read from the
+       log rather than guessed from screenshots. `tracked` is the clamped HMD
+       rise/fall, `manual` is the eye_height calibration, `total` the offset. */
+    if ((g_frame % 30) == 0) {
+        float tracked = g_posScale * g_pose.headP[1];
+        if (tracked >  1.0f) tracked =  1.0f;
+        if (tracked < -1.0f) tracked = -1.0f;
+        LogD("EYE      hmdY=%+.3f tracked=%+.3f manual=%+.3f total=%+.3f",
+             g_pose.headP[1], tracked, g_eyeHeight, tracked + g_eyeHeight);
     }
 
-    if (g_dofMode >= DOF_HEIGHT && g_havePrevHead) {
-        /* Add only what the head moved since last frame, to whatever height
-           the game currently has - so gravity, stairs and crouching all keep
-           working and the head merely contributes on top. */
-        const float dY = g_posScale * (g_pose.headP[1] - g_prevHeadP[1]);
-        float cur;
-        g_wroteY = FALSE;
-        if (dY != 0.0f && SafeRead(CamAddr(A_Y), &cur)) {
-            SafeWrite(CamAddr(A_Y), cur + dY);
-            g_yBeforeWrite = cur;
-            g_yWriteWanted = dY;
-            g_wroteY = TRUE;
-        }
-    }
-
-    if (g_dofMode >= DOF_FULL && g_havePrevHead) {
-        /* The head's sideways and forward motion is relative to the head, so
-           it has to be rotated into the world by the yaw we are facing before
-           it can be added to a world position: leaning left must move you
-           left relative to your facing, not along a fixed world axis. */
-        const float dx = g_posScale * (g_pose.headP[0] - g_prevHeadP[0]);
-        const float dz = g_posScale * (g_pose.headP[2] - g_prevHeadP[2]);
-        if (dx != 0.0f || dz != 0.0f) {
-            const float c = (float)cos(yaw), sn = (float)sin(yaw);
-            const float d1 =  dz * sn + dx * c;
-            const float d2 =  dz * c  - dx * sn;
-            float cur;
-            if (SafeRead(CamAddr(A_H1), &cur)) {
-                SafeWrite(CamAddr(A_H1), cur + d1);
-                if (g_cluster == CLU_B || g_cluster == CLU_BOTH)
-                    SafeWrite(CamAddr(B_H1), cur + d1);
-            }
-            if (SafeRead(CamAddr(A_H2), &cur)) {
-                SafeWrite(CamAddr(A_H2), cur + d2);
-                if (g_cluster == CLU_B || g_cluster == CLU_BOTH)
-                    SafeWrite(CamAddr(B_H2), cur + d2);
-            }
-        }
-    }
-
-    g_prevHeadP[0] = g_pose.headP[0];
-    g_prevHeadP[1] = g_pose.headP[1];
-    g_prevHeadP[2] = g_pose.headP[2];
-    g_havePrevHead = TRUE;
     ++g_steerWrites;
 }
 
@@ -3812,24 +3756,13 @@ static void StickKeys(PBYTE p)
 {
     int pressed = 0;
 
-    if (!g_stickMove || !g_posed || !g_pose.valid) return;
+    if (!g_posed || !g_pose.valid) return;
     if (!InGameplay()) return;      /* never move the player in a menu/screen */
     if (!g_vrExclusive) return;     /* desktop test mode: no synthetic input */
 
-    /* Only while steering. Supplying movement keys when the head is not
-       driving the view would walk the player sideways relative to where he is
-       looking, which is worse than not working at all. */
-    if (!g_steer) return;
-
-    if (g_pose.moveY >  STICK_DEAD) { p['W'] |= 0x80; ++pressed; }
-    if (g_pose.moveY < -STICK_DEAD) { p['S'] |= 0x80; ++pressed; }
-    if (g_pose.moveX >  STICK_DEAD) { p['D'] |= 0x80; ++pressed; }
-    if (g_pose.moveX < -STICK_DEAD) { p['A'] |= 0x80; ++pressed; }
-
-    if (pressed) ++g_stickFrames;
-
     /* Right stick click recentres, the convention the Shogo client uses.
-       Edge-triggered, or it would recentre every frame it is held. */
+       Edge-triggered, or it would recentre every frame it is held. This also
+       makes the current HMD height the new 0 (the flat game player height). */
     {
         const BOOL now = XrButton(&g_pose, XRB_R_STICK) ? TRUE : FALSE;
         if (now && !g_prevRecentreBtn) {
@@ -3838,6 +3771,15 @@ static void StickKeys(PBYTE p)
         }
         g_prevRecentreBtn = now;
     }
+
+    if (!g_stickMove || !g_steer) return;
+
+    if (g_pose.moveY >  STICK_DEAD) { p['W'] |= 0x80; ++pressed; }
+    if (g_pose.moveY < -STICK_DEAD) { p['S'] |= 0x80; ++pressed; }
+    if (g_pose.moveX >  STICK_DEAD) { p['D'] |= 0x80; ++pressed; }
+    if (g_pose.moveX < -STICK_DEAD) { p['A'] |= 0x80; ++pressed; }
+
+    if (pressed) ++g_stickFrames;
 }
 
 /* Edge-press a game key for a few frames. The game polls GetKeyboardState
@@ -3956,17 +3898,11 @@ static void SteerLog(void)
         /* Run 12's symptom: position arriving every frame, DOF left at
            yaw+pitch, and so nothing moving. Silence there reads as a bug in
            the camera work, which it is not. */
-        if (g_yClamped > 20)
-            LogD("XR       NOTE: height writes are being undone - %d frames in a"
-                " row. XOPS re-clamps the player to the ground, so crouching"
-                " cannot be driven by writing Y. Horizontal 6DOF is"
-                " unaffected.", g_yClamped);
         if (g_dofMode == DOF_LOOK
             && (g_pose.headP[0] != 0.0f || g_pose.headP[1] != 0.0f
                 || g_pose.headP[2] != 0.0f))
-            LogD("XR       NOTE: head POSITION is arriving but the DOF mode is"
-                " yaw+pitch only, so it is being ignored. Press ' to include"
-                " height and then full 6DOF.");
+            LogD("XR       NOTE: head POSITION is arriving; it is applied at"
+                " render time (CameraOffset), independent of the old DOF mode.");
     }
 }
 
@@ -4155,7 +4091,12 @@ static void ProbeKeys(PBYTE p)
         vk = watch[i];
         now[vk] = (BYTE)(p[vk] & 0x80);
         if (now[vk] && !prev[vk]) {
-            if (vk == '6') {
+            /* Every debug key except 0 is PC-only and lives behind manual
+               mode (0). WinlatorXR does not map 0 by default, so a device
+               session cannot trigger the probe/HUD/debug keys by accident. */
+            if (g_vrExclusive && vk != '0') {
+                /* locked - do nothing */
+            } else if (vk == '6') {
                 BallisticArm();        /* works whether or not probe mode is on */
             } else if (vk == '5') {
                 WatchDump("on demand (key 5)");
@@ -4537,7 +4478,13 @@ static void HandLoadConfig(void)
             fputs("# roll: rotate the world with head tilt (HUD stays fixed).\n", f);
             fputs("# roll_sign: flip if the horizon tilts the wrong way on device.\n", f);
             fputs("roll = true\n", f);
-            fputs("roll_sign = 1\n", f);
+            fputs("roll_sign = -1\n", f);
+            fputs("# eye_height: render-side vertical head offset; the game clamps\n", f);
+            fputs("# its own camera Y every frame, so this is applied to the world draws.\n", f);
+            fputs("eye_height = 0.0\n", f);
+            fputs("# pos_scale: gain on tracked HMD translation (x/y/z), 1.0 = 1:1.\n", f);
+            fputs("# Lower it if head movement shifts the render too far in-game.\n", f);
+            fputs("pos_scale = 1.0\n", f);
             fclose(f);
             Log("HAND     created %s with defaults", path);
         } else {
@@ -4553,7 +4500,9 @@ static void HandLoadConfig(void)
         g_verboseDebug = FALSE;
         g_stereoMode = STEREO_MONO;
         g_roll = TRUE;
-        g_rollSign = 1.0f;
+        g_rollSign = -1.0f;
+        g_eyeHeight = 0.0f;
+        g_posScale = 1.0f;
         return;
     }
 
@@ -4607,6 +4556,14 @@ static void HandLoadConfig(void)
             g_rollSign = (float)atof(val);
             if (g_rollSign >= 0.0f) g_rollSign = 1.0f;
             else                    g_rollSign = -1.0f;
+        } else if (!_stricmp(key, "eye_height")) {
+            g_eyeHeight = (float)atof(val);
+            if (g_eyeHeight >  5.0f) g_eyeHeight =  5.0f;
+            if (g_eyeHeight < -5.0f) g_eyeHeight = -5.0f;
+        } else if (!_stricmp(key, "pos_scale")) {
+            g_posScale = (float)atof(val);
+            if (g_posScale < 0.0f) g_posScale = 0.0f;
+            if (g_posScale > 2.0f) g_posScale = 2.0f;
         }
     }
     fclose(f);
@@ -4626,6 +4583,8 @@ static void HandLoadConfig(void)
                       : g_stereoMode == STEREO_AER ? "AER (experimental)"
                                                    : "mono");
     Log("ROLL     %s  sign %+.0f", g_roll ? "on" : "off", g_rollSign);
+    Log("EYE      height %+.2f (manual render offset)  pos_scale %.2f",
+        g_eyeHeight, g_posScale);
 }
 
 static void EnsureInit(void)
@@ -4840,6 +4799,58 @@ static float EyeIpd(void)
     const float v = g_pose.ipd;
     if (v > 0.01f && v < 0.12f) return v;
     return 0.064f;
+}
+
+/* The HMD translation relative to the recentre, in the camera's own axes.
+   The game's position writes are disabled (it clamps Y and fights the head),
+   so the world is shifted by the negative of this at draw time. The hands are
+   already in the head frame and need no shift. `eye_height` is a manual float
+   calibration offset (default 0, clamped +/-5). */
+static void CameraOffset(float out[3])
+{
+    float r[3], p[3];
+
+    out[0] = out[1] = out[2] = 0.0f;
+    if (!g_posed || !g_pose.valid || !InGameplay()) return;
+
+    HandCross(g_pose.headU, g_pose.headF, r);    /* camera right */
+    HandNorm(r);
+
+    p[0] = g_pose.headP[0];
+    p[1] = g_pose.headP[1];
+    p[2] = g_pose.headP[2];
+
+    out[0] = g_posScale * (p[0]*r[0] + p[1]*r[1] + p[2]*r[2]);
+    out[1] = g_posScale * (p[0]*g_pose.headU[0] + p[1]*g_pose.headU[1]
+                           + p[2]*g_pose.headU[2]);
+    out[2] = g_posScale * (p[0]*g_pose.headF[0] + p[1]*g_pose.headF[1]
+                           + p[2]*g_pose.headF[2]);
+
+    /* A player switching between sitting and standing moves well under a
+       metre. Clamp the tracked part so bad pose data (or a badly placed
+       recentre) cannot throw the view through the floor or ceiling; the
+       manual `eye_height` calibration is added on top and keeps its own
+       wider limit. */
+    if (out[1] >  1.0f) out[1] =  1.0f;
+    if (out[1] < -1.0f) out[1] = -1.0f;
+
+    out[1] += g_eyeHeight;
+    if (out[1] >  5.0f) out[1] =  5.0f;
+    if (out[1] < -5.0f) out[1] = -5.0f;
+
+    if (fabsf(out[0]) < 0.002f) out[0] = 0.0f;
+    if (fabsf(out[1]) < 0.002f) out[1] = 0.0f;
+    if (fabsf(out[2]) < 0.002f) out[2] = 0.0f;
+}
+
+/* True when the draw path must be copied for a render-side offset: AER's
+   eye shift, the HMD camera offset, or both. */
+static BOOL RenderOffsetActive(void)
+{
+    float o[3];
+    CameraOffset(o);
+    return o[0] != 0.0f || o[1] != 0.0f || o[2] != 0.0f ||
+           (g_stereoMode == STEREO_AER && InGameplay());
 }
 
 /* The head's roll about its own forward axis, in radians. The no-roll up is
@@ -5135,7 +5146,7 @@ static HRESULT AerDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
     BYTE* data = NULL;
     PFN_VBLock lock;
     PFN_VBUnlock unlock;
-    float d;
+    float dx, dy, dz, off[3];
     static long logged = 0;
 
     if (!o_GetStreamSource || !o_DrawPrimitiveUP) return E_FAIL;
@@ -5150,22 +5161,32 @@ static HRESULT AerDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
         return E_FAIL;
     }
     data += (SIZE_T)start * stride;
-    /* The non-indexed world path is in centimetres (a room spans ~500 units),
-       so the metre eye offset is scaled by 100 here. */
-    d = (g_eyeRight ? 0.5f : -0.5f) * EyeIpd() * 100.0f;
+    /* Camera-space metres: the game's projection is near 0.1 / far 80 and the
+       player's own Y is ~1.9, so one unit here is one metre - the same scale
+       CameraOffset() produces. Multiplying by 100 (an old centimetre
+       assumption) threw a 1 m head movement 100 m through the level. Keep the
+       HMD translation 1:1; we are only shifting the render, not the player. */
+    CameraOffset(off);
+    dx = -off[0];
+    dy = -off[1];
+    dz = -off[2];
+    if (g_stereoMode == STEREO_AER && InGameplay())
+        dx -= (g_eyeRight ? 0.5f : -0.5f) * EyeIpd();
     for (i = 0; i < count; ++i) {
         const BYTE* src = data + (SIZE_T)i * stride;
         BYTE* dst = g_aerVerts + (SIZE_T)i * stride;
         memcpy(dst, src, stride);
-        *(float*)(dst + 0) = *(const float*)(src + 0) - d;
+        *(float*)(dst + 0) = *(const float*)(src + 0) + dx;
+        *(float*)(dst + 4) = *(const float*)(src + 4) + dy;
+        *(float*)(dst + 8) = *(const float*)(src + 8) + dz;
     }
     unlock(vb);
     ReleaseIUnknown(vb);
 
     if (logged < 20 || (g_frame % 600) == 0) {
         ++logged;
-        LogD("STEREO   AER primitive: count=%u stride=%u eye=%s d=%+.4f",
-             count, stride, g_eyeRight ? "right" : "left", d);
+        LogD("STEREO   offset primitive: count=%u stride=%u dx=%+.3f dy=%+.3f dz=%+.3f",
+             count, stride, dx, dy, dz);
     }
     return o_DrawPrimitiveUP(dev, prim, count, g_aerVerts, stride);
 }
@@ -5187,7 +5208,7 @@ static HRESULT __stdcall hkDrawPrimitive(void* dev, DWORD prim, UINT start, UINT
         --g_dumpDraws;
     }
     if (g_handDrawnThisFrame && HideThisDraw()) return 0;
-    if (g_stereoMode == STEREO_AER && InGameplay() && !g_hudModelPass) {
+    if (InGameplay() && !g_hudModelPass && RenderOffsetActive()) {
         if (AerDrawPrimitive(dev, prim, start, count) == S_OK)
             return S_OK;
     }
@@ -5870,7 +5891,6 @@ static HRESULT AerDrawIndexed(void* dev, DWORD prim, UINT minIdx, UINT numV,
     if (!o_GetStreamSource || !o_GetIndices || !o_DrawIndexedPrimitiveUP)
         return E_FAIL;
     if (prim != 4 /* D3DPT_TRIANGLELIST */ || !g_haveProj) return E_FAIL;
-    if (!(g_curFvf & D3DFVF_XYZRHW)) return E_FAIL;
     if (numV == 0 || numV > AER_MAX_V) return E_FAIL;
     if (primCount == 0 || primCount * 3 > AER_MAX_I) return E_FAIL;
 
@@ -5885,7 +5905,6 @@ static HRESULT AerDrawIndexed(void* dev, DWORD prim, UINT minIdx, UINT numV,
         return E_FAIL;
     }
     d = (g_eyeRight ? 0.5f : -0.5f) * EyeIpd();
-
     lock   = (PFN_VBLock)(*(void***)vb)[11];
     unlock = (PFN_VBUnlock)(*(void***)vb)[12];
     if (lock(vb, 0, 0, &vdata, 0x10) != S_OK || !vdata) {
@@ -5893,30 +5912,36 @@ static HRESULT AerDrawIndexed(void* dev, DWORD prim, UINT minIdx, UINT numV,
         return E_FAIL;
     }
     vdata += (SIZE_T)minIdx * stride;
-
-    for (i = 0; i < numV; ++i) {
-        const BYTE* src = vdata + (SIZE_T)i * stride;
-        BYTE* dst = g_aerVerts + (SIZE_T)i * stride;
-        float x;
-        memcpy(dst, src, stride);
-        x = *(const float*)(src + 0);
-        if (stride == 20) {
-            /* World vertices are camera-space XYZ + TEX1, so the eye shift is
-               a plain lateral translation; D3D applies the fixed projection. */
-            *(float*)(dst + 0) = x - d;
-        } else {
-            /* XYZRHW: pre-transformed. Move the vertex in screen space by the
-               parallax for its depth. */
-            float z = *(const float*)(src + 8);
-            zndc = z;
-            if (zndc < 0.0f) zndc = 0.0f;
-            if (zndc > 0.9999f) zndc = 0.9999f;
-            zcam = B / (A - zndc);
-            if (zcam < 0.05f) zcam = 0.05f;
-            dx = -d * fpx / zcam;
-            if (dx >  60.0f) dx =  60.0f;
-            if (dx < -60.0f) dx = -60.0f;
-            *(float*)(dst + 0) = x + dx;
+    {
+        const BOOL aer = (g_stereoMode == STEREO_AER && InGameplay());
+        float off[3];
+        CameraOffset(off);
+        for (i = 0; i < numV; ++i) {
+            const BYTE* src = vdata + (SIZE_T)i * stride;
+            BYTE* dst = g_aerVerts + (SIZE_T)i * stride;
+            float x;
+            memcpy(dst, src, stride);
+            x = *(const float*)(src + 0);
+            if (stride == 20) {
+                /* Camera-space XYZ + TEX1: move the world opposite the eye. */
+                *(float*)(dst + 0) = x - off[0] - (aer ? d : 0.0f);
+                *(float*)(dst + 4) = *(const float*)(src + 4) - off[1];
+                *(float*)(dst + 8) = *(const float*)(src + 8) - off[2];
+            } else if (aer) {
+                /* XYZRHW: pre-transformed. Move the vertex in screen space by
+                   the parallax for its depth. The HMD offset is not applied
+                   here; this path is HUD/pre-transformed geometry. */
+                float z = *(const float*)(src + 8);
+                zndc = z;
+                if (zndc < 0.0f) zndc = 0.0f;
+                if (zndc > 0.9999f) zndc = 0.9999f;
+                zcam = B / (A - zndc);
+                if (zcam < 0.05f) zcam = 0.05f;
+                dx = -d * fpx / zcam;
+                if (dx >  60.0f) dx =  60.0f;
+                if (dx < -60.0f) dx = -60.0f;
+                *(float*)(dst + 0) = x + dx;
+            }
         }
     }
     unlock(vb);
@@ -6017,10 +6042,17 @@ static HRESULT __stdcall hkDrawIndexedPrim(void* dev, DWORD prim, UINT minIdx,
             DumpWorldZ(dev, minIdx, numV);
         --g_dumpDraws;
     }
+    /* The game's spinning 3D weapon-slot HUD is drawn after the capture and
+       tail record above. Skip only the submission: the mesh has already been
+       copied for the VR hand, and the tail still lets the next frame select
+       the primary weapon's vertex buffer. Toggle the custom HUD off (K) to
+       bring the game's own slots back for comparison. */
+    if (g_compositeActive && g_customHud && InGameplay() && g_hudModelPass)
+        return 0;
     /* AER: reproject the pre-transformed world into the current eye. The
        three primCount=28/numV=34 draws are the game's 3D HUD weapon slots and
        stay screen-fixed, like a view model. */
-    if (g_stereoMode == STEREO_AER && InGameplay() && !g_hudModelPass) {
+    if (InGameplay() && !g_hudModelPass && RenderOffsetActive()) {
         if (AerDrawIndexed(dev, prim, minIdx, numV, startIdx, primCount) == S_OK)
             return S_OK;
     }

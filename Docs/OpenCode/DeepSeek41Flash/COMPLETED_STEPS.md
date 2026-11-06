@@ -4,8 +4,8 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 09:49:19`, SHA-256
-`53b831374c82e436a037d2e8f591e605bac9dc357d29e2df5b5c89be482e0bad`.
+**Last build covered:** `built Nov  6 2026 10:55:35`, SHA-256
+`119074900cf3c1dda3ec4ac9ccb101b5c13ae9944b208fe194a8271cdecd15ae`.
 
 ---
 
@@ -46,6 +46,25 @@ pass; `BUG_FIXES.md` will be created from that run.
   stay fixed too. `roll` (default on) and `roll_sign` (default `-1`) in
   `config.txt`; `/` toggles roll live. Black corners at the sprite corners are
   accepted because the HMD lenses hide them.
+- **Render-side 6DOF and eye height:** the game re-clamps its own camera Y
+  every frame, so the HMD translation is **not written to the game's
+  position**. Instead `CameraOffset()` rotates the head's `headP` into the
+  camera frame and the world vertex copies are shifted opposite the eye in
+  `AerDrawPrimitive`/`AerDrawIndexed`; hands, gun and laser stay in the head
+  frame. The offset is 1:1 in **metres** on both the indexed (stride 20) and
+  non-indexed (stride 20/24) world paths - the old `*100` centimetre
+  assumption on the non-indexed path was the cause of the view flying through
+  floors and ceilings and is gone. HMD Y is clamped to **±1 m** (far more than
+  a sit/stand change needs); `eye_height` is a separate manual float offset
+  (default `0`, clamped ±5) and `pos_scale` is a gain on the tracked
+  translation (default `1.0`, 0..2). A **right-stick click** calls
+  `SteerRecentre()`, so the current HMD height becomes the flat game player
+  height (`0`). Head yaw is still written to both camera clusters, so
+  stick-forward follows the head. This is visual-only and does **not** add
+  collision: standing or leaning into geometry can still clip, and the
+  intended mitigation is lowering `pos_scale`, not solving world collisions.
+  Verified with a ±1 m sine feed (log `dy` tracks `hmdY` 1:1, clamped at
+  ±1.000) and a constant 0.8 m re-zero (0.000 -> 0.800 -> click -> 0.000).
 
 ## 3. HUD
 
@@ -57,8 +76,11 @@ pass; `BUG_FIXES.md` will be created from that run.
 - Title, briefing, menus, objective, death and victory keep the game's own 2D
   UI (`MODE_VR 0`). The custom HUD is **gameplay-only**, so the death
   summary/stats screen is not covered by it.
-- 3D weapon-slot models are left untouched (where to place them is still an
-  open decision, see `NEXT_STEPS.md`).
+- The game's spinning **3D weapon-slot HUD is hidden** while the custom text
+  HUD is active; the text HUD is the only slot display. The capture and tail
+  recording still run before the draw is skipped, so the VR hand's cloned
+  weapon model still loads on spawn, swap, drop and pickup. `K` restores the
+  game's slots for comparison.
 
 ## 4. Hands and weapons
 
@@ -93,7 +115,11 @@ pass; `BUG_FIXES.md` will be created from that run.
   B reload; A switch; X drop; Y zoom (toggle). Left-handed mode swaps only
   shoot and fire mode.
 - **Manual PC mode (`0`):** default two-hand pose, cursor centred once, right
-  hand driven by `E`/`Q` + numpad; incoming 6DOF ignored.
+  hand driven by `E`/`Q` + numpad; incoming 6DOF ignored. **Every debug key is
+  locked behind `0`:** while VR input is active, only `0` is accepted, and the
+  probe/HUD/window/dump keys do nothing until manual mode is on. WinlatorXR
+  does not map `0` by default, so a device session cannot trigger them by
+  accident.
 - **Focus boundary:** while the game window is unfocused, **physical desktop
   input** is muted (keyboard, mouse, debug keys) but **XrApi/runtime input
   still arrives**, because the UDP Tester normally holds focus.
@@ -127,22 +153,23 @@ pass; `BUG_FIXES.md` will be created from that run.
 - **`tools/start-level.ps1`** replays the title -> mission -> briefing clicks;
   `record_clicks.py` records new sequences by process id.
 - Weapon-hunt keys `J/K/N`, draw dump `V`, HUD comparison `K`, window `F`,
-  target res `M`, verbose diagnostics on demand.
+  target res `M`, verbose diagnostics on demand. All are **locked behind `0`**
+  while VR input is active.
 
 ## 8. Experimental stereo â€” AER
 
 - **AER is implemented and desktop-verified.** `stereo = aer` opts in;
   `mono` is the shipping default.
-- The camera is CPU-baked, so AER works by **reprojecting each draw**: the
-  non-indexed world path (centimetres) shifts x by `-d*100`, the indexed model
-  path (metres) by `-d`; the hand/laser pass shifts its view. Shared vertex
-  buffers are copied, never modified.
+- The camera is CPU-baked, so AER works by **reprojecting each draw**: both the
+  non-indexed world path and the indexed model path shift x by `-d` in metres.
+  (Both are camera-space metres: the projection is near 0.1 / far 80 and the
+  player's own Y is ~1.9. The earlier non-indexed `-d*100` was a centimetre
+  assumption and is removed.) Shared vertex buffers are copied, never modified.
 - One eye per presented frame; `MODE_3D = 2`; sync pixel blue 255 = right.
   The eye flips after `Present`, so image, flag and log agree.
 - Desktop evidence: pair grabs `eye=left`/`eye=right`; full-frame MAD 8.07
   between eyes vs 0.033 for mono; depth-dependent 5-12 px shift at 1920.
-- **Still open:** device eye sign / centimetre scale, and SBS. See
-  `NEXT_STEPS.md`.
+- **Still open:** device eye sign, and SBS. See `NEXT_STEPS.md`.
 
 ---
 
