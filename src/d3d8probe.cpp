@@ -90,6 +90,8 @@ static void HandViewPose(const float* hp, const float* hf, const float* hu,
                          float vp[3], float vf[3], float vu[3], float vr[3]);
 static void HandTwoHandedAim(const float offP[3], const float vp[3],
                              float vf[3], float vu[3], float vr[3]);
+static void HandCross(const float a[3], const float b[3], float o[3]);
+static void HandNorm(float a[3]);
 static UINT PrimVertexCount(DWORD prim, UINT primCount);
 static BOOL SafeWrite(UINT_PTR a, float v);
 static UINT_PTR WatchAddr(int i);
@@ -1184,6 +1186,13 @@ static long  g_hapShots     = 0;
    Both hands are on the weapon, so a shot buzzes both controllers; the pose
    work will hang the off hand off the same state. */
 static BOOL  g_twoHanded    = FALSE;
+
+/* Head roll. The game camera has yaw and pitch only, so roll is applied as a
+   rotation of the world projection (camera roll). The 2D HUD and the
+   hand/gun pass keep the unrolled projection, so they stay correct relative
+   to the head. `roll_sign` flips the direction on device if needed. */
+static BOOL  g_roll         = TRUE;
+static float g_rollSign     = 1.0f;
 
 /* Stereo experiment. 0 = mono (shipping), 1 = SBS, 2 = AER. AER alternates
    one eye per presented frame and offsets the view by +/- IPD/2 along the
@@ -4528,6 +4537,10 @@ static void HandLoadConfig(void)
             fputs("verbose_debug = false\n", f);
             fputs("# stereo: mono (default), sbs, or aer (experimental)\n", f);
             fputs("stereo = mono\n", f);
+            fputs("# roll: rotate the world with head tilt (HUD stays fixed).\n", f);
+            fputs("# roll_sign: flip if the horizon tilts the wrong way on device.\n", f);
+            fputs("roll = true\n", f);
+            fputs("roll_sign = 1\n", f);
             fclose(f);
             Log("HAND     created %s with defaults", path);
         } else {
@@ -4542,6 +4555,8 @@ static void HandLoadConfig(void)
         g_twoHanded = FALSE;
         g_verboseDebug = FALSE;
         g_stereoMode = STEREO_MONO;
+        g_roll = TRUE;
+        g_rollSign = 1.0f;
         return;
     }
 
@@ -4588,6 +4603,13 @@ static void HandLoadConfig(void)
             if (!_stricmp(val, "sbs") || !strcmp(val, "1"))      g_stereoMode = STEREO_SBS;
             else if (!_stricmp(val, "aer") || !strcmp(val, "2")) g_stereoMode = STEREO_AER;
             else                                                 g_stereoMode = STEREO_MONO;
+        } else if (!_stricmp(key, "roll")) {
+            g_roll = (!_stricmp(val, "true") || !_stricmp(val, "yes") ||
+                      !strcmp(val, "1")) ? TRUE : FALSE;
+        } else if (!_stricmp(key, "roll_sign")) {
+            g_rollSign = (float)atof(val);
+            if (g_rollSign >= 0.0f) g_rollSign = 1.0f;
+            else                    g_rollSign = -1.0f;
         }
     }
     fclose(f);
@@ -4606,6 +4628,7 @@ static void HandLoadConfig(void)
     Log("STEREO   %s", g_stereoMode == STEREO_SBS ? "SBS (experimental)"
                       : g_stereoMode == STEREO_AER ? "AER (experimental)"
                                                    : "mono");
+    Log("ROLL     %s  sign %+.0f", g_roll ? "on" : "off", g_rollSign);
 }
 
 static void EnsureInit(void)
@@ -4820,6 +4843,46 @@ static float EyeIpd(void)
     const float v = g_pose.ipd;
     if (v > 0.01f && v < 0.12f) return v;
     return 0.064f;
+}
+
+/* The head's roll about its own forward axis, in radians. The no-roll up is
+   world up projected off the forward vector; the sign of the angle between
+   the actual right and that reference is the roll. */
+static float HeadRoll(void)
+{
+    float f[3], u[3], u0[3], r[3], r0[3], d, n;
+
+    if (!g_posed || !g_pose.valid) return 0.0f;
+    f[0] = g_pose.headF[0]; f[1] = g_pose.headF[1]; f[2] = g_pose.headF[2];
+    u[0] = g_pose.headU[0]; u[1] = g_pose.headU[1]; u[2] = g_pose.headU[2];
+
+    d = f[1];                              /* dot(forward, world up) */
+    u0[0] = -f[0]*d; u0[1] = 1.0f - f[1]*d; u0[2] = -f[2]*d;
+    n = sqrtf(u0[0]*u0[0] + u0[1]*u0[1] + u0[2]*u0[2]);
+    if (n < 0.001f) return 0.0f;
+    u0[0] /= n; u0[1] /= n; u0[2] /= n;
+
+    n = sqrtf(u[0]*u[0] + u[1]*u[1] + u[2]*u[2]);
+    if (n < 0.001f) return 0.0f;
+    u[0] /= n; u[1] /= n; u[2] /= n;
+
+    HandCross(u, f, r);
+    HandNorm(r);
+    HandCross(u0, f, r0);
+    HandNorm(r0);
+
+    return atan2f(r[0]*u0[0] + r[1]*u0[1] + r[2]*u0[2],
+                  r[0]*r0[0] + r[1]*r0[1] + r[2]*r0[2]);
+}
+
+/* The angle the presented game sprite is rolled by. The player's head roll is
+   counter-rotated on the sprite, so the world stays world-upright. The hand
+   pass is counter-rotated by the opposite amount (see DrawHandAndLaserWorld),
+   so the hands keep their tracked orientation. */
+static float SpriteRoll(void)
+{
+    if (!g_roll || !InGameplay()) return 0.0f;
+    return -g_rollSign * HeadRoll();
 }
 
 static HRESULT __stdcall hkSetTransform(void* dev, DWORD type, const D3DMATRIX8* m)
@@ -6141,6 +6204,31 @@ static void CompDrawQuad(void* dev, float x0, float y0, float x1, float y1,
     o_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, v, sizeof(CompVert));
 }
 
+/* The game sprite, rolled as a 2D quad in Present. No scaling: the HMD lenses
+   hide the black corners that the rotation exposes. */
+static void CompDrawQuadRot(void* dev, float cx, float cy, float hw, float hh,
+                            float angle, float u0, float v0, float u1, float v1)
+{
+    CompVert v[4];
+    const float sx[4] = { -1.0f,  1.0f, -1.0f,  1.0f };
+    const float sy[4] = { -1.0f, -1.0f,  1.0f,  1.0f };
+    const float uu[4] = { u0, u1, u0, u1 };
+    const float vv[4] = { v0, v0, v1, v1 };
+    const float c = cosf(angle), s = sinf(angle);
+    int i;
+
+    for (i = 0; i < 4; ++i) {
+        const float px = sx[i] * hw, py = sy[i] * hh;
+        v[i].x = cx + px*c - py*s;
+        v[i].y = cy + px*s + py*c;
+        v[i].z = 0.0f; v[i].rhw = 1.0f;
+        v[i].color = 0xFFFFFFFF;
+        v[i].u = uu[i]; v[i].v = vv[i];
+    }
+    o_SetVertexShader(dev, 0x0144);
+    o_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, v, sizeof(CompVert));
+}
+
 static float HandDot(const float a[3], const float b[3])
 {
     return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
@@ -6677,6 +6765,17 @@ static void DrawHandAndLaserWorld(void* dev)
        eye shift becomes a translation of the view. */
     if (g_stereoMode == STEREO_AER && InGameplay())
         view.m[3][0] = (g_eyeRight ? -0.5f : 0.5f) * EyeIpd();
+    /* The presented game sprite is rotated by SpriteRoll(); roll the hand/gun
+       geometry the opposite way so it keeps its tracked orientation instead
+       of being rolled twice. */
+    {
+        const float ha = -SpriteRoll();
+        if (fabsf(ha) > 0.0005f) {
+            const float c = cosf(ha), s = sinf(ha);
+            view.m[0][0] = c;  view.m[0][1] = s;
+            view.m[1][0] = -s; view.m[1][1] = c;
+        }
+    }
     /* World must stay identity: no leftover model matrix. Do not copy the
        translated view into it or the eye shift is applied twice. */
     ZeroMemory(&world, sizeof(world));
@@ -6966,9 +7065,21 @@ static void CompositeFrame(void* dev)
 
     o_SetTexture(dev, 0, g_gameRT);
     o_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, 0);
-    CompDrawQuad(dev, (float)gx, (float)gy,
-                 (float)(gx + gw), (float)(gy + gh),
-                 0.0f, 0.0f, 1.0f, 1.0f);
+    {
+        /* Roll the presented game sprite with the head. The HUD below is
+           drawn afterwards in screen space, so it stays fixed like part of the
+           VR camera. Black corners are acceptable; the lenses hide them. */
+        const float ra = SpriteRoll();
+        if (fabsf(ra) > 0.0005f)
+            CompDrawQuadRot(dev, (float)gx + (float)gw * 0.5f,
+                            (float)gy + (float)gh * 0.5f,
+                            (float)gw * 0.5f, (float)gh * 0.5f,
+                            ra, 0.0f, 0.0f, 1.0f, 1.0f);
+        else
+            CompDrawQuad(dev, (float)gx, (float)gy,
+                         (float)(gx + gw), (float)(gy + gh),
+                         0.0f, 0.0f, 1.0f, 1.0f);
+    }
 
     if (g_customHud && HudShouldDraw() && UpdateHudTexture(dev)) {
         hw = (int)g_bbW / 3;
@@ -7244,7 +7355,10 @@ static HRESULT __stdcall hkBeginScene(void* dev)
     /* The 640x480 target is bound persistently outside Present, so draws the
        title screen makes before BeginScene land in it too. Do not clear here:
        a pre-scene title background must survive. */
-    return o_BeginScene(dev);
+    {
+        HRESULT hr = o_BeginScene(dev);
+        return hr;
+    }
 }
 
 static HRESULT __stdcall hkEndScene(void* dev)

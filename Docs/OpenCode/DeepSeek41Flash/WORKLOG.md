@@ -918,3 +918,32 @@ clear look, `SamplePoseData.txt` is copied and the two hand `z` values are
 made 0.10 m more negative (OpenXR forward is -Z). The mod's fallback pose is
 unchanged; editing it would change shipping behaviour for a test preference.
 The scratch feeder for this is `%TEMP%\opencode\xr_feeder_forward.py`.
+
+## 2026-11-06 - head roll via the presented 2D sprite
+
+The world is CPU pre-transformed and submitted already projected, so rolling
+the D3D projection did nothing to it: only the hand geometry (which is in head
+space) moved. The fix is the owner's original idea - **rotate the presented
+640x480 sprite** in `Present`, then counter-roll the hand/gun/laser pass.
+
+- `HeadRoll()` derives the roll from the head basis (no-roll up = world up
+  projected off the forward vector).
+- `CompDrawQuadRot` draws the game texture as a rotated 2D quad around the
+  centre. **No scaling**: black corners are accepted because the HMD lenses
+  hide them.
+- The hand/gun/laser pass gets a view rotation of the opposite angle, so it
+  keeps its tracked orientation instead of rolling twice.
+- The custom HUD is drawn after the sprite and stays fixed; the sync pixel is
+  fixed at the top-left.
+- Config: `roll = true`, `roll_sign = 1` (flip on device if the horizon tilts
+  the wrong way).
+
+Verified on the PC with an oscillating +/-25 degree head-roll feeder: the world
+tilts with the head, the HUD panels stay upright, and the hand/gun stays at its
+tracked orientation. The corners of the rotated sprite go black, as accepted.
+
+Design note: the earlier projection-roll attempt was removed. `roll_sign` is
+the one-line device correction.
+
+Build `built Nov  6 2026 07:01:29`, SHA-256
+`3186c8e1a69e0e98a83eacc120f70ec0b90b891641a786506ebc334e571f0c5d`.

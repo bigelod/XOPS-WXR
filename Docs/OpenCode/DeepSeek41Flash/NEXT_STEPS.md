@@ -1,11 +1,11 @@
-# XOPS-WXR — NEXT STEPS
+﻿# XOPS-WXR â€” NEXT STEPS
 
 **Only work that is still open lives here.** Implemented features are in
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 06:41:06`, SHA-256
-`74931a59f64cc9a559c1e49d14261881eba296c010832f174402cd76f82a057a`.
+**Last build:** `built Nov  6 2026 07:01:29`, SHA-256
+`3186c8e1a69e0e98a83eacc120f70ec0b90b891641a786506ebc334e571f0c5d`.
 
 ---
 
@@ -55,6 +55,9 @@ outstanding:
   A/B/X/Y and arrow blocking, `MODE_VR` screens, both hands and their angles,
   laser and hand-aim, two-handed aim, weapon clone across swaps/drops/pickups
   and textures, haptics feel, tracking latency/judder.
+- **Roll:** tilt the head and confirm the world tilts the correct way and the
+  HUD stays fixed. If it is inverted, set `roll_sign = -1`; if the black
+  corners are visible in the lenses, note it for the stereo pass.
 - After this run, create `BUG_FIXES.md` from the device findings.
 
 ## 6. Stereo
@@ -88,8 +91,6 @@ mod from the diagnostic hooks so a release build carries no probe machinery.
 
 - **Eye height:** the game re-clamps Y every frame; try writing Y at ENDSCENE
   before hunting a separate field.
-- **Roll:** rotate the rendered frame (the frame is not lockable; the plan was
-  `CopyRects` to an off-screen surface, rotate, draw).
 - **Floating zoom scope** (HWXR Halo style) instead of the simple zoom toggle.
 - **Removing the probe's debug key set** from release builds (covered by 8).
 

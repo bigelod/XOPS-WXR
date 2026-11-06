@@ -1,11 +1,11 @@
-# XOPS-WXR — COMPLETED STEPS
+﻿# XOPS-WXR â€” COMPLETED STEPS
 
 **Everything in this file is implemented.** Unless a line says otherwise it is
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 06:41:06`, SHA-256
-`74931a59f64cc9a559c1e49d14261881eba296c010832f174402cd76f82a057a`.
+**Last build covered:** `built Nov  6 2026 07:01:29`, SHA-256
+`3186c8e1a69e0e98a83eacc120f70ec0b90b891641a786506ebc334e571f0c5d`.
 
 ---
 
@@ -39,6 +39,12 @@ pass; `BUG_FIXES.md` will be created from that run.
   move the real cursor and the game's look delta stays zero.
 - **Hand aim:** while firing, the game's shot is aimed at the laser endpoint
   and the view is restored before the world is drawn.
+- **Head roll:** the presented 640x480 game sprite is rotated as a 2D quad in
+  `Present` by the head roll. The hand/gun/laser pass is counter-rolled so it
+  keeps its tracked orientation, and the HUD and sync pixel are drawn
+  afterwards and stay fixed. `roll` (default on) and `roll_sign` in
+  `config.txt`; black corners at the sprite corners are accepted because the
+  HMD lenses hide them.
 
 ## 3. HUD
 
@@ -58,7 +64,7 @@ pass; `BUG_FIXES.md` will be created from that run.
 - Hand model: compact dark **palm plate**, four **short chunky finger slabs**
   and a thick **thumb angled outward** from its own side; all glove-textured
   with black outlines. Shape follows the SixDOFinator calibration reference.
-- **Quest 3 hand roll is the default:** `hand_flip = false` applies the 180°
+- **Quest 3 hand roll is the default:** `hand_flip = false` applies the 180Â°
   roll correction; `hand_flip = true` recreates the old roll for non-Quest-3
   devices.
 - **Dominant-hand laser**, depth-tested; a continuous strip that walls cut off.
@@ -121,7 +127,7 @@ pass; `BUG_FIXES.md` will be created from that run.
 - Weapon-hunt keys `J/K/N`, draw dump `V`, HUD comparison `K`, window `F`,
   target res `M`, verbose diagnostics on demand.
 
-## 8. Experimental stereo — AER
+## 8. Experimental stereo â€” AER
 
 - **AER is implemented and desktop-verified.** `stereo = aer` opts in;
   `mono` is the shipping default.

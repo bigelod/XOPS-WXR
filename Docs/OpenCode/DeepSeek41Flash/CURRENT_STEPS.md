@@ -5,8 +5,8 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 06:41:06`, SHA-256
-`74931a59f64cc9a559c1e49d14261881eba296c010832f174402cd76f82a057a`,
+**Current build:** `built Nov  6 2026 07:01:29`, SHA-256
+`3186c8e1a69e0e98a83eacc120f70ec0b90b891641a786506ebc334e571f0c5d`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---
@@ -32,7 +32,9 @@ default. Device testing is the next real milestone.
    The target stays bound outside `Present`, so title/demo draws between
    scenes also land in it.
 3. `Present` binds the real back buffer, draws the 640x480 texture at native
-   4:3, then the GDI-rendered HUD/panel textures and the sync square.
+   4:3 (rotated as a 2D sprite by the head roll), then the GDI-rendered
+   HUD/panel textures and the sync square. The HUD and sync pixel are drawn
+   after the sprite, so they stay fixed.
 4. The sync square is 10x10 at `(0,0)`: red echoes `HMD_SYNC`; blue is the AER
    eye flag (0 outside AER).
 
@@ -59,6 +61,10 @@ native frame fills it with no bars or crop.
 - **Two-handed aim:** while the left grip is held, the dominant hand's basis
   is rebuilt to point at the off hand (`HandTwoHandedAim`); the gun, laser and
   hand-aim shot all use it. Haptics buzz both hands.
+- **Roll:** `HeadRoll()` gives the head's roll; the game sprite is rotated by
+  it in `Present` (`CompDrawQuadRot`), and the hand/gun/laser pass is rotated
+  the opposite way so it does not roll twice. The 2D HUD and sync pixel are
+  fixed. No scaling; black sprite corners are accepted.
 - **AER stereo:** the engine CPU-bakes the world and submits it, so eye
   separation is applied by copying each draw's vertices and shifting x
   (`AerDrawPrimitive` in cm, `AerDrawIndexed` in m), one eye per frame.
@@ -115,6 +121,8 @@ haptics_hand = dominant     # dominant | both | left | right
 haptic_frames = 2           # 1..5
 verbose_debug = true        # this test PC; ship with false
 stereo = mono               # experimental: aer
+roll = true                 # rotate the world sprite with head tilt
+roll_sign = 1               # -1 if the device horizon tilts the wrong way
 ```
 
 `xops_wxr_steer.ini` still carries the settled steering facts (`yawSign`,
