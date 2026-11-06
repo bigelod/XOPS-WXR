@@ -4,8 +4,8 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 07:13:13`, SHA-256
-`037e219d977ff1b556ae256e1d567e46bb3367f19b209797b1547f707d083f11`.
+**Last build:** `built Nov  6 2026 09:12:29`, SHA-256
+`2cc5662fcf8d04f93585b0e0e6e739dfa25d3ffaf3ba265b3edf21ec3e9cb179`.
 
 ---
 

@@ -6422,18 +6422,29 @@ static void HandDrawBeam3D(void* dev, const float p0[3], const float p1[3],
     HandDrawQuad3D(dev, corners, u, v, color, g_whiteTex);
 }
 
-/* Build a hand's view-space basis. Positions/orientations come from XrApi,
-   already relative to the head; transform by the head basis. */
+/* Build a hand's view-space basis. Positions/orientations come from XrApi.
+   The head basis used here has the head ROLL removed: the hands are part of
+   the VR camera, so they must not roll with the world. Yaw and pitch still
+   place them correctly; the presented sprite handles the world roll. */
 static void HandViewPose(const float* hp, const float* hf, const float* hu,
                          BOOL isRight, BOOL flip,
                          float vp[3], float vf[3], float vu[3], float vr[3])
 {
-    float headR[3], rel[3];
+    float headR[3], headU[3], rel[3];
+    float up0[3] = { 0.0f, 1.0f, 0.0f };
     BOOL noPos = (HandLen(hp) < 0.01f);
     BOOL noDir = (HandLen(hf) < 0.01f);
-    float d;
+    float d, n;
 
-    HandCross(g_pose.headU, g_pose.headF, headR);
+    /* No-roll up: world up projected off the head forward vector. */
+    d = g_pose.headF[1];
+    headU[0] = -g_pose.headF[0]*d;
+    headU[1] = 1.0f - g_pose.headF[1]*d;
+    headU[2] = -g_pose.headF[2]*d;
+    n = HandLen(headU);
+    if (n > 0.001f) { headU[0] /= n; headU[1] /= n; headU[2] /= n; }
+    else            { headU[0] = up0[0]; headU[1] = up0[1]; headU[2] = up0[2]; }
+    HandCross(headU, g_pose.headF, headR);
     HandNorm(headR);
 
     if (noPos) {
@@ -6449,7 +6460,7 @@ static void HandViewPose(const float* hp, const float* hf, const float* hu,
         rel[1] = hp[1] - g_pose.headP[1];
         rel[2] = hp[2] - g_pose.headP[2];
         vp[0] = HandDot(rel, headR);
-        vp[1] = HandDot(rel, g_pose.headU);
+        vp[1] = HandDot(rel, headU);
         vp[2] = HandDot(rel, g_pose.headF);
     }
 
@@ -6458,10 +6469,10 @@ static void HandViewPose(const float* hp, const float* hf, const float* hu,
         vu[0] = 0.0f; vu[1] = 1.0f; vu[2] = 0.0f;
     } else {
         vf[0] = HandDot(hf, headR);
-        vf[1] = HandDot(hf, g_pose.headU);
+        vf[1] = HandDot(hf, headU);
         vf[2] = HandDot(hf, g_pose.headF);
         vu[0] = HandDot(hu, headR);
-        vu[1] = HandDot(hu, g_pose.headU);
+        vu[1] = HandDot(hu, headU);
         vu[2] = HandDot(hu, g_pose.headF);
         HandNorm(vf);
         if (HandLen(vu) < 0.1f) {

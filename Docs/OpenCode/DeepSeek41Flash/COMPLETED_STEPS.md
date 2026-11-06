@@ -4,8 +4,8 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 07:13:13`, SHA-256
-`037e219d977ff1b556ae256e1d567e46bb3367f19b209797b1547f707d083f11`.
+**Last build covered:** `built Nov  6 2026 09:12:29`, SHA-256
+`2cc5662fcf8d04f93585b0e0e6e739dfa25d3ffaf3ba265b3edf21ec3e9cb179`.
 
 ---
 
@@ -40,11 +40,12 @@ pass; `BUG_FIXES.md` will be created from that run.
 - **Hand aim:** while firing, the game's shot is aimed at the laser endpoint
   and the view is restored before the world is drawn.
 - **Head roll:** the presented 640x480 game sprite is rotated as a 2D quad in
-  `Present` by the head roll. The hand/gun/laser pass is counter-rolled so it
-  keeps its tracked orientation, and the HUD and sync pixel are drawn
-  afterwards and stay fixed. `roll` (default on) and `roll_sign` (default
-  `-1`) in `config.txt`; `/` toggles roll live. Black corners at the sprite
-  corners are accepted because the HMD lenses hide them.
+  `Present` by the head roll. The hands/gun/laser are built on a **no-roll head
+  basis** (yaw/pitch only), so they behave like part of the VR camera and stay
+  fixed while the world rolls; the HUD and sync pixel are drawn afterwards and
+  stay fixed too. `roll` (default on) and `roll_sign` (default `-1`) in
+  `config.txt`; `/` toggles roll live. Black corners at the sprite corners are
+  accepted because the HMD lenses hide them.
 
 ## 3. HUD
 

@@ -944,26 +944,29 @@ Verified on the PC in `building.ext` with a static +25 degree head-roll pose
 and the `/` toggle, same camera and hands:
 
 - World sprite: clearly rolled by 25 degrees with black corners.
-- HUD: upright, unchanged.
-- Hand/gun pass: the **red laser is pixel-identical** with roll on and off
-  (centroid 1057,805 vs 1058,806; axis 70.0 degrees both; same endpoints), so
-  the counter-rotation is exact. The game's own bottom-right weapon-slot
-  models are inside the sprite and do roll with the world, which is what made
-  it look as if the hands were moving.
 - HUD: the white HUD text is **pixel-identical** in both roll states (336
   bright pixels, centroid 696.8,597.0 exactly), confirming it is drawn after
   the sprite and stays fixed.
-- A mirrored **-25 degree** head roll produces the symmetric sprite angle
-  (+25 with the default `roll_sign = -1`) and the same fixed hand/laser axis,
-  so the sign is consistent.
-- **Independent check of the hand frame:** with the head level and the sprite
-  off, the laser axis is 45.0 degrees at (1159,740). With +25 degrees of head
-  roll and the sprite still off, it is 70.0 degrees at (1058,806) - exactly a
-  +25 degree rotation about the screen centre. The hands therefore naturally
-  rotate +25 degrees with the head, and the sprite with `roll_sign = -1`
-  rotates +25 degrees too: world and hands agree. The hand counter (camera
-  +25, screen -25) cancels the sprite, keeping the hands at their tracked
-  +25 degrees.
+- A mirrored **-25 degree** head roll produces the symmetric sprite angle,
+  so `roll_sign = -1` is consistent.
 
-Build `built Nov  6 2026 07:13:13`, SHA-256
-`037e219d977ff1b556ae256e1d567e46bb3367f19b209797b1547f707d083f11`.
+**The hand fix.** The first version built the hands in the full head frame, so
+they naturally rotated +25 degrees with the head - i.e. they moved *with* the
+world, which the owner rejected. The measurement below showed it: with the
+head level and sprite off the laser axis was 45.0 degrees at (1159,740); with
++25 degrees head roll it was 70.0 degrees at (1058,806), exactly a +25 degree
+rotation about the screen centre.
+
+Final design: `HandViewPose` now uses a **no-roll head basis** (yaw and pitch
+only; up = world up projected off the head forward). The hands/gun/laser are
+therefore part of the VR camera and do not roll with the world. The existing
+hand-pass view rotation cancels the sprite on top, and the HUD is drawn after
+the sprite. The result with the SixDOFinator sample hands and a smooth +/-25
+degree sine roll (8 s period) is: world rocks, hands and HUD stay fixed. The
+owner confirmed it was fixed.
+
+- `roll_sign` default is **-1** (the original +1 direction was inverted).
+  `/` toggles roll live for comparison.
+
+Build `built Nov  6 2026 09:12:29`, SHA-256
+`2cc5662fcf8d04f93585b0e0e6e739dfa25d3ffaf3ba265b3edf21ec3e9cb179`.

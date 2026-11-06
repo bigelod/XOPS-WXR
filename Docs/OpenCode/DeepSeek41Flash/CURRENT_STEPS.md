@@ -5,8 +5,8 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 07:13:13`, SHA-256
-`037e219d977ff1b556ae256e1d567e46bb3367f19b209797b1547f707d083f11`,
+**Current build:** `built Nov  6 2026 09:12:29`, SHA-256
+`2cc5662fcf8d04f93585b0e0e6e739dfa25d3ffaf3ba265b3edf21ec3e9cb179`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---
@@ -47,9 +47,11 @@ native frame fills it with no bars or crop.
 - The camera lives in the game's own globals; `SteerTick` composes head pose,
   recentre and right-stick yaw. Cluster A is the render copy, cluster B is
   what movement reads; both are written.
-- Hand pose is converted from XrApi into view space by `HandViewPose`, then
-  drawn as boxes in the game's 3D pass. The hand is a palm plate with four
-  chunky finger slabs and an angled thumb.
+- Hand pose is converted from XrApi into view space by `HandViewPose`, using a
+  **no-roll head basis** (yaw/pitch only), then drawn as boxes in the game's
+  3D pass. The hand is a palm plate with four chunky finger slabs and an
+  angled thumb. Because the basis has no head roll, the hands/gun behave like
+  part of the VR camera.
 - **Weapon capture:** the inventory weapon arrives as a group of indexed
   draws sharing one vertex buffer. The primary weapon is the last contiguous
   VB group; each draw is one submesh. Parts are copied (verts + indices +
@@ -62,9 +64,10 @@ native frame fills it with no bars or crop.
   is rebuilt to point at the off hand (`HandTwoHandedAim`); the gun, laser and
   hand-aim shot all use it. Haptics buzz both hands.
 - **Roll:** `HeadRoll()` gives the head's roll; the game sprite is rotated by
-  it in `Present` (`CompDrawQuadRot`), and the hand/gun/laser pass is rotated
-  the opposite way so it does not roll twice. The 2D HUD and sync pixel are
-  fixed. No scaling; black sprite corners are accepted.
+  it in `Present` (`CompDrawQuadRot`). The hand/gun/laser pass is built on the
+  no-roll head basis and also gets the opposite view rotation, so it stays
+  fixed relative to the VR camera while the world rolls. The 2D HUD and sync
+  pixel are fixed. No scaling; black sprite corners are accepted.
 - **AER stereo:** the engine CPU-bakes the world and submits it, so eye
   separation is applied by copying each draw's vertices and shifting x
   (`AerDrawPrimitive` in cm, `AerDrawIndexed` in m), one eye per frame.
