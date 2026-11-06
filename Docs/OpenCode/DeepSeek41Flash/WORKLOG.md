@@ -1135,6 +1135,34 @@ Before/after, same ±1 m head sine with the hands held fixed:
 | pre-fix | `270,728` -> `875,-480` -> `1130,2800` -> `245,-326` (flying) |
 | post-fix | `522..625, 421..678` (bounded, correct close-range parallax) |
 
-Build: `built Nov  6 2026 12:49:34`, SHA-256
-`076f3851b880b626c9374d3560024b1300802ce19084c7672c404281284b920c`,
-deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
+This matched-parallax version was an intermediate step. The owner then
+specified the final rule: the hands live in the default/recentre head-height
+frame and take only the head's orientation, not its live translation.
+
+### Final hand rule and `pos_scale` in Options
+
+- `HandViewPose` now uses the **raw** hand position (`rel = hp`) rotated by
+  the no-roll head basis. No `headP` and no `eye_height` subtraction. So
+  `0,0,0` is the default HMD/head height; a controller below it is at hand
+  height; moving the HMD moves the view/world, not the hands.
+- `pos_scale` default is back to **1.0** (1:1), range 0..2.
+- The launcher's Options dialog has an **HMD position gain** edit box
+  (0.0-2.0). `Config` reads/writes `pos_scale` and preserves the rest of
+  `config.txt`.
+
+Verified:
+
+- Launcher: the Options dialog opened with `1.00`, accepted `0.55`, and wrote
+  `pos_scale = 0.55` to the game-folder config. (Test channel was parked at
+  9.9 locally so the startup update prompt did not block the dialog.)
+- Mod: continuous sine on X, Y and Z, each ±0.5 m, `pos_scale = 1.0`.
+  `EYE hmdY` stayed within ±0.51; `offset primitive` showed dx/dy/dz up to
+  ±0.47 with `verts = 3 * count`; back-buffer frames stayed coherent.
+  `HAND screen` stayed exactly `577,516` / `78,145` for the whole run,
+  confirming the hands no longer follow the HMD translation.
+
+Build: `built Nov  6 2026 12:58:01`, SHA-256
+`8b9d428afd56e13bfcfd382fddcea470ce97592374ad8773edbad001d59d9c8c`.
+Launcher `XOPSVR.exe`: 187,392 bytes, SHA-256
+`5ba78f8743e5e8f01410d68e010185133ab227abe3f79fb645d5fbe5f5159861`
+(build artifact, not committed).

@@ -268,7 +268,7 @@ created locally. It is created with defaults if missing:
 handedness = right
 hand_flip = false
 eye_height = 0.0
-pos_scale = 0.1
+pos_scale = 1.0
 ```
 
 `handedness` selects the dominant hand for the laser and the initial
@@ -283,10 +283,9 @@ stays unflipped.
 
 `eye_height` is a **manual float** vertical render offset in metres (default
 `0`, clamped ±5); `pos_scale` is the gain on the tracked HMD translation
-(default **0.1**, 0..2; 1.0 = 1:1). The cautious 0.1 start exists because any
-1:1 movement broke the render on the owner's test; raise it only after 0.1 is
-stable, and set it to 0 to disable translation entirely. The right-stick
-click re-zeroes the current HMD height.
+(default **1.0** = 1:1, 0..2; `0` disables translation). It is also editable in
+the launcher's Options dialog. The right-stick click re-zeroes the current HMD
+height.
 `config.txt` also holds `haptics`, `haptics_hand`, `haptic_frames`,
 `verbose_debug`, `stereo`, `roll` and `roll_sign`; the full list is in
 `CURRENT_STEPS.md`.
@@ -403,15 +402,16 @@ exempt. Informative logging is behind `verbose_debug` (default false) in
 **Render-side 6DOF + eye height + debug-key lock (6 Nov).** The game re-clamps
 its camera Y every frame, so the HMD translation is no longer written to the
 player. `CameraOffset()` rotates the head's `headP` into the camera frame and
-the world draw copies are shifted opposite the eye in all three axes. The
-hands, gun and laser subtract the same `ScaledHeadP()` (Y-clamped,
-`pos_scale`-scaled) from their tracked positions, so their parallax matches
-the world; using raw `headP` made them move `1 / pos_scale` times too far (the
-"moving the hands, not the head" symptom at gain 0.1). Both
+the world draw copies are shifted opposite the eye in all three axes. Hands,
+gun and laser are **not** translated by the current HMD position: they are
+placed in the default/recentre head-height frame (`0,0,0` = the default HMD
+position, a controller around `-Y` is at hand height) and only take the head's
+**orientation**, so moving the HMD moves the view, not the hands. Both
 world paths are camera-space **metres** - the non-indexed `*100` was a
 centimetre assumption and threw the view through floors and ceilings. HMD Y is
-clamped to ±1 m before the gain; `pos_scale` is that gain (default **0.1**;
-1.0 = 1:1, 0..2) and `eye_height` is a manual float offset (default 0, ±5). A
+clamped to ±1 m before the gain; `pos_scale` is that gain (default **1.0** =
+1:1, 0..2, also in the launcher's Options dialog) and `eye_height` is a manual
+float offset (default 0, ±5). A
 **right-stick click** recentres and makes the current HMD height the new zero
 (flat game player height). Head yaw is still written to both camera clusters,
 so stick-forward follows the head. All debug keys now require manual PC mode
@@ -423,8 +423,6 @@ bug**: `DrawPrimitive` passes a primitive count, but the copy treated it as a
 vertex count, so a triangle list read two thirds of its vertices from stale
 memory and any nonzero offset tore the frame apart. `PrimVertexCount()` now
 converts it, and back-buffer grabs at zero, +Y, +X and +Z are all coherent.
-The shipped 0.1 gain is a cautious starting point (`pos_scale = 1.0` is 1:1),
-not a workaround for that bug.
 
 ### What is still not built
 
@@ -505,8 +503,8 @@ deployed copy with SHA-256 (`match=True`). The DLL is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 12:49:34`, SHA-256
-`076f3851b880b626c9374d3560024b1300802ce19084c7672c404281284b920c`,
+Current handover build: `built Nov  6 2026 12:58:01`, SHA-256
+`8b9d428afd56e13bfcfd382fddcea470ce97592374ad8773edbad001d59d9c8c`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---

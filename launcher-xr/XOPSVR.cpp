@@ -57,6 +57,7 @@ struct Config
     std::wstring stereo = L"mono";
     bool roll = true;
     int rollSign = -1;
+    double posScale = 1.0;          // HMD translation gain, 0..2
 };
 
 Config g_cfg;
@@ -374,6 +375,11 @@ void LoadConfig()
             g_cfg.roll = ParseBool(val);
         } else if (name == L"roll_sign") {
             g_cfg.rollSign = (_wtoi(val.c_str()) > 0) ? 1 : -1;
+        } else if (name == L"pos_scale") {
+            double v = _wtof(val.c_str());
+            if (v < 0.0) v = 0.0;
+            if (v > 2.0) v = 2.0;
+            g_cfg.posScale = v;
         }
     }
 
@@ -382,6 +388,13 @@ void LoadConfig()
 }
 
 std::wstring BoolStr(bool b) { return b ? L"true" : L"false"; }
+
+std::wstring FloatStr(double v)
+{
+    wchar_t buf[32];
+    swprintf(buf, 32, L"%.2f", v);
+    return buf;
+}
 
 void SaveConfig()
 {
@@ -409,6 +422,7 @@ void SaveConfig()
         { L"stereo",        g_cfg.stereo, false },
         { L"roll",          BoolStr(g_cfg.roll), false },
         { L"roll_sign",     std::to_wstring(g_cfg.rollSign), false },
+        { L"pos_scale",     FloatStr(g_cfg.posScale), false },
     };
 
     for (std::wstring& line : lines) {
@@ -517,6 +531,8 @@ INT_PTR CALLBACK OptionsProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         CheckDlgButton(h, IDC_HAPTICS,  g_cfg.haptics  ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(h, IDC_VERBOSE,  g_cfg.verbose  ? BST_CHECKED : BST_UNCHECKED);
 
+        SetDlgItemTextW(h, IDC_POSSCALE, FloatStr(g_cfg.posScale).c_str());
+
         PrepareDialog(h);
         return TRUE;
     }
@@ -536,6 +552,17 @@ INT_PTR CALLBACK OptionsProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             g_cfg.handFlip = IsDlgButtonChecked(h, IDC_HANDFLIP) == BST_CHECKED;
             g_cfg.haptics  = IsDlgButtonChecked(h, IDC_HAPTICS)  == BST_CHECKED;
             g_cfg.verbose  = IsDlgButtonChecked(h, IDC_VERBOSE)  == BST_CHECKED;
+
+            {
+                wchar_t scale[32] = {};
+                GetDlgItemTextW(h, IDC_POSSCALE, scale, 32);
+                if (scale[0]) {
+                    double v = _wtof(scale);
+                    if (v < 0.0) v = 0.0;
+                    if (v > 2.0) v = 2.0;
+                    g_cfg.posScale = v;
+                }
+            }
 
             /* Head roll is not a user option: always on. haptic_frames is
                preserved from config.txt; it has no UI. */

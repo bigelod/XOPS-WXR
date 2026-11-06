@@ -4,8 +4,8 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 12:49:34`, SHA-256
-`076f3851b880b626c9374d3560024b1300802ce19084c7672c404281284b920c`.
+**Last build covered:** `built Nov  6 2026 12:58:01`, SHA-256
+`8b9d428afd56e13bfcfd382fddcea470ce97592374ad8773edbad001d59d9c8c`.
 
 ---
 
@@ -50,12 +50,12 @@ pass; `BUG_FIXES.md` will be created from that run.
   every frame, so the HMD translation is **not written to the game's
   position**. Instead `CameraOffset()` rotates the head's `headP` into the
   camera frame and the world vertex copies are shifted opposite the eye in
-  `AerDrawPrimitive`/`AerDrawIndexed`; hands, gun and laser subtract the same
-  `ScaledHeadP()` (clamped, `pos_scale`-scaled) from their tracked positions,
-  so their parallax matches the world. Using the raw `headP` there made the
-  hands move `1 / pos_scale` times too far - the "hands move, not the head"
-  symptom at gain 0.1. Both world paths are camera-space **metres** - the old
-  `*100`
+  `AerDrawPrimitive`/`AerDrawIndexed`. Hands, gun and laser are **not**
+  translated by the current HMD position: their positions are relative to the
+  **default/recentre head height** (`0,0,0` = the default HMD position, so a
+  controller around `-Y` is at hand height), and only the head's
+  **orientation** is applied. Moving the HMD moves the view, not the hands.
+  Both world paths are camera-space **metres** - the old `*100`
   centimetre assumption on the non-indexed path was the cause of the view
   flying through floors and ceilings and is gone. **`DrawPrimitive`'s third
   argument is a primitive count, not a vertex count:** the copy path now runs
@@ -65,9 +65,9 @@ pass; `BUG_FIXES.md` will be created from that run.
   apart. The indexed path also passes the real `stride` now instead of a
   hardcoded 28. HMD Y is clamped to **±1 m**
   (far more than a sit/stand change needs) *before* the gain; `pos_scale` is
-  the gain on the tracked translation (default **0.1** as a cautious start;
-  1.0 = 1:1, range 0..2); `eye_height` is a separate manual float offset
-  (default `0`, clamped ±5). A **right-stick click** calls
+  the gain on the tracked translation (default **1.0** = 1:1, range 0..2;
+  also editable in the launcher's Options dialog); `eye_height` is a separate
+  manual float offset (default `0`, clamped ±5). A **right-stick click** calls
   `SteerRecentre()`, so the current HMD height becomes the flat game player
   height (`0`). Head yaw is still written to both camera clusters, so
   stick-forward follows the head. This is visual-only and does **not** add
@@ -192,9 +192,10 @@ pass; `BUG_FIXES.md` will be created from that run.
 - **Play** finds `xops096.exe` next to the launcher (or up to two folders up)
   and starts it.
 - **Options** edits `config.txt` **in the game folder**: handedness, Flip
-  hands, haptics on/off, haptics hand, verbose debug, stereo (mono/AER) and
-  roll direction. Haptic frame length and head roll are intentionally not
-  exposed; head roll is always on and the frame count is preserved.
+  hands, haptics on/off, haptics hand, verbose debug, stereo (mono/AER), roll
+  direction and **HMD position gain (`pos_scale`, 0.0-2.0, default 1.0)**.
+  Haptic frame length and head roll are intentionally not exposed; head roll
+  is always on and the frame count is preserved.
 - **Update check** reads `version.txt` and `notes.txt` over HTTPS (WinHTTP),
   compares by value (same rules as the Shogo launcher), shows the notes in a
   YES/NO box, and logs to `XOPSVR_update.log`. For now the channel is the

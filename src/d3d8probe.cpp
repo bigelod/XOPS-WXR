@@ -3053,7 +3053,7 @@ static float g_yawSign    = 1.0f;
    the evidence; a toggle history is not. */
 static float g_pitchSign  = -1.0f;
 static int   g_cluster    = CLU_BOTH;
-static float g_posScale   = 0.1f;   /* gain on HMD translation; 0.1 = cautious start */
+static float g_posScale   = 1.0f;   /* gain on HMD translation; 1.0 = 1:1 */
 /* Render-side eye height: the game re-clamps its camera Y every frame, so
    the head's vertical offset is applied to the world draws instead.
    `eye_height` is a manual float offset (default 0, clamped +/-5) added to
@@ -4484,9 +4484,9 @@ static void HandLoadConfig(void)
             fputs("# its own camera Y every frame, so this is applied to the world draws.\n", f);
             fputs("eye_height = 0.0\n", f);
             fputs("# pos_scale: gain on tracked HMD translation (x/y/z).\n", f);
-            fputs("# 0.1 is the cautious start; 1.0 = 1:1. Lower it if moving\n", f);
-            fputs("# the head at all breaks the render.\n", f);
-            fputs("pos_scale = 0.1\n", f);
+            fputs("# 1.0 = 1:1; 0 disables translation. Lower it if the render\n", f);
+            fputs("# shifts too far.\n", f);
+            fputs("pos_scale = 1.0\n", f);
             fclose(f);
             Log("HAND     created %s with defaults", path);
         } else {
@@ -4504,7 +4504,7 @@ static void HandLoadConfig(void)
         g_roll = TRUE;
         g_rollSign = -1.0f;
         g_eyeHeight = 0.0f;
-        g_posScale = 0.1f;
+        g_posScale = 1.0f;
         return;
     }
 
@@ -4803,11 +4803,11 @@ static float EyeIpd(void)
     return 0.064f;
 }
 
-/* The head translation the render actually applies, in XrApi/world space:
-   the raw HMD position with Y clamped to +/-1 m, then the `pos_scale` gain.
-   World draws shift by the negative of this in camera axes; the hands
-   subtract the same value so their parallax matches the world. Without this
-   the hands used the raw headP and moved 1/pos_scale times too far. */
+/* The head translation the render actually applies to the WORLD, in
+   XrApi/world space: the raw HMD position with Y clamped to +/-1 m, then the
+   `pos_scale` gain. World draws shift by the negative of this in camera axes.
+   The hands deliberately do not use it: they are placed in the default
+   head-height frame and only take the head's orientation. */
 static void ScaledHeadP(float out[3])
 {
     out[0] = g_pose.headP[0];
@@ -4824,9 +4824,8 @@ static void ScaledHeadP(float out[3])
 
 /* The HMD translation relative to the recentre, in the camera's own axes.
    The game's position writes are disabled (it clamps Y and fights the head),
-   so the world is shifted by the negative of this at draw time. The hands
-   subtract `ScaledHeadP` too (see HandViewPose). `eye_height` is a manual
-   float calibration offset (default 0, clamped +/-5). */
+   so the world is shifted by the negative of this at draw time. `eye_height`
+   is a manual float calibration offset (default 0, clamped +/-5). */
 static void CameraOffset(float out[3])
 {
     float r[3], p[3];
@@ -6475,7 +6474,7 @@ static void HandViewPose(const float* hp, const float* hf, const float* hu,
                          BOOL isRight, BOOL flip,
                          float vp[3], float vf[3], float vu[3], float vr[3])
 {
-    float headR[3], headU[3], rel[3], sh[3];
+    float headR[3], headU[3], rel[3];
     float up0[3] = { 0.0f, 1.0f, 0.0f };
     BOOL noPos = (HandLen(hp) < 0.01f);
     BOOL noDir = (HandLen(hf) < 0.01f);
@@ -6501,14 +6500,15 @@ static void HandViewPose(const float* hp, const float* hf, const float* hu,
             LogD("HAND     no controller hand position; using fallback offsets");
         }
     } else {
-        /* Subtract the same scaled/clamped head offset the world draws use,
-           plus the manual eye-height calibration. The hand is a fixed point
-           in the play space, so the camera moving by eye_height must move it
-           the opposite way in view space. */
-        ScaledHeadP(sh);
-        rel[0] = hp[0] - sh[0] - g_eyeHeight * headU[0];
-        rel[1] = hp[1] - sh[1] - g_eyeHeight * headU[1];
-        rel[2] = hp[2] - sh[2] - g_eyeHeight * headU[2];
+        /* Hand positions are relative to the default/recentre HMD origin
+           (0,0,0 = default head height, a controller around -Y is at hand
+           height). Only the head's ORIENTATION is applied here; the current
+           HMD translation must not drag the hands around. The world draws
+           carry the translation instead, so the view moves and the hands stay
+           in the default hand frame. */
+        rel[0] = hp[0];
+        rel[1] = hp[1];
+        rel[2] = hp[2];
         vp[0] = HandDot(rel, headR);
         vp[1] = HandDot(rel, headU);
         vp[2] = HandDot(rel, g_pose.headF);

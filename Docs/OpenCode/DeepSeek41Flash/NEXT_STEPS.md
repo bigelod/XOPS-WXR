@@ -4,8 +4,8 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 12:49:34`, SHA-256
-`076f3851b880b626c9374d3560024b1300802ce19084c7672c404281284b920c`.
+**Last build:** `built Nov  6 2026 12:58:01`, SHA-256
+`8b9d428afd56e13bfcfd382fddcea470ce97592374ad8773edbad001d59d9c8c`.
 
 ---
 
@@ -49,11 +49,12 @@ outstanding:
   laser and hand-aim, two-handed aim, weapon clone across swaps/drops/pickups
   and textures, haptics feel, tracking latency/judder.
 - **6DOF / eye height:** crouch and stand and confirm the render follows the
-  head without moving the player. Confirm the right-stick click re-zeroes the
-  current height. The shipping gain is `pos_scale = 0.1`; raise it toward 1.0
-  only after 0.1 is confirmed stable on device. If 0.1 still breaks the
-  render, lower it again or set it to 0 to disable translation; do not change
-  the draw code.
+  head without moving the player, and that the hands stay in the default
+  head-height frame rather than being dragged by the HMD translation. Confirm
+  the right-stick click re-zeroes the current height. `pos_scale` defaults to
+  **1.0** (1:1) and is editable in the launcher's Options dialog; lower it (or
+  set it to 0) if the translation feels too strong. Do not change the draw
+  code.
 - **Roll:** tilt the head and confirm the world tilts the correct way and the
   HUD stays fixed. The default is `roll_sign = -1`; if it is inverted on
   device, set `+1`. If the black corners are visible in the lenses, note it

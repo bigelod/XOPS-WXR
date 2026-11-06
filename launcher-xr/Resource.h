@@ -22,3 +22,6 @@
 #define IDC_ROLLSIGN_LABEL          1113
 #define IDC_ROLLSIGN                1114
 #define IDC_SAVE_NOTE               1115
+#define IDC_POSSCALE_LABEL          1116
+#define IDC_POSSCALE                1117
+#define IDC_POSSCALE_HINT           1118
