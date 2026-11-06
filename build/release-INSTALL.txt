@@ -27,8 +27,19 @@ Controls
 --------
 Left stick move, right stick turn, right stick click recentre,
 left grip two-handed aim, left trigger fire mode, right trigger shoot,
-right grip jump, B reload, A switch, X drop, Y zoom.
+right grip jump, B reload, A switch, X drop, Y zoom (the laser stays on).
 Left-handed mode swaps only shoot and fire mode.
+Every level start makes the current head position and facing the new origin.
+In gameplay all physical keyboard/mouse input is ignored except ESC and 0.
+If the WinlatorXR left stick is mapped to the arrow keys, the mod turns those
+presses into movement, so they cannot change weapons.
+
+AER menus
+---------
+With stereo = aer the runtime stays in VR on menus; the flat screen appears as
+a floating panel in the centre of the view. Point the dominant hand at it and
+use the right trigger as left click. AER itself is off on menus, death,
+objective and victory screens.
 
 Tuning in config.txt
 --------------------

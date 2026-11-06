@@ -4,8 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 15:14:55`, SHA-256
-`add51605a989213493e7867ffa30f1e56ebe3d574b5ec9afd867a9f66c7a249f`.
+**Last build:** `built Nov  6 2026 18:01:24`, SHA-256
+`0d24ca6ea2b685d3b303faf5fbf016194829696b0582415a4f88b313129cd524`.
+Release: 282,624 bytes, SHA-256
+`a4b214618fe7ad8dfc7c5a050eb35728c17091db8321853bf0109624b332c908`.
 
 ---
 
@@ -45,16 +47,26 @@ outstanding:
 - Container at **1280x960** (native 4:3, no bars) unless testing stereo.
 - Shipped config has `verbose_debug = false`; full log on demand.
 - Check: input mute while unfocused (physical only), XrApi input still works,
-  A/B/X/Y and arrow blocking, `MODE_VR` screens, both hands and their angles,
-  laser and hand-aim, two-handed aim, weapon clone across swaps/drops/pickups
-  and textures, haptics feel, tracking latency/judder.
+  A/B/X/Y and arrow blocking, full keyboard/mouse isolation in gameplay,
+  `MODE_VR` screens, both hands and their angles, laser and hand-aim,
+  two-handed aim, weapon clone across swaps/drops/pickups and textures, haptics
+  feel, tracking latency/judder.
 - **6DOF / eye height:** crouch and stand and confirm the render follows the
-  head without moving the player, and that the hands stay in the default
-  head-height frame rather than being dragged by the HMD translation. Confirm
-  the right-stick click re-zeroes the current height. `pos_scale` defaults to
-  **1.0** (1:1) and is editable in the launcher's Options dialog; lower it (or
-  set it to 0) if the translation feels too strong. Do not change the draw
-  code.
+  head without moving the player, and that the hands **stay at their
+  level-start/recentre position** instead of riding with the current HMD
+  translation. Confirm the right-stick click re-zeroes XYZ and yaw. `pos_scale`
+  defaults to **1.0** (1:1) and is editable in the launcher's Options dialog.
+  Do not change the draw code.
+- **Level start:** begin several levels and confirm the view's XYZ and yaw are
+  relative to the player model at spawn (no inherited yaw/height from the
+  menu), and that shots follow the right hand on every level.
+- **Hand roll:** tilt the head and confirm the hands/gun roll with the
+  presented world instead of staying glued to the view. The previous
+  counter-rotation was removed.
+- **Left stick:** with WinlatorXR's current arrow-key mapping the mod now
+  translates arrows to W/A/S/D. Confirm movement and that no arrow reaches the
+  weapon-swap binding. Mapping the stick to the analog XrApi left stick remains
+  the cleaner long-term fix.
 - **Roll:** tilt the head and confirm the world tilts the correct way and the
   HUD stays fixed. The default is `roll_sign = -1`; if it is inverted on
   device, set `+1`. If the black corners are visible in the lenses, note it
@@ -68,6 +80,11 @@ outstanding:
   reproject helpers are now 1:1 metres (the non-indexed `*100` centimetre
   assumption was removed with the height work), so there is no scale left to
   tune; one-line sign if needed.
+- **AER menus:** the runtime now stays `MODE_VR=1` for the whole run and only
+  `MODE_3D` drops to 0. Confirm the title/menu/death/objective/victory screens
+  appear as the centre-third floating panel, AER is visibly off there, and the
+  hand laser pointer + right-trigger click select menu items. This also tests
+  whether the old `MODE_VR 1 -> 0` crash is gone.
 - **SBS is deferred.** It needs a double-width game target and a double-width
   container/window so each eye keeps 4:3. Plan: duplicate every world/model
   draw into two viewports with the existing eye shift, draw the HUD per half,
@@ -112,7 +129,8 @@ src/xrapi.cpp/.h                     XrApi parsing, poses, input
 Docs/OpenCode/DeepSeek41Flash/COMPLETED_STEPS.md  implemented work
 Docs/OpenCode/DeepSeek41Flash/CURRENT_STEPS.md    current architecture/state
 Docs/OpenCode/DeepSeek41Flash/WORKLOG.md          experiment history
-build/build-probe.bat                build/deploy
+build/build-dev.bat                  build/deploy dev DLL
+build/build-release.bat              build release DLL + launcher into Release\
 tools/start-level.ps1                title -> level (do not auto-run during hand tests)
 E:\tmp\Q3Mods\xops096\xops_wxr_probe.log         runtime log
 E:\tmp\Q3Mods\xops096\config.txt               handedness / haptics / debug / stereo

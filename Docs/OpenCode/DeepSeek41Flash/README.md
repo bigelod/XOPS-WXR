@@ -12,7 +12,9 @@ discard its code and its protocol claims.
 
 Evidence tags are the project's own: `[spec]`, `[runtime]`, `[general]`,
 `[derived]`, `[code]`, `[device]`, `[unverified]`. Nothing in this folder is
-`[device]` unless it says so; the build is PC-verified, not device-verified.
+`[device]` unless it says so. Startup, injection, the DXVK export fix and AER
+in gameplay have run on a Quest 3; the 6 Nov hand/input changes are built and
+PC-verified but await the next device pass.
 
 ---
 
@@ -31,7 +33,7 @@ WinlatorXR and no build has been verified on the Quest 3.**
 | Replacement HUD | **implemented**: target-resolution D3D texture in the centre square, desktop-verified |
 | Decoupled aim (F-7) | not started - the hardest remaining problem |
 | Height / crouch | **render-side 6DOF implemented**: `CameraOffset` shifts the world draws; right-stick click re-zeroes; game position is not written |
-| Roll | **implemented**: the rendered sprite rotates; hands/HUD stay fixed |
+| Roll | **implemented**: the rendered sprite rotates; hands roll with the world, HUD stays fixed |
 | Stereo | AER experiment implemented; mono is the default until device-verified |
 
 ### The camera addresses, as inherited
@@ -255,7 +257,7 @@ far 80). The hand/laser therefore have to reset **all three** transforms:
   distance so it reads as a roughly 2px beam. Depth test is `LESSEQUAL`,
   Z-write is off for the beam and on for the hand boxes, so walls really cut
   the laser off and hide a hand behind geometry.
-- **Zoom:** Y toggles the game's zoom and hides the laser; the hands stay.
+- **Zoom:** Y toggles the game's zoom; the laser stays on and the hands stay.
 - **Fallback:** if the XrApi tester sends no hand position, a default
   view-space offset is used so the desktop test is still visible.
 
@@ -318,20 +320,24 @@ respawn switches back to 1, and DUEL_EXT's low 39-indexed draw count no longer
 drops head tracking. The internal renderer is still 640x480 - this is a
 stretched output, not native yet.
 
-**VR controller mapping (5 Nov).** Left stick moves, right stick turns the body
-by a yaw offset (120 deg/s, `turnSpeed` in the INI), left grip walks, right
-grip jumps, B reloads, A switches, X drops, Y toggles zoom, and the triggers
-are shoot/fire-mode. Right-handed: right trigger shoots, left trigger cycles
-fire mode. Left-handed swaps only those two (`N` toggles, `leftHanded` saved).
-Fire mode/jump/reload/switch/drop and **zoom** are edge-pulsed; walk/shoot are
-held. Zoom is a toggle in XOPS, so Y sends a press edge; the head still drives
-the view, so the zoom is head-tracked.
+**VR controller mapping (6 Nov).** Left stick moves, right stick turns the body
+by a yaw offset (120 deg/s, `turnSpeed` in the INI), left grip switches to
+two-handed aim, right grip jumps, B reloads, A switches, X drops, Y toggles
+zoom, and the triggers are shoot/fire-mode. Right-handed: right trigger shoots,
+left trigger cycles fire mode. Left-handed swaps only those two (`N` toggles,
+`leftHanded` saved). Fire mode/jump/reload/switch/drop and **zoom** are
+edge-pulsed; shoot is held. Zoom is a toggle in XOPS, so Y sends a press edge;
+the head still drives the view, so the zoom is head-tracked.
 
 **Steering is on by default.** `3` is only a debug toggle now. Input defaults
-to **VR-only in gameplay**; `0` enables desktop keyboard/mouse for manual
-tests without a headset or fake XrApi data, and pauses synthetic VR input.
-**MODE_VR 0 screens always keep desktop input** (title, objective, menus,
-death, victory) regardless of that toggle.
+to **VR-only**; `0` enables desktop keyboard/mouse for manual tests without a
+headset or fake XrApi data, and pauses synthetic VR input.
+**Mono `MODE_VR 0` screens keep desktop input** (title, objective, menus,
+death, victory) regardless of that toggle. **In gameplay and on the AER
+floating menu, everything is swallowed except `ESC` and `0`**, through both
+`GetKeyboardState` and the window procedure. A/B/X/Y and the arrows are
+swallowed in VR on every screen. WinlatorXR's left-stick-as-arrow mapping is
+captured before the filter and translated to W/A/S/D.
 
 **The game no longer steals the desktop cursor.** XOPS recentres the pointer
 with `SetCursorPos` every frame to read its mouse delta. When another window
@@ -403,18 +409,20 @@ exempt. Informative logging is behind `verbose_debug` (default false) in
 its camera Y every frame, so the HMD translation is no longer written to the
 player. `CameraOffset()` rotates the head's `headP` into the camera frame and
 the world draw copies are shifted opposite the eye in all three axes. Hands,
-gun and laser are **not** translated by the current HMD position: they are
-placed in the default/recentre head-height frame (`0,0,0` = the default HMD
-position, a controller around `-Y` is at hand height) and only take the head's
-**orientation**, so moving the HMD moves the view, not the hands. Both
+gun and laser subtract the same clamped, `pos_scale`-scaled `ScaledHeadP()` plus
+`eye_height`, so they are **world-anchored at the recentre position**: moving
+the HMD moves the view, not the hands. They are not counter-rotated against
+the sprite roll; the whole world and the hands roll together. Both
 world paths are camera-space **metres** - the non-indexed `*100` was a
 centimetre assumption and threw the view through floors and ceilings. HMD Y is
 clamped to ±1 m before the gain; `pos_scale` is that gain (default **1.0** =
 1:1, 0..2, also in the launcher's Options dialog) and `eye_height` is a manual
 float offset (default 0, ±5). A
-**right-stick click** recentres and makes the current HMD height the new zero
-(flat game player height). Head yaw is still written to both camera clusters,
-so stick-forward follows the head. All debug keys now require manual PC mode
+**right-stick click** recentres; entering gameplay from a menu/level load also
+calls `SteerRecentre()`, so the player's current HMD XYZ and facing become the
+new origin against the player model. Head yaw is still written to both camera
+clusters, so stick-forward follows the head. All debug keys now require manual
+PC mode
 (`0`), which WinlatorXR does not map by default. Verified with a ±1 m sine
 feed at `pos_scale = 1.0` (`dy` tracked `hmdY` 1:1, clamped at ±1.000), a
 constant 0.8 m re-zero (0.000 -> 0.800 -> click -> 0.000), and an
@@ -424,13 +432,38 @@ vertex count, so a triangle list read two thirds of its vertices from stale
 memory and any nonzero offset tore the frame apart. `PrimVertexCount()` now
 converts it, and back-buffer grabs at zero, +Y, +X and +Z are all coherent.
 
+**Device follow-up (6 Nov, late).** The first Quest 3 run showed four concrete
+problems: hands rode with physical head height and rolled with the head,
+arrows still changed weapons, `Y` still hid the laser, and some levels shot
+from the wrong yaw/height. The fixes:
+
+- `HandViewPose` now subtracts `ScaledHeadP()` + `eye_height` before projecting
+  into the no-roll head basis, so hands stay at the level-start/recentre
+  position. The hand counter-rotation against `SpriteRoll` was removed; hands
+  and gun roll with the presented world.
+- Every level start (`MODE_VR` 0 -> 1) calls `SteerRecentre()`; the current HMD
+  XYZ and yaw become the new origin against the player model. The right-stick
+  click does the same at any time.
+- Gameplay and the AER floating menu strip **all** physical keyboard/mouse
+  input from `GetKeyboardState` and swallow the matching `WM_KEY*`/`WM_MOUSE*`
+  messages. Only `ESC` and `0` survive. A/B/X/Y and arrows are blocked in VR on
+  every screen. WinlatorXR's left-stick-as-arrows presses are translated to
+  W/A/S/D so movement works and the arrows cannot swap weapons.
+- The laser is always drawn; `Y` is zoom only.
+- AER keeps `MODE_VR=1` for the whole run (HWXR model) and toggles only
+  `MODE_3D` (2 in gameplay, 0 on menus/death/objective/victory). Those non-VR
+  screens are drawn as a floating panel in the centre third of the view, with
+  a dominant-hand laser pointer published through `GetCursorPos` and a
+  right-trigger click.
+
 ### What is still not built
 
 **Desktop-verified now:** target-resolution composite, replacement HUD,
 borderless window, exact sync pixel, real FOV, `MODE_VR` state, render-side
-6DOF/eye height, recentre.
-**Still not built:** decoupled aim. **Not device-verified:** nothing has run on
-the Quest 3 yet. See section 4.
+6DOF/eye height, recentre, input isolation, AER and the AER menu panel.
+**Still not built:** decoupled aim. **Device-verified:** startup, injection,
+DXVK export, AER in gameplay. **Device follow-up still open:** the items in
+`NEXT_STEPS.md` section 4.
 
 ---
 
@@ -492,20 +525,21 @@ already done and recorded in `COMPLETED_STEPS.md`.
 
 ```
 call "<VS2022>\VC\Auxiliary\Build\vcvarsall.bat" x86
-build\build-probe.bat                 REM builds + deploys to E:\tmp\Q3Mods\xops096
-build\build-probe.bat D:\VR\xops096-wxr
+build\build-dev.bat                   REM builds + deploys to E:\tmp\Q3Mods\xops096
+build\build-release.bat               REM release DLL + launcher into Release\
 ```
 
-The script refuses a non-x86 compiler, wipes `out\probe`, and verifies the
-deployed copy with SHA-256 (`match=True`). The DLL is
-`out\probe\d3d8.dll`.
+The scripts refuse a non-x86 compiler and verify the deployed copy with
+SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
+`out\release\d3d8.dll` plus the assembled `Release\` folder.
 
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 15:14:55`, SHA-256
-`add51605a989213493e7867ffa30f1e56ebe3d574b5ec9afd867a9f66c7a249f`,
-deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
+Current handover build: `built Nov  6 2026 18:01:24`, SHA-256
+`0d24ca6ea2b685d3b303faf5fbf016194829696b0582415a4f88b313129cd524`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 282,624 bytes,
+SHA-256 `a4b214618fe7ad8dfc7c5a050eb35728c17091db8321853bf0109624b332c908`.
 
 ---
 

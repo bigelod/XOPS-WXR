@@ -4,8 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 15:14:55`, SHA-256
-`add51605a989213493e7867ffa30f1e56ebe3d574b5ec9afd867a9f66c7a249f`.
+**Last build covered:** `built Nov  6 2026 18:01:24`, SHA-256
+`0d24ca6ea2b685d3b303faf5fbf016194829696b0582415a4f88b313129cd524`.
+Release: 282,624 bytes, SHA-256
+`a4b214618fe7ad8dfc7c5a050eb35728c17091db8321853bf0109624b332c908`.
 
 ---
 
@@ -125,7 +127,22 @@ pass; `BUG_FIXES.md` will be created from that run.
 - **VR controller mapping:** left stick move; right stick turn L/R; left grip
   two-handed aim; left trigger fire mode; right trigger shoot; right grip jump;
   B reload; A switch; X drop; Y zoom (toggle). Left-handed mode swaps only
-  shoot and fire mode.
+  shoot and fire mode. **The laser is always on**; Y no longer hides it.
+- **VR input isolation:** in gameplay and on the AER floating menu, *all*
+  physical keyboard and mouse input is removed from `GetKeyboardState`, and the
+  window procedure swallows the corresponding `WM_KEY*`/`WM_MOUSE*` messages.
+  Only `ESC` (the way out) and `0` (PC-only manual mode) survive. This fixes
+  the arrow-key -> weapon-swap leak through either input path. Mono menu
+  screens keep single desktop keys because the runtime owns the flat panel.
+- **Left-stick-as-arrows fallback:** WinlatorXR currently maps the left stick
+  to the arrow keys. Those raw presses are captured before the filter and
+  translated to W/A/S/D, so the stick moves the player instead of swapping
+  weapons. Mapping the stick to the analog XrApi left stick remains cleaner.
+- **AER menu laser pointer:** the dominant hand's ray is intersected with a 1 m
+  plane, mapped onto the centre-third panel, published through `GetCursorPos`
+  in 640x480 UI space, and clicked with the right trigger (`VK_LBUTTON` plus
+  posted `WM_LBUTTONDOWN`/`WM_LBUTTONUP`). A screen-space dot marks the same
+  point.
 - **Manual PC mode (`0`):** default two-hand pose, cursor centred once, right
   hand driven by `E`/`Q` + numpad; incoming 6DOF ignored. **Every debug key is
   locked behind `0`:** while VR input is active, only `0` is accepted, and the
@@ -135,8 +152,8 @@ pass; `BUG_FIXES.md` will be created from that run.
 - **Focus boundary:** while the game window is unfocused, **physical desktop
   input** is muted (keyboard, mouse, debug keys) but **XrApi/runtime input
   still arrives**, because the UDP Tester normally holds focus.
-- **Reserved keys:** physical A/B/X/Y are never accepted in VR mode; the four
-  arrows are not accepted while `MODE_VR = 1`. Manual PC mode is exempt.
+- **Reserved keys:** physical A/B/X/Y and all four arrows are never accepted in
+  VR mode, on any screen. Manual PC mode is exempt.
 - Edge-pulsed buttons where the game polls once per frame; held walk/shoot
   where appropriate.
 
@@ -176,6 +193,13 @@ pass; `BUG_FIXES.md` will be created from that run.
 
 - **AER is implemented and desktop-verified.** `stereo = aer` opts in;
   `mono` is the shipping default.
+- **Runtime stays `MODE_VR=1` for the whole run in AER**, following HWXR. Only
+  `MODE_3D` toggles: `2` in gameplay, `0` on title/menu/death/objective/
+  victory. This avoids the `MODE_VR 1 -> 0` transition that killed the runtime
+  on device.
+- **Non-VR screens become a floating panel** in AER: the game's 640x480 frame
+  is drawn at one third size in the centre cell of a 3x3 grid, with a
+  dominant-hand laser pointer and right-trigger click.
 - The camera is CPU-baked, so AER works by **reprojecting each draw**: both the
   non-indexed world path and the indexed model path shift x by `-d` in metres.
   (Both are camera-space metres: the projection is near 0.1 / far 80 and the

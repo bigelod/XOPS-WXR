@@ -5,9 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 15:14:55`, SHA-256
-`add51605a989213493e7867ffa30f1e56ebe3d574b5ec9afd867a9f66c7a249f`,
+**Current build:** `built Nov  6 2026 18:01:24`, SHA-256
+`0d24ca6ea2b685d3b303faf5fbf016194829696b0582415a4f88b313129cd524`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
+
+Release build: 282,624 bytes, SHA-256
+`a4b214618fe7ad8dfc7c5a050eb35728c17091db8321853bf0109624b332c908`.
 
 ---
 
@@ -15,14 +18,18 @@ deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 The `d3d8.dll` proxy runs XOPS at the container resolution with a native
 640x480, 4:3 composite and no FOV change. Head tracking writes the camera;
-both hands are visible and depth-tested; the dominant hand carries the cloned
-game weapon and a laser; the replacement HUD is in the centre square.
-Haptics, two-handed aim, the input focus boundary, verbose logging, the
-Quest 3 hand-roll default and the chunkier calibration hand are implemented
-and PC-verified. The HMD's 6DOF translation (including height) is applied to
-the world draws at render time, so it is visual only; a right-stick click
-makes the current HMD height the new zero. AER stereo is implemented as an
-experiment; mono is the default. Device testing is the next real milestone.
+both hands are visible, depth-tested and **world-anchored** (they subtract the
+same HMD translation the world uses, so moving the head moves the view, not the
+hands). The dominant hand carries the cloned game weapon and an always-on
+laser. Every level start makes the current HMD XYZ and yaw the new origin, and
+a right-stick click does the same. Haptics, two-handed aim, the input focus
+boundary, verbose logging and the Quest 3 hand-roll default are implemented.
+Gameplay and the AER floating menu take **no physical keyboard or mouse**
+except ESC and the PC-only `0`. AER stereo is implemented as an experiment; in
+AER the runtime stays `MODE_VR=1` for the whole run, `MODE_3D` drops to mono on
+the title/menu/death/objective/victory screens, and those screens are drawn as
+a floating panel in the centre third with a hand laser pointer. Mono is the
+default. Device testing is the next real milestone.
 
 ---
 
@@ -39,6 +46,10 @@ experiment; mono is the default. Device testing is the next real milestone.
    4:3 (rotated as a 2D sprite by the head roll), then the GDI-rendered
    HUD/panel textures and the sync square. The HUD and sync pixel are drawn
    after the sprite, so they stay fixed.
+   In **AER**, the non-gameplay screens are drawn at one third size in the
+   centre cell of a 3x3 grid instead (`VrMenuPanel`/`CompositeFrame`), with
+   the dominant-hand laser pointer dot on top. Mono runs keep the full-frame
+   menu because the runtime presents its own flat panel under `MODE_VR=0`.
 4. The sync square is 10x10 at `(0,0)`: red echoes `HMD_SYNC`; blue is the AER
    eye flag (0 outside AER).
 
@@ -54,8 +65,14 @@ native frame fills it with no bars or crop.
 - Hand pose is converted from XrApi into view space by `HandViewPose`, using a
   **no-roll head basis** (yaw/pitch only), then drawn as boxes in the game's
   3D pass. The hand is a palm plate with four chunky finger slabs and an
-  angled thumb. Because the basis has no head roll, the hands/gun behave like
-  part of the VR camera.
+  angled thumb.
+- **Hands are world-anchored.** `HandViewPose` subtracts the same clamped,
+  `pos_scale`-scaled head translation the world uses, plus `eye_height`, before
+  projecting into the head basis. Moving the HMD moves the view, not the
+  hands; the hands stay at their level-start/recentre position. They are *not*
+  counter-rotated against `SpriteRoll` - the whole game image rolls with the
+  head, so the world-fixed hands and gun roll with it. Counter-rotating glued
+  them to the view and made them swing on every head roll.
 - **Weapon capture:** the inventory weapon arrives as a group of indexed
   draws sharing one vertex buffer. The primary weapon is the last contiguous
   VB group; each draw is one submesh. Parts are copied (verts + indices +
@@ -68,38 +85,56 @@ native frame fills it with no bars or crop.
   is rebuilt to point at the off hand (`HandTwoHandedAim`); the gun, laser and
   hand-aim shot all use it. Haptics buzz both hands.
 - **Roll:** `HeadRoll()` gives the head's roll; the game sprite is rotated by
-  it in `Present` (`CompDrawQuadRot`). The hand/gun/laser pass is built on the
-  no-roll head basis and also gets the opposite view rotation, so it stays
-  fixed relative to the VR camera while the world rolls. The 2D HUD and sync
-  pixel are fixed. No scaling; black sprite corners are accepted.
+  it in `Present` (`CompDrawQuadRot`). The hand/gun/laser pass is not
+  counter-rotated, so the hands roll with the presented world instead of
+  staying glued to the view. The 2D HUD and sync pixel are fixed. No scaling;
+  black sprite corners are accepted.
 - **AER stereo:** the engine CPU-bakes the world and submits it, so eye
   separation is applied by copying each draw's vertices and shifting x
   (`AerDrawPrimitive` and `AerDrawIndexed`, both camera-space metres), one eye
-  per frame. `stereo = mono | aer`; `mono` ships.
+  per frame. In AER the runtime stays `MODE_VR=1` for the whole run; menus,
+  death, objective and victory keep `MODE_3D=0` (mono) and are drawn as the
+  centre-third panel. `stereo = mono | aer`; `mono` ships.
+- **Level-start recentre:** when `MODE_VR` goes 0 -> 1 (title/menu -> gameplay)
+  `SteerRecentre()` is called. It asks the XrApi layer to zero the pose yaw and
+  XYZ and captures the game's current camera yaw/position as the new reference,
+  so the player's current head position and facing are the new `0,0,0` and
+  zero-yaw origin against the player model.
 - **Render-side 6DOF / eye height:** the game clamps its camera Y every frame,
   so `SteerTick` writes only yaw/pitch and never position. `CameraOffset()`
   rotates `headP` into the camera frame and the draw copies shift the world
-  opposite the eye in all three axes. Hands/gun/laser are **not** translated
-  by the current HMD position: their positions are relative to the
-  default/recentre head height (`0,0,0` = default HMD position, a controller
-  around `-Y` is at hand height) and only the head's **orientation** is
-  applied, so moving the HMD moves the view, not the hands.
-  HMD Y is clamped ±1 m (before the gain), `eye_height` adds a manual float
-  offset (default 0, ±5) and `pos_scale` scales the tracked translation
-  (default 1.0 = 1:1, 0..2). Right-stick click recentres, making the current
-  elevation the new 0. Both paths are 1:1 metres; the old non-indexed `*100`
-  was removed. `AerDrawPrimitive` converts `DrawPrimitive`'s **primitive
-  count** to a vertex count with `PrimVertexCount()` before copying; without
-  that, any nonzero offset drew two thirds of each triangle list from stale
-  memory and tore the frame apart. `AerDrawIndexed` now passes the real
-  stride, not a hardcoded 28.
+  opposite the eye in all three axes. HMD Y is clamped ±1 m (before the gain),
+  `eye_height` adds a manual float offset (default 0, ±5) and `pos_scale`
+  scales the tracked translation (default 1.0 = 1:1, 0..2). Right-stick click
+  recentres. Both paths are 1:1 metres; the old non-indexed `*100` was
+  removed. `AerDrawPrimitive` converts `DrawPrimitive`'s **primitive count**
+  to a vertex count with `PrimVertexCount()` before copying; without that, any
+  nonzero offset drew two thirds of each triangle list from stale memory and
+  tore the frame apart. `AerDrawIndexed` now passes the real stride, not a
+  hardcoded 28.
 
 ## 4. Input, haptics, logging
 
 - **Focus boundary:** unfocused means physical keyboard/mouse and debug keys
-  are muted; XrApi sticks/triggers/buttons are still injected. In VR mode
-  physical A/B/X/Y are always swallowed and arrows are swallowed while
-  `MODE_VR = 1`; manual PC mode (`0`) is exempt.
+  are muted; XrApi sticks/triggers/buttons are still injected.
+- **VR input isolation:** in gameplay and on the AER floating menu, *all*
+  physical keyboard and mouse input is removed from `GetKeyboardState`, and
+  the window procedure also swallows the corresponding `WM_KEY*`/`WM_MOUSE*`
+  messages. Only `ESC` (the way out) and `0` (PC-only manual mode) survive.
+  A/B/X/Y and the arrow keys are swallowed in VR on every screen. Single
+  desktop keys still work on the mono menu screens, where the runtime owns the
+  flat panel.
+- **Left stick as arrows:** WinlatorXR currently maps the left stick to the
+  arrow keys rather than the XrApi analog fields. Those raw arrow presses are
+  read before the filter and translated to W/A/S/D, so the stick moves the
+  player instead of swapping weapons.
+- **AER menu pointer:** in AER menus the dominant hand's ray hits a 1 m plane,
+  is mapped onto the centre-third panel, and is published through
+  `GetCursorPos` in the game's 640x480 UI space. Right trigger injects the
+  left mouse button and posts `WM_LBUTTONDOWN`/`WM_LBUTTONUP`; a screen-space
+  dot is drawn at the same point.
+- **Laser:** always on. `Y` toggles the game's zoom and no longer hides the
+  laser.
 - **Haptics:** outbound fields 1-2 are a per-hand duration in frames; a shot
   sends a 2-frame pulse, decayed before sending. Both hands while two-handed
   aim is held. The 7278 packet is sent every frame (0 haptics when idle) so
@@ -122,9 +157,14 @@ native frame fills it with no bars or crop.
 | B | Reload |
 | A | Switch weapon |
 | X | Drop weapon |
-| Y | Zoom (toggle) |
+| Y | Zoom (toggle; the laser stays on) |
 
 Left-handed mode swaps only shoot and fire mode. Walk is gone.
+
+On the title/menu/death/objective/victory screens in AER, the dominant-hand
+laser is the mouse pointer and the right trigger is left click. The current
+WinlatorXR left-stick-to-arrow mapping is also translated to W/A/S/D; mapping
+the stick to the analog XrApi left stick remains the cleaner long-term fix.
 
 ## 6. Manual / debug keys
 
@@ -169,24 +209,27 @@ hud_scale = 1.1             # HUD visual scale, 0.5..2.0 (1.0 = native)
 
 ```
 call "<VS2022>\VC\Auxiliary\Build\vcvarsall.bat" x86
-build\build-probe.bat                 REM builds + deploys to E:\tmp\Q3Mods\xops096
+build\build-dev.bat       REM builds + deploys the dev DLL to E:\tmp\Q3Mods\xops096
+build\build-release.bat   REM release DLL + launcher into Release\
 ```
 
-The script wipes `out\probe`, refuses a non-x86 compiler, and verifies the
-deployed DLL with SHA-256. Line 1 of `xops_wxr_probe.log` is the build stamp -
-check it before interpreting any report.
+The scripts refuse a non-x86 compiler and verify the deployed DLL with SHA-256.
+Line 1 of `xops_wxr_probe.log` is the build stamp - check it before
+interpreting any report.
 
 ## 9. Standing rules
 
 - Do not change the game's FOV/projection; native 4:3.
-- `MODE_VR=0` on title/menu/death/victory; desktop input must work there.
-- `MODE_VR=1` only in gameplay.
+- Mono: `MODE_VR=0` on title/menu/death/victory; desktop input works there.
+- AER: `MODE_VR=1` for the whole run; `MODE_3D=0` (mono) on
+  title/menu/death/objective/victory, `MODE_3D=2` only in gameplay.
 - Reuse the game's models and effects; do not invent replacements.
 - Only `0` remains from the old number keys; numpads, `J/K/N/T/Q/E` are ours.
 - `SetCursorPos` must never move the real cursor when the game is unfocused.
 - No physical input crosses between windows; XrApi input still does.
-- A/B/X/Y and (in `MODE_VR=1`) the arrows are never taken from the physical
-  keyboard in VR mode; manual PC mode is the exception.
+- In gameplay and the AER floating menu, no physical key or mouse button
+  reaches the game except `ESC` and `0`; A/B/X/Y and arrows are swallowed in
+  VR on every screen. Manual PC mode is the exception.
 - `verbose_debug = false` ships; diagnostics never replace errors/state.
 - Normalise every quaternion on ingest; freeze on the last good pose.
 - Never commit XOPS's own data files or binaries.
