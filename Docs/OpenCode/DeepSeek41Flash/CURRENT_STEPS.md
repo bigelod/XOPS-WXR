@@ -5,8 +5,8 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 11:09:06`, SHA-256
-`d6852fc74c1aba51ba064a7bedc2cbfc2893a5b5246ebd1b1b604e5e135c561a`,
+**Current build:** `built Nov  6 2026 12:49:34`, SHA-256
+`076f3851b880b626c9374d3560024b1300802ce19084c7672c404281284b920c`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---
@@ -79,11 +79,19 @@ native frame fills it with no bars or crop.
 - **Render-side 6DOF / eye height:** the game clamps its camera Y every frame,
   so `SteerTick` writes only yaw/pitch and never position. `CameraOffset()`
   rotates `headP` into the camera frame and the draw copies shift the world
-  opposite the eye in all three axes. Hands/gun/laser stay in the head frame.
-  HMD Y is clamped ±1 m, `eye_height` adds a manual float offset (default 0,
-  ±5) and `pos_scale` scales the tracked translation (default 0.1, 0..2).
-  Right-stick click recentres, making the current elevation the new 0. Both
-  paths are 1:1 metres; the old non-indexed `*100` was removed.
+  opposite the eye in all three axes. Hands/gun/laser subtract the same
+  `ScaledHeadP()` (Y-clamped, `pos_scale`-scaled) from their tracked positions,
+  so they and the world share one parallax; raw `headP` made them move
+  `1 / pos_scale` times too far.
+  HMD Y is clamped ±1 m (before the gain), `eye_height` adds a manual float
+  offset (default 0, ±5) and `pos_scale` scales the tracked translation
+  (default 0.1, 0..2). Right-stick click recentres, making the current
+  elevation the new 0. Both paths are 1:1 metres; the old non-indexed `*100`
+  was removed. `AerDrawPrimitive` converts `DrawPrimitive`'s **primitive
+  count** to a vertex count with `PrimVertexCount()` before copying; without
+  that, any nonzero offset drew two thirds of each triangle list from stale
+  memory and tore the frame apart. `AerDrawIndexed` now passes the real
+  stride, not a hardcoded 28.
 
 ## 4. Input, haptics, logging
 

@@ -403,8 +403,11 @@ exempt. Informative logging is behind `verbose_debug` (default false) in
 **Render-side 6DOF + eye height + debug-key lock (6 Nov).** The game re-clamps
 its camera Y every frame, so the HMD translation is no longer written to the
 player. `CameraOffset()` rotates the head's `headP` into the camera frame and
-the world draw copies are shifted opposite the eye in all three axes; the
-hands, gun and laser already live in the head frame and do not move. Both
+the world draw copies are shifted opposite the eye in all three axes. The
+hands, gun and laser subtract the same `ScaledHeadP()` (Y-clamped,
+`pos_scale`-scaled) from their tracked positions, so their parallax matches
+the world; using raw `headP` made them move `1 / pos_scale` times too far (the
+"moving the hands, not the head" symptom at gain 0.1). Both
 world paths are camera-space **metres** - the non-indexed `*100` was a
 centimetre assumption and threw the view through floors and ceilings. HMD Y is
 clamped to ±1 m before the gain; `pos_scale` is that gain (default **0.1**;
@@ -415,8 +418,13 @@ so stick-forward follows the head. All debug keys now require manual PC mode
 (`0`), which WinlatorXR does not map by default. Verified with a ±1 m sine
 feed at `pos_scale = 1.0` (`dy` tracked `hmdY` 1:1, clamped at ±1.000), a
 constant 0.8 m re-zero (0.000 -> 0.800 -> click -> 0.000), and an
-F-before-0 / F-after-0 key test. The shipped 0.1 gain is deliberate: 1:1
-still broke the render whenever the HMD moved off `0,0,0`.
+F-before-0 / F-after-0 key test. The offset copy also had a **primitive-count
+bug**: `DrawPrimitive` passes a primitive count, but the copy treated it as a
+vertex count, so a triangle list read two thirds of its vertices from stale
+memory and any nonzero offset tore the frame apart. `PrimVertexCount()` now
+converts it, and back-buffer grabs at zero, +Y, +X and +Z are all coherent.
+The shipped 0.1 gain is a cautious starting point (`pos_scale = 1.0` is 1:1),
+not a workaround for that bug.
 
 ### What is still not built
 
@@ -497,8 +505,8 @@ deployed copy with SHA-256 (`match=True`). The DLL is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 11:09:06`, SHA-256
-`d6852fc74c1aba51ba064a7bedc2cbfc2893a5b5246ebd1b1b604e5e135c561a`,
+Current handover build: `built Nov  6 2026 12:49:34`, SHA-256
+`076f3851b880b626c9374d3560024b1300802ce19084c7672c404281284b920c`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 ---

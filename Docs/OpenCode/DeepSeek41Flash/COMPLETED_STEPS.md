@@ -4,8 +4,8 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 11:09:06`, SHA-256
-`d6852fc74c1aba51ba064a7bedc2cbfc2893a5b5246ebd1b1b604e5e135c561a`.
+**Last build covered:** `built Nov  6 2026 12:49:34`, SHA-256
+`076f3851b880b626c9374d3560024b1300802ce19084c7672c404281284b920c`.
 
 ---
 
@@ -50,10 +50,20 @@ pass; `BUG_FIXES.md` will be created from that run.
   every frame, so the HMD translation is **not written to the game's
   position**. Instead `CameraOffset()` rotates the head's `headP` into the
   camera frame and the world vertex copies are shifted opposite the eye in
-  `AerDrawPrimitive`/`AerDrawIndexed`; hands, gun and laser stay in the head
-  frame. Both world paths are camera-space **metres** - the old `*100`
+  `AerDrawPrimitive`/`AerDrawIndexed`; hands, gun and laser subtract the same
+  `ScaledHeadP()` (clamped, `pos_scale`-scaled) from their tracked positions,
+  so their parallax matches the world. Using the raw `headP` there made the
+  hands move `1 / pos_scale` times too far - the "hands move, not the head"
+  symptom at gain 0.1. Both world paths are camera-space **metres** - the old
+  `*100`
   centimetre assumption on the non-indexed path was the cause of the view
-  flying through floors and ceilings and is gone. HMD Y is clamped to **±1 m**
+  flying through floors and ceilings and is gone. **`DrawPrimitive`'s third
+  argument is a primitive count, not a vertex count:** the copy path now runs
+  it through `PrimVertexCount()` (3 vertices per triangle). Previously it
+  copied only one third of a triangle list and the remaining two thirds of
+  the draw read stale buffer memory, so *any* nonzero offset tore the frame
+  apart. The indexed path also passes the real `stride` now instead of a
+  hardcoded 28. HMD Y is clamped to **±1 m**
   (far more than a sit/stand change needs) *before* the gain; `pos_scale` is
   the gain on the tracked translation (default **0.1** as a cautious start;
   1.0 = 1:1, range 0..2); `eye_height` is a separate manual float offset
@@ -65,8 +75,8 @@ pass; `BUG_FIXES.md` will be created from that run.
   intended mitigation is lowering `pos_scale`, not solving world collisions.
   Verified with a ±1 m sine feed at `pos_scale = 1.0` (log `dy` tracked `hmdY`
   1:1, clamped at ±1.000) and a constant 0.8 m re-zero (0.000 -> 0.800 ->
-  click -> 0.000). The shipped gain is now **0.1** because the owner found
-  that even 1:1 broke the render whenever the HMD left `0,0,0`.
+  click -> 0.000). After the count fix, back-buffer grabs at zero, +Y, +X and
+  +Z are all coherent; the log confirms `verts = 3 * count`.
 
 ## 3. HUD
 

@@ -1087,6 +1087,54 @@ Verified at 0.1: constant 0.8 m feed logs `tracked=+0.080` and the world draw
 shifts `dy=-0.080`; the right-stick click still drops `hmdY` and `tracked` to
 0.000. Raise the gain only after 0.1 is stable on hardware.
 
-Build: `built Nov  6 2026 11:09:06`, SHA-256
-`d6852fc74c1aba51ba064a7bedc2cbfc2893a5b5246ebd1b1b604e5e135c561a`,
+### Root cause: primitive count vs vertex count (any nonzero offset tore the frame)
+
+The owner then reported that even a tiny X/Y/Z movement broke the render. The
+gain was not the real problem: the copy path had a count bug.
+
+`IDirect3DDevice8::DrawPrimitive(PrimitiveType, StartVertex, PrimitiveCount)`
+passes a **primitive** count. `AerDrawPrimitive` treated it as a vertex count,
+so for a triangle list it copied and shifted only `count` vertices, then
+`DrawPrimitiveUP(..., count, ...)` rendered `3 * count` vertices - two thirds
+of them stale data from earlier draws. Any nonzero `CameraOffset` therefore
+produced garbage triangles.
+
+Fix:
+
+- `AerDrawPrimitive` now computes `verts = PrimVertexCount(prim, count)` (the
+  helper already used by the HUD path), copies/shifts `verts`, and passes the
+  original primitive count to `DrawPrimitiveUP`.
+- The log now reports `prim`, `count` and `verts`; the world draws show
+  `count=460 verts=1380`, confirming the 3x conversion.
+- `AerDrawIndexed` was passing a hardcoded stride 28 to
+  `DrawIndexedPrimitiveUP`; it now passes the real `stride` (20 or 28).
+
+Verified with back-buffer grabs at `0,0,0`, +0.5 m Y, +0.5 m X and +0.5 m Z
+(at `pos_scale = 0.1`): all four frames are coherent, with the expected small
+vertical/horizontal parallax. `pos_scale` stays at the owner-requested 0.1 as
+a cautious default; it can be raised now that the copy is correct.
+
+### Hands used the unscaled head offset
+
+Re-checked the packet against `XRAPI_V0_4_DESC.md`: floats 18-21 are the HMD
+quaternion and 22-24 the HMD position, so the sine feeder was moving the head
+correctly (confirmed by `EYE hmdY`). The hands, however, subtracted the **raw**
+`g_pose.headP` while the world used `pos_scale * headP`. At 0.1 the hands'
+parallax was ten times the world's, which reads as "the hands move, not the
+head".
+
+Fix: a single `ScaledHeadP()` helper returns the clamped, gain-scaled head
+translation used by both `CameraOffset()` and `HandViewPose()`. The manual
+`eye_height` is also subtracted along the head-up axis for the hands, so they
+stay anchored when the calibration offset changes.
+
+Before/after, same ±1 m head sine with the hands held fixed:
+
+| | hand screen positions (640x480) |
+|---|---|
+| pre-fix | `270,728` -> `875,-480` -> `1130,2800` -> `245,-326` (flying) |
+| post-fix | `522..625, 421..678` (bounded, correct close-range parallax) |
+
+Build: `built Nov  6 2026 12:49:34`, SHA-256
+`076f3851b880b626c9374d3560024b1300802ce19084c7672c404281284b920c`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).

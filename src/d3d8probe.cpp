@@ -4803,11 +4803,30 @@ static float EyeIpd(void)
     return 0.064f;
 }
 
+/* The head translation the render actually applies, in XrApi/world space:
+   the raw HMD position with Y clamped to +/-1 m, then the `pos_scale` gain.
+   World draws shift by the negative of this in camera axes; the hands
+   subtract the same value so their parallax matches the world. Without this
+   the hands used the raw headP and moved 1/pos_scale times too far. */
+static void ScaledHeadP(float out[3])
+{
+    out[0] = g_pose.headP[0];
+    out[1] = g_pose.headP[1];
+    out[2] = g_pose.headP[2];
+
+    if (out[1] >  1.0f) out[1] =  1.0f;
+    if (out[1] < -1.0f) out[1] = -1.0f;
+
+    out[0] *= g_posScale;
+    out[1] *= g_posScale;
+    out[2] *= g_posScale;
+}
+
 /* The HMD translation relative to the recentre, in the camera's own axes.
    The game's position writes are disabled (it clamps Y and fights the head),
-   so the world is shifted by the negative of this at draw time. The hands are
-   already in the head frame and need no shift. `eye_height` is a manual float
-   calibration offset (default 0, clamped +/-5). */
+   so the world is shifted by the negative of this at draw time. The hands
+   subtract `ScaledHeadP` too (see HandViewPose). `eye_height` is a manual
+   float calibration offset (default 0, clamped +/-5). */
 static void CameraOffset(float out[3])
 {
     float r[3], p[3];
@@ -4818,21 +4837,13 @@ static void CameraOffset(float out[3])
     HandCross(g_pose.headU, g_pose.headF, r);    /* camera right */
     HandNorm(r);
 
-    p[0] = g_pose.headP[0];
-    p[1] = g_pose.headP[1];
-    p[2] = g_pose.headP[2];
+    ScaledHeadP(p);
 
-    /* A player switching between sitting and standing moves well under a
-       metre. Clamp the raw tracked height before applying the gain, so
-       lowering `pos_scale` does not silently loosen the physical limit. */
-    if (p[1] >  1.0f) p[1] =  1.0f;
-    if (p[1] < -1.0f) p[1] = -1.0f;
-
-    out[0] = g_posScale * (p[0]*r[0] + p[1]*r[1] + p[2]*r[2]);
-    out[1] = g_posScale * (p[0]*g_pose.headU[0] + p[1]*g_pose.headU[1]
-                           + p[2]*g_pose.headU[2]);
-    out[2] = g_posScale * (p[0]*g_pose.headF[0] + p[1]*g_pose.headF[1]
-                           + p[2]*g_pose.headF[2]);
+    out[0] = p[0]*r[0] + p[1]*r[1] + p[2]*r[2];
+    out[1] = p[0]*g_pose.headU[0] + p[1]*g_pose.headU[1]
+           + p[2]*g_pose.headU[2];
+    out[2] = p[0]*g_pose.headF[0] + p[1]*g_pose.headF[1]
+           + p[2]*g_pose.headF[2];
 
     /* `eye_height` is a manual calibration added after the gain so it keeps
        its own wider limit. */
@@ -5144,7 +5155,7 @@ static HRESULT __stdcall hkDrawIndexedPrimitiveUP(void* dev, DWORD prim,
 static HRESULT AerDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
 {
     void* vb = NULL;
-    UINT stride = 0, i;
+    UINT stride = 0, i, verts;
     BYTE* data = NULL;
     PFN_VBLock lock;
     PFN_VBUnlock unlock;
@@ -5152,7 +5163,13 @@ static HRESULT AerDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
     static long logged = 0;
 
     if (!o_GetStreamSource || !o_DrawPrimitiveUP) return E_FAIL;
-    if (count == 0 || count > AER_MAX_V) return E_FAIL;
+    /* DrawPrimitive's third argument is a PRIMITIVE count, not a vertex
+       count. Convert before touching the vertex buffer: copying only
+       `count` vertices for a triangle list left two thirds of the draw
+       reading stale memory, which is why any HMD offset tore the frame
+       apart. */
+    verts = PrimVertexCount(prim, count);
+    if (verts == 0 || verts > AER_MAX_V) return E_FAIL;
     if (o_GetStreamSource(dev, 0, &vb, &stride) != S_OK || !vb) return E_FAIL;
     if (stride != 20 && stride != 24) { ReleaseIUnknown(vb); return E_FAIL; }
 
@@ -5174,7 +5191,7 @@ static HRESULT AerDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
     dz = -off[2];
     if (g_stereoMode == STEREO_AER && InGameplay())
         dx -= (g_eyeRight ? 0.5f : -0.5f) * EyeIpd();
-    for (i = 0; i < count; ++i) {
+    for (i = 0; i < verts; ++i) {
         const BYTE* src = data + (SIZE_T)i * stride;
         BYTE* dst = g_aerVerts + (SIZE_T)i * stride;
         memcpy(dst, src, stride);
@@ -5187,8 +5204,9 @@ static HRESULT AerDrawPrimitive(void* dev, DWORD prim, UINT start, UINT count)
 
     if (logged < 20 || (g_frame % 600) == 0) {
         ++logged;
-        LogD("STEREO   offset primitive: count=%u stride=%u dx=%+.3f dy=%+.3f dz=%+.3f",
-             count, stride, dx, dy, dz);
+        LogD("STEREO   offset primitive: prim=%u count=%u verts=%u stride=%u"
+             " dx=%+.3f dy=%+.3f dz=%+.3f",
+             prim, count, verts, stride, dx, dy, dz);
     }
     return o_DrawPrimitiveUP(dev, prim, count, g_aerVerts, stride);
 }
@@ -5975,7 +5993,7 @@ static HRESULT AerDrawIndexed(void* dev, DWORD prim, UINT minIdx, UINT numV,
 
     return o_DrawIndexedPrimitiveUP(dev, prim, 0, numV, primCount,
                                     g_aerIdx, D3DFMT_INDEX16,
-                                    g_aerVerts, 28);
+                                    g_aerVerts, stride);
 }
 
 static HRESULT __stdcall hkDrawIndexedPrim(void* dev, DWORD prim, UINT minIdx,
@@ -6457,7 +6475,7 @@ static void HandViewPose(const float* hp, const float* hf, const float* hu,
                          BOOL isRight, BOOL flip,
                          float vp[3], float vf[3], float vu[3], float vr[3])
 {
-    float headR[3], headU[3], rel[3];
+    float headR[3], headU[3], rel[3], sh[3];
     float up0[3] = { 0.0f, 1.0f, 0.0f };
     BOOL noPos = (HandLen(hp) < 0.01f);
     BOOL noDir = (HandLen(hf) < 0.01f);
@@ -6483,9 +6501,14 @@ static void HandViewPose(const float* hp, const float* hf, const float* hu,
             LogD("HAND     no controller hand position; using fallback offsets");
         }
     } else {
-        rel[0] = hp[0] - g_pose.headP[0];
-        rel[1] = hp[1] - g_pose.headP[1];
-        rel[2] = hp[2] - g_pose.headP[2];
+        /* Subtract the same scaled/clamped head offset the world draws use,
+           plus the manual eye-height calibration. The hand is a fixed point
+           in the play space, so the camera moving by eye_height must move it
+           the opposite way in view space. */
+        ScaledHeadP(sh);
+        rel[0] = hp[0] - sh[0] - g_eyeHeight * headU[0];
+        rel[1] = hp[1] - sh[1] - g_eyeHeight * headU[1];
+        rel[2] = hp[2] - sh[2] - g_eyeHeight * headU[2];
         vp[0] = HandDot(rel, headR);
         vp[1] = HandDot(rel, headU);
         vp[2] = HandDot(rel, g_pose.headF);
