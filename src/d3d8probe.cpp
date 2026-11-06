@@ -77,6 +77,7 @@ static void MenuPointerKeys(PBYTE p);
 static BOOL MenuPointerPos(float* x, float* y);
 static BOOL VrMenuPanel(void);
 static BOOL InGameplay(void);
+static BOOL LevelActive(void);
 static BOOL g_steer = TRUE;    /* always-on by default; 3 is a debug toggle */
 
 static void SteerRecentre(void);
@@ -3825,6 +3826,30 @@ static BOOL InGameplay(void)
         }
     }
     return g_lastXforms == 0 && g_lastIndexed >= GAMEPLAY_MIN_INDEXED;
+}
+
+/* The game's own "a player exists in a mission" state, WITHOUT the per-frame
+   draw signature. The briefing/objective, death and victory screens make this
+   false; a level spawn makes it true. Used only to detect the level-start edge
+   before SteerTick writes the camera, so the captured yaw is still the spawn
+   yaw rather than the previous level's head offset. A pause-menu round trip
+   leaves it true, so it does not recentre on resume. */
+static BOOL LevelActive(void)
+{
+    if (g_exeBase) {
+        int mission = -1, result = -1, player = -1;
+        const UINT_PTR b = g_exeBase;
+        if (SafeReadInt(b + (0x490A44 - 0x400000), &mission) &&
+            SafeReadInt(b + (0x490A48 - 0x400000), &result) &&
+            SafeReadInt(b + (0x48DDD8 - 0x400000), &player)) {
+            if (mission == 0x40) return FALSE;   /* title */
+            if (mission < 0)     return FALSE;
+            if (result != 0)     return FALSE;   /* death / victory */
+            if (player < 0)      return FALSE;   /* briefing / objective */
+            return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 /* Haptics are driven by the magazine counter falling. Both slots are watched
@@ -7823,6 +7848,21 @@ static HRESULT __stdcall hkBeginScene(void* dev)
         /* In "0" desktop mode the numpad owns the right hand; re-apply after
            the poll so the XrApi packet does not overwrite it. */
         if (g_manualRight) ManualHandApply();
+        /* Level-start recentre must happen BEFORE SteerTick writes the camera,
+           or it captures a yaw that already contains the old head offset.
+           LevelActive() is the game's own mission/result/player state; it goes
+           false on the briefing/objective and death/victory screens and true
+           again when a player exists, so a pause-menu round trip does not
+           re-trigger it. */
+        {
+            static BOOL wasLevelActive = FALSE;
+            const BOOL levelActive = LevelActive();
+            if (levelActive && !wasLevelActive) {
+                Log("STEER    level start - recentring HMD XYZ/yaw to spawn");
+                SteerRecentre();
+            }
+            wasLevelActive = levelActive;
+        }
         /* Only drive the camera while the previous frame looked like gameplay.
            In the title, briefing/objective, menus and death screens the game
            owns its own camera and the runtime is in MODE_VR 0. */
@@ -7996,11 +8036,6 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
         const int gameVr = gameplay ? XR_VR_ON : XR_VR_OFF;
         static int lastGameVr = -1;
         if (gameVr != lastGameVr) {
-            /* Entering gameplay from a menu/title/level load: make the HMD's
-               current XYZ and yaw the new 0,0,0 against the player model.
-               This is the level-start recentre the owner asked for. */
-            if (gameVr == XR_VR_ON && lastGameVr != XR_VR_ON)
-                SteerRecentre();
             Log("XR       MODE_VR -> %d  (%s)  last frame: %ld xforms,"
                 " %ld indexed, %ld UP",
                 gameVr,

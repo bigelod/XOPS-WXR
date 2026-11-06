@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 18:01:24`, SHA-256
-`0d24ca6ea2b685d3b303faf5fbf016194829696b0582415a4f88b313129cd524`,
+**Current build:** `built Nov  6 2026 18:07:10`, SHA-256
+`89579240c173ff4d6027b4cd66a9dbb023eae3d7036352b72e320f3566db826f`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
-Release build: 282,624 bytes, SHA-256
-`a4b214618fe7ad8dfc7c5a050eb35728c17091db8321853bf0109624b332c908`.
+Release build: 283,136 bytes, SHA-256
+`56ff4c7c8e99d40f0d7f9435c357a417a87642217b5868a67e38fa8fa6737226`.
 
 ---
 
@@ -95,11 +95,14 @@ native frame fills it with no bars or crop.
   per frame. In AER the runtime stays `MODE_VR=1` for the whole run; menus,
   death, objective and victory keep `MODE_3D=0` (mono) and are drawn as the
   centre-third panel. `stereo = mono | aer`; `mono` ships.
-- **Level-start recentre:** when `MODE_VR` goes 0 -> 1 (title/menu -> gameplay)
-  `SteerRecentre()` is called. It asks the XrApi layer to zero the pose yaw and
-  XYZ and captures the game's current camera yaw/position as the new reference,
-  so the player's current head position and facing are the new `0,0,0` and
-  zero-yaw origin against the player model.
+- **Level-start recentre:** `LevelActive()` (the game's mission/result/player
+  state, without the draw signature) rises when a player exists in a mission.
+  `hkBeginScene` sees that edge **before** `SteerTick` writes the camera and
+  calls `SteerRecentre()`. That captures the untouched spawn yaw, so an old
+  menu/level head offset cannot leak in. A pause-menu round trip leaves
+  `LevelActive` true and does not recentre. It asks the XrApi layer to zero the
+  pose yaw and XYZ, making the player's current head position and facing the
+  new `0,0,0` and zero-yaw origin against the player model.
 - **Render-side 6DOF / eye height:** the game clamps its camera Y every frame,
   so `SteerTick` writes only yaw/pitch and never position. `CameraOffset()`
   rotates `headP` into the camera frame and the draw copies shift the world

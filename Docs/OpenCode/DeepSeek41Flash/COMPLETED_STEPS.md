@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 18:01:24`, SHA-256
-`0d24ca6ea2b685d3b303faf5fbf016194829696b0582415a4f88b313129cd524`.
-Release: 282,624 bytes, SHA-256
-`a4b214618fe7ad8dfc7c5a050eb35728c17091db8321853bf0109624b332c908`.
+**Last build covered:** `built Nov  6 2026 18:07:10`, SHA-256
+`89579240c173ff4d6027b4cd66a9dbb023eae3d7036352b72e320f3566db826f`.
+Release: 283,136 bytes, SHA-256
+`56ff4c7c8e99d40f0d7f9435c357a417a87642217b5868a67e38fa8fa6737226`.
 
 ---
 
@@ -52,11 +52,11 @@ Release: 282,624 bytes, SHA-256
   every frame, so the HMD translation is **not written to the game's
   position**. Instead `CameraOffset()` rotates the head's `headP` into the
   camera frame and the world vertex copies are shifted opposite the eye in
-  `AerDrawPrimitive`/`AerDrawIndexed`. Hands, gun and laser are **not**
-  translated by the current HMD position: their positions are relative to the
-  **default/recentre head height** (`0,0,0` = the default HMD position, so a
-  controller around `-Y` is at hand height), and only the head's
-  **orientation** is applied. Moving the HMD moves the view, not the hands.
+  `AerDrawPrimitive`/`AerDrawIndexed`. Hands, gun and laser subtract the same
+  clamped, `pos_scale`-scaled `ScaledHeadP()` plus `eye_height`, so they are
+  **world-anchored at the recentre position**: moving the HMD moves the view,
+  not the hands. They are not counter-rotated against the sprite roll; the
+  whole world and the hands roll together.
   Both world paths are camera-space **metres** - the old `*100`
   centimetre assumption on the non-indexed path was the cause of the view
   flying through floors and ceilings and is gone. **`DrawPrimitive`'s third
@@ -71,7 +71,9 @@ Release: 282,624 bytes, SHA-256
   also editable in the launcher's Options dialog); `eye_height` is a separate
   manual float offset (default `0`, clamped ±5). A **right-stick click** calls
   `SteerRecentre()`, so the current HMD height becomes the flat game player
-  height (`0`). Head yaw is still written to both camera clusters, so
+  height (`0`); a level start does the same from the `LevelActive()` rising
+  edge **before** `SteerTick` writes the camera, so the untouched spawn yaw is
+  the reference. Head yaw is still written to both camera clusters, so
   stick-forward follows the head. This is visual-only and does **not** add
   collision: standing or leaning into geometry can still clip, and the
   intended mitigation is lowering `pos_scale`, not solving world collisions.

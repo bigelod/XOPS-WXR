@@ -418,9 +418,10 @@ centimetre assumption and threw the view through floors and ceilings. HMD Y is
 clamped to ±1 m before the gain; `pos_scale` is that gain (default **1.0** =
 1:1, 0..2, also in the launcher's Options dialog) and `eye_height` is a manual
 float offset (default 0, ±5). A
-**right-stick click** recentres; entering gameplay from a menu/level load also
-calls `SteerRecentre()`, so the player's current HMD XYZ and facing become the
-new origin against the player model. Head yaw is still written to both camera
+**right-stick click** recentres; a level start also calls `SteerRecentre()`
+before `SteerTick` touches the camera, so the untouched spawn yaw is captured
+and the player's current HMD XYZ and facing become the new origin against the
+player model. Head yaw is still written to both camera
 clusters, so stick-forward follows the head. All debug keys now require manual
 PC mode
 (`0`), which WinlatorXR does not map by default. Verified with a ±1 m sine
@@ -441,9 +442,10 @@ from the wrong yaw/height. The fixes:
   into the no-roll head basis, so hands stay at the level-start/recentre
   position. The hand counter-rotation against `SpriteRoll` was removed; hands
   and gun roll with the presented world.
-- Every level start (`MODE_VR` 0 -> 1) calls `SteerRecentre()`; the current HMD
-  XYZ and yaw become the new origin against the player model. The right-stick
-  click does the same at any time.
+- Every level start calls `SteerRecentre()` from the `LevelActive()` rising
+  edge, before `SteerTick` writes the camera, so the captured yaw is the
+  untouched spawn yaw. The current HMD XYZ and yaw become the new origin
+  against the player model. The right-stick click does the same at any time.
 - Gameplay and the AER floating menu strip **all** physical keyboard/mouse
   input from `GetKeyboardState` and swallow the matching `WM_KEY*`/`WM_MOUSE*`
   messages. Only `ESC` and `0` survive. A/B/X/Y and arrows are blocked in VR on
@@ -536,10 +538,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 18:01:24`, SHA-256
-`0d24ca6ea2b685d3b303faf5fbf016194829696b0582415a4f88b313129cd524`,
-deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 282,624 bytes,
-SHA-256 `a4b214618fe7ad8dfc7c5a050eb35728c17091db8321853bf0109624b332c908`.
+Current handover build: `built Nov  6 2026 18:07:10`, SHA-256
+`89579240c173ff4d6027b4cd66a9dbb023eae3d7036352b72e320f3566db826f`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 283,136 bytes,
+SHA-256 `56ff4c7c8e99d40f0d7f9435c357a417a87642217b5868a67e38fa8fa6737226`.
 
 ---
 

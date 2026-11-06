@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  6 2026 18:01:24`, SHA-256
-`0d24ca6ea2b685d3b303faf5fbf016194829696b0582415a4f88b313129cd524`.
-Release build: 282,624 bytes, SHA-256
-`a4b214618fe7ad8dfc7c5a050eb35728c17091db8321853bf0109624b332c908`.
+Current dev build: `built Nov  6 2026 18:07:10`, SHA-256
+`89579240c173ff4d6027b4cd66a9dbb023eae3d7036352b72e320f3566db826f`.
+Release build: 283,136 bytes, SHA-256
+`56ff4c7c8e99d40f0d7f9435c357a417a87642217b5868a67e38fa8fa6737226`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1262,9 +1262,13 @@ wrong. Changes:
 - Removed the hand counter-rotation against `SpriteRoll`. The entire game image
   rolls with the head; counter-rotating the hands made them view-glued and they
   swung on every head roll. They now roll with the presented world.
-- `MODE_VR` 0 -> 1 (level start) calls `SteerRecentre()`, so the current HMD
-  XYZ and yaw become the new `0,0,0` / zero-yaw origin against the player model.
-  Right-stick click still recentres at any time.
+- The game's `LevelActive()` state (mission/result/player, no draw signature)
+  rises at a level spawn. `hkBeginScene` catches that edge **before**
+  `SteerTick` writes the camera and calls `SteerRecentre()`, so the untouched
+  spawn yaw is captured; an old menu/level head offset cannot leak in. Pausing
+  and resuming leaves `LevelActive` true, so it does not recentre on every
+  pause. The current HMD XYZ and yaw become the new `0,0,0` / zero-yaw origin
+  against the player model. Right-stick click still recentres at any time.
 - **Full VR input isolation:** in gameplay and on the AER menu panel, all
   physical keys/mouse are stripped from `GetKeyboardState`, and the window
   procedure now also swallows `WM_KEY*`/`WM_MOUSE*`. Only `ESC` and `0`
