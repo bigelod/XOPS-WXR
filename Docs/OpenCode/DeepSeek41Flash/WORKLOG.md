@@ -893,23 +893,25 @@ Build `built Nov  6 2026 06:14`, SHA-256
 
 The bare palm box gave no readable roll/pitch. Following the
 `Docs/general_wxr/SixDOFinatorCalibration` hand markings, the hand is now a
-palm box plus:
+compact palm plate plus:
 
-- four white finger slabs, fanned outward and staggered in length
-  (1.9/2.3/2.2/1.8 cm), sitting toward the back of the hand so they stay
-  visible above the gun grip;
-- one thumb slab on the inner side (right hand -> -right, left hand ->
-  +right), angled forward and inward.
+- four **short, chunky glove-textured finger slabs** with black outlines:
+  half-extents 4.2 mm wide, 9.5 mm thick, 7.5-8.5 mm long, staggered and
+  fanned slightly, all but touching the palm's leading edge;
+- one **thick thumb slab** (5.5 x 9.5 x 13 mm) on the inner side (local
+  -right on both hands, because both controller bases point +right outward),
+  angled **outward from its own side** and forward. The first version angled
+  it across the palm, which looked like a broken joint.
 
-The palm keeps the dark glove texture; fingers and thumb use the white texture
-so their direction reads at a glance. `HandDrawBoxBasis` is the shared
-six-face box helper. Verified with the exact SixDOFinator
-`SamplePoseData.txt` packet: the off hand shows the white fan clearly and the
-thumb side is correct for the left hand; the dominant hand's fingers sit
-around the gun grip. `.` grabs the frame pair for inspection.
+The palm is 60% of the earlier length (3.8 cm total) and 2.4 cm thick, so the
+fingers and thumb are nearly as thick as the hand body. All parts share the
+glove texture and black outlines. `HandDrawBoxBasis` is the shared six-face
+box helper. Verified with the exact SixDOFinator `SamplePoseData.txt` packet
+in a NONE/NONE level: both hands read clearly, the left thumb is on the inner
+side, and the stubby fingers point forward. `.` grabs the frame pair.
 
-Build `built Nov  6 2026 06:26`, SHA-256
-`2b539140707e1b256a0a2687438a35e288bb4d69e6f82322f89be71ef4f8ea92`.
+Build `built Nov  6 2026 06:41`, SHA-256
+`74931a59f64cc9a559c1e49d14261881eba296c010832f174402cd76f82a057a`.
 
 Test hand placement is **data, not code**: to bring the hands forward for a
 clear look, `SamplePoseData.txt` is copied and the two hand `z` values are

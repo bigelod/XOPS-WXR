@@ -279,10 +279,10 @@ HWXR, Shogo WXR and IMVR all hit this). Set `hand_flip = true` to recreate
 the old, uncorrected gun roll on devices other than a Quest 3. The off-hand
 stays unflipped.
 
-The hand mesh is a dark palm box with four small **white fanned finger slabs**
-and an angled **thumb slab**, SixDOFinator-calibration style: their direction
-and the thumb side make roll/pitch/yaw obvious at a glance without a full
-glove model.
+The hand mesh is a compact dark palm plate with four **short, chunky finger
+slabs** and a thick **thumb slab** angled outward from its own side, all using
+the same glove texture and black outlines, SixDOFinator-calibration style:
+their direction and the thumb side make roll/pitch/yaw obvious at a glance.
 
 The game's own 3D HUD weapon-slot draws are **indexed** draws and are left
 untouched; only the stride-28 2D `DrawPrimitiveUP` HUD set is replaced. The

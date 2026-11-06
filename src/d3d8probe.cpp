@@ -6442,7 +6442,10 @@ static void HandDrawBoxBasis(void* dev, const float c[3], const float vf[3],
 static void HandDrawBox(void* dev, const float vp[3], const float vf[3],
                         const float vu[3], const float vr[3], BOOL isRight)
 {
-    const float hw = 0.016f, hh = 0.028f, hl = 0.028f, off = 0.023f;
+    /* Flatter than a cube, and only 60% as long: the calibration reference is
+       a compact palm plate, and a thin plate is what makes the thumb side and
+       roll obvious. */
+    const float hw = 0.020f, hh = 0.012f, hl = 0.019f, off = 0.023f;
     float c[3];
     int i;
 
@@ -6458,14 +6461,14 @@ static void HandDrawBox(void* dev, const float vp[3], const float vf[3],
        foreshortened. They sit toward the back of the hand so they stay
        visible above a grip. */
     {
-        const float lens[4] = { 0.019f, 0.023f, 0.022f, 0.018f };
+        const float lens[4] = { 0.0075f, 0.0085f, 0.0080f, 0.0070f };
         for (i = 0; i < 4; ++i) {
-            const float sideOff = (-1.5f + (float)i) * 0.0082f;
+            const float sideOff = (-1.5f + (float)i) * 0.0098f;
             float base[3], ff[3], fu[3], fr[3], fc[3], d, len;
 
-            base[0] = c[0] + vf[0]*hl + vr[0]*sideOff + vu[0]*0.010f;
-            base[1] = c[1] + vf[1]*hl + vr[1]*sideOff + vu[1]*0.010f;
-            base[2] = c[2] + vf[2]*hl + vr[2]*sideOff + vu[2]*0.010f;
+            base[0] = c[0] + vf[0]*hl + vr[0]*sideOff + vu[0]*0.001f;
+            base[1] = c[1] + vf[1]*hl + vr[1]*sideOff + vu[1]*0.001f;
+            base[2] = c[2] + vf[2]*hl + vr[2]*sideOff + vu[2]*0.001f;
 
             ff[0] = vf[0] + vr[0]*sideOff*4.0f;
             ff[1] = vf[1] + vr[1]*sideOff*4.0f;
@@ -6480,35 +6483,39 @@ static void HandDrawBox(void* dev, const float vp[3], const float vf[3],
             HandNorm(fr);
 
             len = lens[i];
-            fc[0] = base[0] + ff[0]*(len + 0.001f);
-            fc[1] = base[1] + ff[1]*(len + 0.001f);
-            fc[2] = base[2] + ff[2]*(len + 0.001f);
+            fc[0] = base[0] + ff[0]*len;
+            fc[1] = base[1] + ff[1]*len;
+            fc[2] = base[2] + ff[2]*len;
 
             HandDrawBoxBasis(dev, fc, ff, fu, fr,
-                             0.0034f, 0.0038f, len,
-                             0xFFF4F4F4u, g_whiteTex);
+                             0.0042f, 0.0095f, len,
+                             0xFFFFFFFFu, g_handTex);
         }
     }
 
-    /* Thumb: on the inner side (right hand -> -right, left hand -> +right),
-       angled forward and inward. */
+    /* Thumb: on the inner side. Both controller bases put their local +right
+       outward, so the inner side is -right on either hand. Angled forward and
+       inward. */
     {
-        const float side = isRight ? -1.0f : 1.0f;
+        const float side = -1.0f;
         float tc[3], tf[3], tu[3], tr[3], len, d;
 
-        tc[0] = c[0] + vr[0]*side*(hw + 0.004f)
-                     + vu[0]*0.004f + vf[0]*(hl*0.18f);
-        tc[1] = c[1] + vr[1]*side*(hw + 0.004f)
-                     + vu[1]*0.004f + vf[1]*(hl*0.18f);
-        tc[2] = c[2] + vr[2]*side*(hw + 0.004f)
-                     + vu[2]*0.004f + vf[2]*(hl*0.18f);
+        tc[0] = c[0] + vr[0]*side*hw
+                     + vu[0]*0.001f + vf[0]*(hl*0.15f);
+        tc[1] = c[1] + vr[1]*side*hw
+                     + vu[1]*0.001f + vf[1]*(hl*0.15f);
+        tc[2] = c[2] + vr[2]*side*hw
+                     + vu[2]*0.001f + vf[2]*(hl*0.15f);
 
-        tf[0] = vf[0]*0.72f - vr[0]*side*0.69f;
-        tf[1] = vf[1]*0.72f - vr[1]*side*0.69f;
-        tf[2] = vf[2]*0.72f - vr[2]*side*0.69f;
+        /* Angle the thumb outward from its own side, not across the palm:
+           the old sign bent it through the hand. */
+        tf[0] = vf[0]*0.50f + vr[0]*side*0.87f;
+        tf[1] = vf[1]*0.50f + vr[1]*side*0.87f;
+        tf[2] = vf[2]*0.50f + vr[2]*side*0.87f;
         len = sqrtf(tf[0]*tf[0] + tf[1]*tf[1] + tf[2]*tf[2]);
         if (len > 0.001f) { tf[0] /= len; tf[1] /= len; tf[2] /= len; }
         else              { tf[0] = vf[0]; tf[1] = vf[1]; tf[2] = vf[2]; }
+        tc[0] += tf[0]*0.006f; tc[1] += tf[1]*0.006f; tc[2] += tf[2]*0.006f;
 
         tu[0] = vu[0]; tu[1] = vu[1]; tu[2] = vu[2];
         d = tu[0]*tf[0] + tu[1]*tf[1] + tu[2]*tf[2];
@@ -6520,7 +6527,7 @@ static void HandDrawBox(void* dev, const float vp[3], const float vf[3],
         HandNorm(tr);
 
         HandDrawBoxBasis(dev, tc, tf, tu, tr,
-                         0.0050f, 0.0050f, 0.013f, 0xFFE8E8E8u, g_whiteTex);
+                         0.0055f, 0.0095f, 0.013f, 0xFFFFFFFFu, g_handTex);
     }
 }
 

@@ -13,7 +13,7 @@ This file is the live "where we are right now and what is next".
   composited to the back buffer (native 4:3, no FOV change).
 - Centre-square HUD (text + panels), ammo, STATE colours, RELOADING/DEAD.
 - Both VR hands as depth-tested 3D boxes at their XrApi poses, with four
-  fanned white finger slabs and an angled thumb so the hand's angles read.
+  short, chunky glove-textured finger slabs and a thick angled thumb.
 - Dominant-hand laser, depth-tested, from the hand.
 - **Hand aim:** while firing, the game's shot is aimed at the laser endpoint,
   and the view is restored before the world is drawn.
@@ -211,9 +211,9 @@ HAPTIC fires=N dur=F frames hand=both|left|right ...
 TAIL  idx N  vb=0x... numV=.. prim=.. tex=0x...
 ```
 
-Last built/deployed (Quest 3 hand roll + finger/thumb slabs):
-`built Nov  6 2026 06:26:56`, SHA-256
-`2b539140707e1b256a0a2687438a35e288bb4d69e6f82322f89be71ef4f8ea92`.
+Last built/deployed (chunky glove-textured hands):
+`built Nov  6 2026 06:41:06`, SHA-256
+`74931a59f64cc9a559c1e49d14261881eba296c010832f174402cd76f82a057a`.
 
 ## 8. Next steps
 
