@@ -44,11 +44,11 @@ latest fixes below.
   failing maps can be compared directly.
 
 **Open aim question:** the shot trace reads A (`0x404CD5`), while the character
-movement reads B. The user reports the character yaw is not being turned and
-that some levels cannot aim at the laser. The new yaw log is the next evidence.
-If A and B diverge, the likely fix is to make the character yaw B the single
-authority and derive A from it (or patch the clamp), not to keep a separate
-camera offset.
+movement reads B. The owner reports aim works on BUILDING_EXT but not on the
+other maps tested; the map id in the new yaw log lets those maps be compared
+directly. If A and B diverge, the likely fix is to make the character yaw B the
+single authority and derive A from it (or patch the clamp), not to keep a
+separate camera offset.
 
 **Tomorrow's first pass:** copy the 01:48 `d3d8.dll` into the container, confirm
 `INPUT direct player-update hook installed at IDA 0x413AC4`, test the left menu
