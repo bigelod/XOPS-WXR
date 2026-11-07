@@ -46,8 +46,10 @@ Floating menus (mono and AER)
 -----------------------------
 The runtime stays in VR for the whole run. The title, menus, objective, death
 and victory screens appear as a floating panel in the centre of the view. Point
-the dominant hand at it and use the right trigger as left click. In AER those
-screens stay mono; AER is only active in gameplay.
+the dominant hand at it and use the right trigger as left click, or use the
+WinlatorXR mouse: pointing and clicking with the runtime mouse works on the
+panel, and the last one moved takes over the pointer. Gameplay stays XrApi-only.
+In AER those screens stay mono; AER is only active in gameplay.
 
 Tuning in config.txt
 --------------------

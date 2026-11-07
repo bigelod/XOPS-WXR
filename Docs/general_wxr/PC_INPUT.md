@@ -146,7 +146,40 @@ Limits to remember:
 - Prefer an in-process call or state hook when the mod already runs in the
   game process.
 
-### 3.4 Reference implementations of the InputAPI
+### 3.4 The runtime's own mouse is not synthetic input
+
+There is one mouse path to keep: the one **WinlatorXR supplies**. The runtime
+can give a flat game its own mouse - the right controller's gyro/stick mapping,
+or a pointer it passes through. That mouse works for aiming a pointer and for
+clicking menus. Blocking it while adding a hand laser is a regression, not an
+improvement: in XOPS-WXR it broke a path the player already had.
+
+The distinction that matters:
+
+- **Synthetic input** is what your mod invents: `SendInput`, `mouse_event`,
+  `keybd_event`, posted `WM_*` messages, or a cursor warp you perform yourself.
+  Do not ship that.
+- **Runtime input** is what WinlatorXR already delivers to the game. It is not
+  yours to suppress. If the game receives a mouse click from the runtime, treat
+  it like an XrApi packet: let it through and make sure the game reads it.
+
+A practical shape for a floating/flat screen:
+
+- Block desktop mouse input only where the VR view owns the pointer. In
+  XOPS-WXR that is gameplay only.
+- On menus and other flat panels, pass `GetCursorPos` and the mouse buttons
+  through. If you also draw a hand laser, arbitrate between the two pointers
+  by "most recent movement wins", so neither one fights the other every frame.
+- Do not clear mouse buttons in a focus filter. The container may own focus
+  while still delivering the runtime's mouse. ESC and the manual-mode key are
+  not the only inputs that must survive an unfocused window.
+
+If you composite the flat screen into part of the frame (XOPS uses the centre
+third), remap the real cursor from that rectangle into the game's logical
+640x480 UI space before publishing it. Passing the raw window position through
+only aligns at the centre of the panel.
+
+### 3.5 Reference implementations of the InputAPI
 
 Neither of these is an XrApi pose-and-matrix mod like the one you are probably
 writing. Both are **external input injectors**: they run alongside the game
@@ -207,10 +240,19 @@ What was tried and what happened:
 - **Direct ESC consumer hook:** calls the game's own `0x413CF0` with a fresh
   ESC edge. This is the working path for menu/quit.
 
-The remaining non-debug mouse path in XOPS is the menu pointer, which still
-feeds the game's own `GetCursorPos`/`ScreenToClient` and `VK_LBUTTON` state.
-The next step is to call the title/mission-select action `0x411F80` with a
-chosen hotspot instead of relying on the cursor.
+- **Blocking the runtime mouse on menus:** also wrong. The mod originally
+  cleared mouse buttons and froze the cursor on every non-gameplay screen to
+  force the hand laser. WinlatorXR's own mouse was a working input path there,
+  and the block broke it. The window procedure now blocks the mouse in
+  **gameplay only**. On the floating panel, the runtime mouse and the hand
+  laser are arbitrated by "most recent movement wins", and the real cursor is
+  remapped from the centre-third rectangle into the game's 640x480 UI space.
+
+The remaining non-debug mouse path in XOPS is therefore deliberate: the
+runtime's mouse feeds the game's own `GetCursorPos`/`ScreenToClient` and
+`VK_LBUTTON` state on menus. A direct title/mission-select call (`0x411F80`
+with a chosen hotspot) is still possible as a future simplification, but it is
+not needed to make the mouse work.
 
 ---
 
@@ -250,6 +292,11 @@ Before writing or approving input code in an XrAPI mod:
       key, do not make the game see a fresh edge every frame unless that is
       what a real held key does.
 - [ ] Does the code work when the game window is unfocused?
+- [ ] Are you blocking the **runtime's** mouse on a menu or flat panel? If yes,
+      you are removing a working input path. Block only where the VR view owns
+      the pointer.
+- [ ] If you composite the flat screen into part of the frame, does the mouse
+      position still map into the game's logical UI space?
 - [ ] Is any debug fallback compiled and called only under a dev build?
 
 Red flags in a patch:
@@ -266,8 +313,11 @@ Red flags in a patch:
 ## 7. Bottom line
 
 **XrApi is the source of truth. If a packet arrives, the mod is responsible for
-delivering the action.**
+delivering the action.** The same is true of input the runtime already
+delivers, including its mouse.
 
 Deliver it by running the game's own code, not by asking Windows to invent a
-keyboard or mouse event. Windows input is a different process, a different
-focus, and a different abstraction; on WinlatorXR it is usually the wrong one.
+keyboard or mouse event. Windows input you synthesize is a different process, a
+different focus, and a different abstraction; on WinlatorXR it is usually the
+wrong one. Windows input the runtime supplies is not yours to synthesise or to
+block.

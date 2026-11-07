@@ -1910,6 +1910,17 @@ static BOOL  g_menuPointerValid = FALSE;
 static float g_menuPointerX     = 320.0f;
 static float g_menuPointerY     = 240.0f;
 static int   g_menuClickPulse   = 0;
+/* The runtime's own mouse is a valid menu pointer too (WinlatorXR supplies one
+   for the flat screens). Track the last frame each pointer moved, so the most
+   recently moved one wins; otherwise the hand laser and the runtime cursor
+   would fight over GetCursorPos every frame. */
+static POINT g_menuRealCursor = {0, 0};
+static BOOL  g_menuRealKnown  = FALSE;
+static float g_menuHandX      = 320.0f;
+static float g_menuHandY      = 240.0f;
+static BOOL  g_menuHandKnown  = FALSE;
+static long  g_menuMouseFrame = -1000000;
+static long  g_menuHandFrame  = -1000000;
 /* WinlatorXR's current left-stick mapping arrives as the arrow keys, not as
    XrApi analog moveX/moveY. Capture those raw presses before the VR filter
    removes them, and turn them back into movement. This also means an arrow
@@ -2215,6 +2226,17 @@ static BOOL InputKeyBlocked(int vk)
     return vk != VK_ESCAPE && vk != '0';
 }
 
+/* The mouse buttons are a valid menu pointer whether the click comes from the
+   hand laser or from WinlatorXR's own mouse. The focus mute is for desktop
+   keyboard input crossing windows; it must not eat a runtime mouse click just
+   because the container owns focus. */
+static BOOL MenuMouseVk(int vk)
+{
+    if (g_vrExclusive && InGameplay()) return FALSE;
+    return vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON ||
+           vk == VK_XBUTTON1 || vk == VK_XBUTTON2;
+}
+
 static WNDPROC g_origWndProc = NULL;
 
 /* Some of XOPS's keyboard handling may go through its window messages rather
@@ -2224,7 +2246,10 @@ static LRESULT CALLBACK VrWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (g_vrExclusive) {
         const BOOL gameplay = InGameplay() ? TRUE : FALSE;
-        const BOOL mouseBlocked = (gameplay || VrMenuPanel()) ? TRUE : FALSE;
+        /* Gameplay is VR-only: the desktop mouse must not fight the XrApi
+           viewport. Menus are the opposite - the runtime supplies a mouse
+           there and it works for pointing and clicking, so let it through. */
+        const BOOL mouseBlocked = gameplay ? TRUE : FALSE;
         switch (msg) {
         case WM_KEYDOWN: case WM_KEYUP:
         case WM_SYSKEYDOWN: case WM_SYSKEYUP:
@@ -2234,9 +2259,8 @@ static LRESULT CALLBACK VrWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (gameplay && wp != VK_ESCAPE && wp != '0') return 0;
             break;
         case WM_LBUTTONDOWN: case WM_LBUTTONUP:
-            /* Physical left clicks are blocked with the rest of the mouse on
-               gameplay and on the floating panel. The menu click is supplied
-               through the game's own GetKeyboardState image, not a message. */
+            /* Only gameplay blocks mouse messages now. Menus keep both the
+               runtime cursor and the hand-laser click. */
             if (mouseBlocked) return 0;
             break;
         case WM_MOUSEMOVE:
@@ -2271,7 +2295,8 @@ static SHORT WINAPI hkGetAsyncKeyState(int vk)
 {
     ++g_inCalls[IN_GETASYNCKEYSTATE]; ++g_inFrame[IN_GETASYNCKEYSTATE];
     if (!g_inReal[IN_GETASYNCKEYSTATE]) return 0;
-    if ((!GameWindowFocused() && vk != VK_ESCAPE && vk != '0') ||
+    if ((!GameWindowFocused() && vk != VK_ESCAPE && vk != '0' &&
+         !MenuMouseVk(vk)) ||
         InputKeyBlocked(vk)) return 0;
     return ((PFN_GetAsyncKeyState)g_inReal[IN_GETASYNCKEYSTATE])(vk);
 }
@@ -2319,11 +2344,14 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
         if (g_inputMuted) {
             /* ESC and 0 stay valid even when the game window is not the real
                foreground window: ESC is always the way out, and 0 is the
-               PC-only manual-input switch. Everything else is desktop input
-               and must not cross windows. */
+               PC-only manual-input switch. Mouse buttons also survive on the
+               non-gameplay screens: the runtime supplies a working mouse there
+               and its click must not be muted just because the container owns
+               focus. */
             int mk;
             for (mk = 0; mk < 256; ++mk)
-                if (mk != VK_ESCAPE && mk != '0') p[mk] = 0;
+                if (mk != VK_ESCAPE && mk != '0' && !MenuMouseVk(mk))
+                    p[mk] = 0;
         }
         {
             static int focusLogs = 0;
@@ -2422,7 +2450,8 @@ static SHORT WINAPI hkGetKeyState(int vk)
 {
   ++g_inCalls[IN_GETKEYSTATE]; ++g_inFrame[IN_GETKEYSTATE];
   if (!g_inReal[IN_GETKEYSTATE]) return 0;
-  if ((!GameWindowFocused() && vk != VK_ESCAPE && vk != '0') ||
+  if ((!GameWindowFocused() && vk != VK_ESCAPE && vk != '0' &&
+       !MenuMouseVk(vk)) ||
       InputKeyBlocked(vk)) return 0;
   return ((PFN_GetKeyState)g_inReal[IN_GETKEYSTATE])(vk);
 }
@@ -2439,29 +2468,100 @@ static BOOL WINAPI hkGetCursorPos(LPPOINT p)
         *p = g_lastCursor;
         return TRUE;
     }
-    /* Floating non-VR panel: the dominant hand is the mouse. Publish its hit
-       point on the 640x480 panel in the screen coordinates the game would get
-       from the real cursor, so its own GetCursorPos -> ScreenToClient path
-       produces the logical panel coordinate. */
+    /* Floating non-VR panel: two pointers are valid here. The dominant hand is
+       the VR laser; WinlatorXR's own mouse also works on the flat screens. Let
+       whichever moved most recently drive the game's cursor, so the two do not
+       fight over GetCursorPos every frame. The published point is in the game's
+       640x480 UI space, so its own GetCursorPos -> ScreenToClient path lands on
+       the same logical point the laser is drawn at. */
     if (VrMenuPanel()) {
-        float mx, my;
-        POINT q;
+        POINT real = {0, 0};
+        const BOOL realOk =
+            ((PFN_GetCursorPos)g_inReal[IN_GETCURSORPOS])(&real) ? TRUE : FALSE;
+        float mx = 0.0f, my = 0.0f;          /* hand, 640x480 logical */
+        float rx = 0.0f, ry = 0.0f;          /* runtime mouse, same space */
+        BOOL mouseInPanel = FALSE;
+        const BOOL handOk = MenuPointerPos(&mx, &my) ? TRUE : FALSE;
+
+        if (realOk) {
+            if (!g_menuRealKnown ||
+                real.x != g_menuRealCursor.x ||
+                real.y != g_menuRealCursor.y)
+                g_menuMouseFrame = g_frame;
+            g_menuRealCursor = real;
+            g_menuRealKnown  = TRUE;
+        }
+        if (handOk) {
+            if (g_menuHandKnown &&
+                (fabsf(mx - g_menuHandX) > 6.0f ||
+                 fabsf(my - g_menuHandY) > 6.0f))
+                g_menuHandFrame = g_frame;
+            g_menuHandX = mx;
+            g_menuHandY = my;
+            g_menuHandKnown = TRUE;
+        }
+
+        /* Only a cursor over the visible panel means anything to the menu.
+           Convert it from window pixels to the game's logical 640x480 space
+           using the same centre-third rectangle CompositeFrame draws into. */
+        if (realOk && g_gameWnd && g_bbW > 0 && g_bbH > 0 &&
+            g_inReal[IN_SCREENTOCLIENT]) {
+            POINT c = real;
+            const int pw = (int)g_bbW / 3;
+            const int ph = (int)g_bbH / 3;
+            const int px = ((int)g_bbW - pw) / 2;
+            const int py = ((int)g_bbH - ph) / 2;
+            if (pw > 0 && ph > 0 &&
+                ((PFN_ScreenToClient)g_inReal[IN_SCREENTOCLIENT])(g_gameWnd, &c) &&
+                c.x >= px && c.x < px + pw &&
+                c.y >= py && c.y < py + ph) {
+                rx = (float)(c.x - px) * 640.0f / (float)pw;
+                ry = (float)(c.y - py) * 480.0f / (float)ph;
+                mouseInPanel = TRUE;
+            }
+        }
+
         if (!p) return FALSE;
-        if (!MenuPointerPos(&mx, &my)) {
-            /* Off-panel: hold the cursor at the middle so the game does not
-               see a wild jump. MenuPointerKeys refuses to click. */
+
+        if (mouseInPanel && g_menuMouseFrame > g_menuHandFrame) {
+            POINT q;
+            static long mouseLog = -1000000;
+            q.x = (LONG)(rx * g_displayScaleX);
+            q.y = (LONG)(ry * g_displayScaleY);
+            if (g_inReal[IN_CLIENTTOSCREEN] &&
+                !((PFN_ClientToScreen)g_inReal[IN_CLIENTTOSCREEN])(g_gameWnd, &q))
+                return FALSE;
+            if (g_frame - mouseLog > 180) {
+                mouseLog = g_frame;
+                LogD("MENU     pointer: runtime mouse -> logical %.0f,%.0f",
+                     rx, ry);
+            }
+            *p = q;
+            g_lastCursor = q;
+            g_cursorKnown = TRUE;
+            return TRUE;
+        }
+
+        /* Hand laser, or the last point it held before the mouse took over. */
+        if (!handOk && g_menuHandKnown) {
+            mx = g_menuHandX;
+            my = g_menuHandY;
+        } else if (!handOk) {
             mx = 320.0f;
             my = 240.0f;
         }
-        q.x = (LONG)(mx * g_displayScaleX);
-        q.y = (LONG)(my * g_displayScaleY);
-        if (g_gameWnd && g_inReal[IN_CLIENTTOSCREEN] &&
-            !((PFN_ClientToScreen)g_inReal[IN_CLIENTTOSCREEN])(g_gameWnd, &q))
-            return FALSE;
-        *p = q;
-        g_lastCursor = q;
-        g_cursorKnown = TRUE;
-        return TRUE;
+        {
+            POINT q;
+            q.x = (LONG)(mx * g_displayScaleX);
+            q.y = (LONG)(my * g_displayScaleY);
+            if (g_gameWnd && g_inReal[IN_CLIENTTOSCREEN] &&
+                !((PFN_ClientToScreen)g_inReal[IN_CLIENTTOSCREEN])(g_gameWnd, &q))
+                return FALSE;
+            *p = q;
+            g_lastCursor = q;
+            g_cursorKnown = TRUE;
+            return TRUE;
+        }
     }
     r = ((PFN_GetCursorPos)g_inReal[IN_GETCURSORPOS])(p);
     if (r && p) {
@@ -4766,12 +4866,6 @@ static void __cdecl EscConsumerHook(void)
     /* Leave no held ESC behind; the next input poll rebuilds the arrays. */
     *cur = 0;
     *prev = 0;
-    {
-        int st = -1, mi = -1;
-        SafeReadInt(g_exeBase + (0x491A6C - 0x400000), &st);
-        SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mi);
-        LogD("INPUT    ESC consumer done: state %d mission %d", st, mi);
-    }
 }
 
 static void XrMenuKey(PBYTE p)

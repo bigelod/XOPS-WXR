@@ -460,19 +460,23 @@ from the wrong yaw/height. The fixes:
 - Gameplay strips **all** physical keyboard/mouse input from
   `GetKeyboardState` and swallows the matching `WM_KEY*`/`WM_MOUSE*` messages;
   only `ESC` and `0` survive. Menus, level objectives, death, victory and intro
-  screens keep physical keys. Gameplay input itself no longer uses Wine's
-  keyboard state: the direct player-update hook rebuilds the game's own VK
-  image from XrApi and runs the game's own input mapper (see above).
+  screens keep physical keys, and they keep the **runtime mouse**: the window
+  procedure blocks the mouse in gameplay only. Gameplay input itself no longer
+  uses Wine's keyboard state: the direct player-update hook rebuilds the game's
+  own VK image from XrApi and runs the game's own input mapper (see above).
 - The laser is always drawn; `Y` is zoom only.
 - `MODE_VR` stays `1` for the whole run in mono and AER (HWXR model) and only
   `MODE_3D` toggles (2 in AER gameplay, 0 on menus/death/objective/victory and
   throughout mono). Those non-VR screens are drawn as a floating panel in the
   centre third of the view, with a dominant-hand laser pointer published
-  through `GetCursorPos` and a right-trigger click.
+  through `GetCursorPos` and a right-trigger click. WinlatorXR's own mouse
+  works on the same panel: the two pointers arbitrate by most recent movement,
+  and the runtime cursor is remapped from the panel rectangle into the game's
+  640x480 UI space.
 
 **7 Nov stopping point.** The AER/menu transition is device-confirmed. Gameplay
 input now runs the game's own input mapper from an XrApi-built image, so no
-Wine keyboard state is involved. The 02:32 build adds: `ESC`/`0` preserved when
+Wine keyboard state is involved. The 11:49 build adds: `ESC`/`0` preserved when
 the window is unfocused; the left controller menu button mapped to the game's
 own ESC consumer (hook at `0x413BA2`, call `0x413CF0` with a fresh ESC edge,
 no Wine key events); canonical XOPS key bindings
@@ -492,11 +496,12 @@ the direct mapper and the game's ESC consumer are called in-process. The old
 `StickKeys`/`VrInputKeys` key injection is compiled/called only under
 `XOPS_DEV_BUILD` as a fallback if the direct hook fails to install. Debug-only
 paths are `ProbeKeys`, `ManualHandKeys`, the numpad hand controls and the manual
-cursor centring. The one remaining non-debug Windows mouse path is the menu
-pointer, which feeds the game's own `GetCursorPos`/`ScreenToClient` and
-`VK_LBUTTON` state to the existing menu hit-testing; no window messages are
-posted now. The next step there is to call the title/mission-select action
-`0x411F80` with a chosen hotspot instead.
+cursor centring. The remaining non-debug Windows mouse path is deliberate:
+the menu pointer feeds the game's own `GetCursorPos`/`ScreenToClient` and
+`VK_LBUTTON` state, and it is the runtime's mouse, not one the mod invents.
+No window messages are posted. Desktop-verified 7 Nov with and without live
+XrApi poses; the three-click title sequence still reaches `building.ext`.
+A direct `0x411F80` call remains an optional simplification.
 
 ### What is still not built
 
@@ -580,10 +585,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  7 2026 02:32:18`, SHA-256
-`66c54a5bd2ab693552edab1e5a809b7618bb018979af6f196c31dddfdd5521d2`,
-deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 286,208 bytes,
-SHA-256 `71f9cff3306e71ee869cdc42ff76045571b32f1ae658a83c0a6bd61564329b98`.
+Current handover build: `built Nov  7 2026 11:49:06`, SHA-256
+`39571b81554eb1710d559bbb294571fea5e34db00326e56d26a5ec34f4a315e9`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 287,744 bytes,
+SHA-256 `b96a9659cd02c668a74cf48d84ed2acc72b18f86335cf6dd53b865f73d01b2c4`.
 
 ---
 

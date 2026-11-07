@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  7 2026 02:32:18`, SHA-256
-`66c54a5bd2ab693552edab1e5a809b7618bb018979af6f196c31dddfdd5521d2`.
-Release build: 286,208 bytes, SHA-256
-`71f9cff3306e71ee869cdc42ff76045571b32f1ae658a83c0a6bd61564329b98`.
+Current dev build: `built Nov  7 2026 11:49:06`, SHA-256
+`39571b81554eb1710d559bbb294571fea5e34db00326e56d26a5ec34f4a315e9`.
+Release build: 287,744 bytes, SHA-256
+`b96a9659cd02c668a74cf48d84ed2acc72b18f86335cf6dd53b865f73d01b2c4`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,8 +1391,51 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 02:32 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 11:49 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
 `NEXT_STEPS.md` section 4.
+
+## 2026-11-07 - restore the runtime mouse on menus (desktop-verified)
+
+### Problem
+
+The floating panel blocked the mouse in `VrWndProc`, replaced `GetCursorPos`
+with the hand pointer, and muted mouse buttons when the window was unfocused.
+The owner reported that WinlatorXR's own mouse **does** work for pointing and
+clicking menus; the block removed a working path.
+
+### Change
+
+- `VrWndProc` blocks mouse input in **gameplay only**; all non-gameplay screens
+  pass mouse messages through.
+- On the panel, `hkGetCursorPos` now arbitrates between two pointers: the
+  runtime/desktop mouse and the hand laser. Whichever moved most recently wins
+  (hand threshold 6 px in 640x480 space). The chosen point is published in the
+  game's logical 640x480 coordinates.
+- The runtime cursor is converted from the centre-third panel rectangle into
+  that logical space before publishing, so clicks land where the panel is
+  drawn. `hkSetCursorPos` still swallows the game's recentre so it cannot warp
+  the desktop cursor.
+- Mouse buttons survive the unfocused-window mute on non-gameplay screens
+  (`MenuMouseVk`), so a runtime click is not lost when the container owns focus.
+- The temporary `ESC consumer done` per-frame log was removed.
+
+### Verification (PC)
+
+- Title -> level: `tools\start-level.ps1` three-click sequence reaches
+  `building.ext` (`A44=2`, `screen -> gameplay`).
+- With a live static XrApi feeder and valid hand poses, the log shows
+  `MENU pointer: runtime mouse -> logical 350,245`, then gameplay. Same result
+  without a feeder.
+- Gameplay input with a synthetic XrApi session:
+  - right trigger: `HAPTIC fires=1` shots, ammo 26 -> 14;
+  - head yaw: A and B both 135.7 -> 95.6 deg (0.7 rad), delta 0;
+  - left stick forward: screenshot MAD 40.4 vs neutral (player moved);
+  - right stick turn: screenshot MAD 17.9 (view rotated).
+
+Build: `built Nov  7 2026 11:49:06`, dev SHA-256
+`39571b81554eb1710d559bbb294571fea5e34db00326e56d26a5ec34f4a315e9`;
+release 287,744 bytes, SHA-256
+`b96a9659cd02c668a74cf48d84ed2acc72b18f86335cf6dd53b865f73d01b2c4`.

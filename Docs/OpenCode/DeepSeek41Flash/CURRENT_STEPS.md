@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  7 2026 02:32:18`, SHA-256
-`66c54a5bd2ab693552edab1e5a809b7618bb018979af6f196c31dddfdd5521d2`,
+**Current build:** `built Nov  7 2026 11:49:06`, SHA-256
+`39571b81554eb1710d559bbb294571fea5e34db00326e56d26a5ec34f4a315e9`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
-Release build: 286,208 bytes, SHA-256
-`71f9cff3306e71ee869cdc42ff76045571b32f1ae658a83c0a6bd61564329b98`.
+Release build: 287,744 bytes, SHA-256
+`b96a9659cd02c668a74cf48d84ed2acc72b18f86335cf6dd53b865f73d01b2c4`.
 Latest code commit: `6a68888` (not pushed).
 
 ## Where we stopped (7 Nov, night)
@@ -18,10 +18,22 @@ Latest code commit: `6a68888` (not pushed).
 **Working on device:** AER in gameplay and the AER/menu transition (the old
 `MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
 always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
-build was desktop-smoke-tested but not device-tested. The 02:32 build adds the
-latest fixes below.
+build was desktop-smoke-tested but not device-tested. The 11:49 build adds the
+latest fixes below and was desktop-tested end to end (menus, movement, turn,
+fire).
 
-**New in the 02:32 build (not yet device-tested):**
+**New in the 11:49 build (not yet device-tested):**
+
+- **The runtime mouse works on menus again.** The window procedure now blocks
+  the mouse in **gameplay only**; menus and the floating panel let the
+  WinlatorXR-supplied mouse through. On the panel, the runtime mouse and the
+  hand laser are arbitrated by "most recent movement wins", and the real cursor
+  is remapped from the centre-third rectangle into the game's 640x480 UI space.
+  Mouse buttons also survive the unfocused-window mute on non-gameplay screens,
+  so a runtime click is not eaten because the container owns focus.
+  Desktop-verified: the three-click title sequence still reaches
+  `building.ext`, and the log shows `MENU pointer: runtime mouse -> logical
+  350,245` both with and without live XrApi poses.
 
 - **ESC is never blocked, and the XrApi left menu runs the game's own ESC
   consumer.** When the game window is unfocused, the input mute now clears
@@ -57,12 +69,16 @@ latest fixes below.
   the direct hook fails to install. Release logs that case and does nothing.
 - **Debug-only:** `ProbeKeys`, `ManualHandKeys`, the numpad hand controls and
   the one-time `SetCursorPos` centring in manual mode (`0`).
-- **Remaining non-debug Windows input:** the menu pointer. It still feeds the
-  game's own `GetCursorPos`/`ScreenToClient` and `VK_LBUTTON` state so the
-  existing menu hit-testing works. No window messages are posted now. The next
-  step is to bypass this too: the title/mission-select handler at state 1 reads
-  the cursor and calls `0x411F80` for a valid mission hotspot. Direct menu
-  selection should call that target with a chosen `0x490A44` value.
+- **Remaining non-debug Windows input:** the menu pointer is now deliberate.
+  It feeds the game's own `GetCursorPos`/`ScreenToClient` and `VK_LBUTTON`
+  state, and it is the runtime's mouse, not one the mod invents. No window
+  messages are posted. A direct title/mission-select call (`0x411F80`) remains
+  an optional simplification, not a requirement.
+- **Desktop test (11:49):** with a static pose feeder and after `start-level`,
+  right trigger produced `HAPTIC fires=1` shots and the ammo counter fell
+  26 -> 14; head yaw moved A/B together 135.7 -> 95.6 deg (0.7 rad); left stick
+  moved the player (screenshot MAD 40.4); right stick turned the view
+  (MAD 17.9). No A/B divergence in any log.
 - **Isolation, not action control:** `GetCursorPos`/`SetCursorPos` hooks in
   gameplay only freeze the physical mouse so it cannot turn the view; they do
   not drive game actions.

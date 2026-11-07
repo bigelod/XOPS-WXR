@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  7 2026 02:32:18`, SHA-256
-`66c54a5bd2ab693552edab1e5a809b7618bb018979af6f196c31dddfdd5521d2`.
-Release: 286,208 bytes, SHA-256
-`71f9cff3306e71ee869cdc42ff76045571b32f1ae658a83c0a6bd61564329b98`.
+**Last build covered:** `built Nov  7 2026 11:49:06`, SHA-256
+`39571b81554eb1710d559bbb294571fea5e34db00326e56d26a5ec34f4a315e9`.
+Release: 287,744 bytes, SHA-256
+`b96a9659cd02c668a74cf48d84ed2acc72b18f86335cf6dd53b865f73d01b2c4`.
 
 ---
 
@@ -168,9 +168,16 @@ Release: 286,208 bytes, SHA-256
   weapons. Mapping the stick to the analog XrApi left stick remains cleaner.
 - **Floating-panel laser pointer:** the dominant hand's ray is intersected with a 1 m
   plane, mapped onto the centre-third panel, published through `GetCursorPos`
-  in 640x480 UI space, and clicked with the right trigger (`VK_LBUTTON` plus
-  posted `WM_LBUTTONDOWN`/`WM_LBUTTONUP`). A screen-space dot marks the same
-  point.
+  in 640x480 UI space, and clicked with the right trigger (`VK_LBUTTON`; no
+  window messages are posted). A screen-space dot marks the same point.
+- **Runtime mouse on menus:** the window procedure blocks the mouse in gameplay
+  only, so WinlatorXR's own mouse still points and clicks on the floating
+  panel. The runtime mouse and the hand laser arbitrate by "most recent
+  movement wins"; the real cursor is remapped from the centre-third rectangle
+  into the game's logical 640x480 space. Mouse buttons survive the
+  unfocused-window mute on non-gameplay screens. Desktop-verified 7 Nov:
+  `MENU pointer: runtime mouse -> logical 350,245`, three-click title sequence
+  reaches `building.ext`, both with and without live XrApi poses.
 - **Manual PC mode (`0`):** default two-hand pose, cursor centred once, right
   hand driven by `E`/`Q` + numpad; incoming 6DOF ignored. **Every debug key is
   locked behind `0`:** while VR input is active, only `0` is accepted, and the
