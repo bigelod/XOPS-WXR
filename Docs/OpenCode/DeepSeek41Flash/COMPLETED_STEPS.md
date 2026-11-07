@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  7 2026 00:39:20`, SHA-256
-`b7c27ddbe40e49f52b62173e6407bea1c0123418b0a383fe67cb51ca3b5c53c9`.
-Release: 286,208 bytes, SHA-256
-`0c396d1c34ec9ddd19177477dbbe8fcb5eb6d8adfce4f17e8410dbdd7aca8821`.
+**Last build covered:** `built Nov  7 2026 01:30:28`, SHA-256
+`509363ba6c1658171728a87eabedaa1a3f2f7ae5dffe4918924a9fb74c838156`.
+Release: 287,232 bytes, SHA-256
+`c7e2c0ae04807c08f090d9e960267dbc11c00c083ab231cf7241a41cdbb205d1`.
 
 ---
 
@@ -139,6 +139,12 @@ Release: 286,208 bytes, SHA-256
   update `0x407CF0`. No Wine keyboard state or OS key events are involved; the
   game's weapon-specific fire-mode and edge logic run unchanged. If the call
   site does not match, it logs and uses the old key fallback.
+- **Canonical controls:** VR mode rewrites the 20-byte key-binding block at
+  `0x48C380` every frame to the default XOPS layout. The launcher's Play button
+  writes the same 20 bytes into `config.dat` (video flags/name preserved), so a
+  custom PC config cannot corrupt the direct-input image.
+- **ESC:** preserved even when the game window is unfocused; the mute only
+  removes the other physical keys. `ESC` is always valid.
 - **VR input isolation:** in **gameplay only**, all physical keyboard and mouse
   input is removed from `GetKeyboardState`, and the window procedure swallows
   the corresponding `WM_KEY*`/`WM_MOUSE*` messages. Only `ESC` (the way out)

@@ -5,38 +5,52 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  7 2026 00:39:20`, SHA-256
-`b7c27ddbe40e49f52b62173e6407bea1c0123418b0a383fe67cb51ca3b5c53c9`,
+**Current build:** `built Nov  7 2026 01:30:28`, SHA-256
+`509363ba6c1658171728a87eabedaa1a3f2f7ae5dffe4918924a9fb74c838156`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
-Release build: 286,208 bytes, SHA-256
-`0c396d1c34ec9ddd19177477dbbe8fcb5eb6d8adfce4f17e8410dbdd7aca8821`.
+Release build: 287,232 bytes, SHA-256
+`c7e2c0ae04807c08f090d9e960267dbc11c00c083ab231cf7241a41cdbb205d1`.
 Latest code commit: `eaaaef3` (not pushed).
 
 ## Where we stopped (7 Nov, night)
 
 **Working on device:** AER in gameplay and the AER/menu transition (the old
 `MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
-always-on laser behaved correctly in the 23:02 build; the 00:39 build adds the
-direct input path and has only been smoke-tested on the desktop.
+always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
+build was desktop-smoke-tested but not device-tested. The 01:30 build adds the
+latest fixes below.
 
-**Built but not yet device-tested:**
+**New in the 01:30 build (not yet device-tested):**
 
-- The direct player-update hook (`0x413AC4`): gameplay now calls the game's
-  own input mapper with an XrApi-built key image instead of relying on Wine
-  keyboard state. Desktop feeder test: movement and A/B weapon switch worked,
-  no crash.
-- The current spawn/aim base choice (`g_refYaw = g_refYawB`). The log prints
-  `yaw A raw X -> Y (deg) B Z`; if the spawn still faces the wrong way, that
-  line says whether the intended reference is the raw A or B.
-- Physical-key policy: blocked only in gameplay; menus/level objectives/death/
-  victory/intro keep keys; `ESC` always; `0` toggles manual PC mode in release
-  too.
+- **ESC is never blocked.** When the game window is unfocused, the input mute
+  now clears everything except `ESC` and `0`. The same exception is applied in
+  `GetAsyncKeyState`/`GetKeyState`. ESC is always the way out.
+- **Canonical controls.** VR mode rewrites the game's 20-byte key-binding block
+  at `0x48C380` every frame from the default XOPS layout. The launcher's Play
+  button also writes those 20 bytes into `config.dat` (preserving the video
+  flags and player name) before starting the game. A custom PC config with
+  several actions on one key can no longer corrupt the direct-input image.
+- **Aim timing restored.** `SteerAimWrite` is called again from the
+  `GetKeyboardState` hook, i.e. before the game's shot step. The direct
+  player-update hook runs after the shot, so the late call was the reason the
+  00:39 build's shot could lag the laser.
+- **Yaw diagnostics.** `YAW A ... B ... delta ...` every ~2 s and
+  `AIM base A ... B ... head ... -> A ... B ...` on the first shots. These show
+  whether the game clamps/overwrites A or B on the levels where aiming fails.
 
-**Tomorrow's first pass:** copy the 00:39 `d3d8.dll` into the container, confirm
-`INPUT direct player-update hook installed at IDA 0x413AC4` in the log, then
-test movement, A/B/X/Y, grips/triggers, spawn facing and shot alignment. Send
-the `STEER recentred` line plus the button-press frames if anything is wrong.
+**Open aim question:** the shot trace reads A (`0x404CD5`), while the character
+movement reads B. The user reports the character yaw is not being turned and
+that some levels cannot aim at the laser. The new yaw log is the next evidence.
+If A and B diverge, the likely fix is to make the character yaw B the single
+authority and derive A from it (or patch the clamp), not to keep a separate
+camera offset.
+
+**Tomorrow's first pass:** copy the 01:30 `d3d8.dll` into the container, confirm
+`INPUT direct player-update hook installed at IDA 0x413AC4`, test ESC in
+gameplay, movement, A/B/X/Y/grips/triggers, spawn facing and shot alignment,
+and send the `STEER recentred`, `YAW`, and `AIM base` lines from a failing
+level.
 
 ---
 

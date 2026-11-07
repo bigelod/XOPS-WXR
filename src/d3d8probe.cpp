@@ -94,6 +94,7 @@ static void ManualHandKeys(PBYTE p);
 static void ManualHandApply(void);
 static void RecaptureWeapon(void);
 static void SteerAimWrite(void);
+static void SteerAimEarly(void);
 static void CaptureHudBatch(void* dev, UINT start, UINT count);
 static void CaptureHudBatchUP(void* dev, const void* data, UINT count);
 static void ReleaseHudBatches(void);
@@ -111,6 +112,7 @@ static const char* PhaseName(int p);
 static void DumpImports(void);
 static void HookInput(void);
 static void HookPlayerUpdate(void);
+static void ForceModKeyBindings(void);
 
 #include "xrapi.h"
 
@@ -2271,7 +2273,8 @@ static SHORT WINAPI hkGetAsyncKeyState(int vk)
 {
     ++g_inCalls[IN_GETASYNCKEYSTATE]; ++g_inFrame[IN_GETASYNCKEYSTATE];
     if (!g_inReal[IN_GETASYNCKEYSTATE]) return 0;
-    if (!GameWindowFocused() || InputKeyBlocked(vk)) return 0;
+    if ((!GameWindowFocused() && vk != VK_ESCAPE && vk != '0') ||
+        InputKeyBlocked(vk)) return 0;
     return ((PFN_GetAsyncKeyState)g_inReal[IN_GETASYNCKEYSTATE])(vk);
 }
 
@@ -2288,6 +2291,10 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
        supply the array ourselves. */
     if (p) {
         if (!r) ZeroMemory(p, 256);
+        /* Keep the game's key-binding block on the canonical layout in VR.
+           The direct input mapper reads these codes; a custom config.dat that
+           puts several actions on one physical key would corrupt the image. */
+        if (g_vrExclusive) ForceModKeyBindings();
         /* WinlatorXR's left stick currently arrives as arrow keys, not as the
            XrApi analog moveX/moveY fields. Capture those presses before the VR
            filter removes them; StickKeys turns them back into W/A/S/D. This
@@ -2311,7 +2318,15 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
            below and inject their keys into the emptied array. Debug keys stay
            muted (ProbeKeys). */
         g_inputMuted = !GameWindowFocused();
-        if (g_inputMuted) ZeroMemory(p, 256);
+        if (g_inputMuted) {
+            /* ESC and 0 stay valid even when the game window is not the real
+               foreground window: ESC is always the way out, and 0 is the
+               PC-only manual-input switch. Everything else is desktop input
+               and must not cross windows. */
+            int mk;
+            for (mk = 0; mk < 256; ++mk)
+                if (mk != VK_ESCAPE && mk != '0') p[mk] = 0;
+        }
         {
             static int focusLogs = 0;
             if ((!r || g_inputMuted) && focusLogs < 6) {
@@ -2351,6 +2366,10 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
             VrInputKeys(p);
         } else {
             g_arrowUp = g_arrowDown = g_arrowLeft = g_arrowRight = FALSE;
+            /* Aim must be written in the input phase, before the game's shot
+               step. The direct player-update hook runs after the shot, so this
+               early write is what makes the shot follow the red laser. */
+            SteerAimEarly();
         }
         ManualHandKeys(p);     /* numpad right hand, 0 mode only */
         MenuPointerKeys(p);    /* floating panel: trigger -> left click */
@@ -2390,7 +2409,8 @@ static SHORT WINAPI hkGetKeyState(int vk)
 {
   ++g_inCalls[IN_GETKEYSTATE]; ++g_inFrame[IN_GETKEYSTATE];
   if (!g_inReal[IN_GETKEYSTATE]) return 0;
-  if (!GameWindowFocused() || InputKeyBlocked(vk)) return 0;
+  if ((!GameWindowFocused() && vk != VK_ESCAPE && vk != '0') ||
+      InputKeyBlocked(vk)) return 0;
   return ((PFN_GetKeyState)g_inReal[IN_GETKEYSTATE])(vk);
 }
 
@@ -3733,11 +3753,31 @@ static void SteerAimWrite(void)
         SafeWrite(CamAddr(B_PITCH), pitchBase + pitchOff);
     }
     ++g_aimWrites;
-    if (g_aimWrites <= 3 || (g_aimWrites % 60) == 0)
+    if (g_aimWrites <= 3 || (g_aimWrites % 60) == 0) {
+        float ay = 0.0f, by = 0.0f;
+        SafeRead(CamAddr(A_YAW), &ay);
+        SafeRead(CamAddr(B_YAW), &by);
         LogD("AIM      shot -> hand laser: yaw %+ .4f rad (%+ .1f deg)"
             "  pitch %+ .4f (%+ .1f deg)  [writes %ld]",
             yawOff, yawOff * 57.2957795f,
             pitchOff, pitchOff * 57.2957795f, g_aimWrites);
+        LogD("AIM      base A %+ .3f B %+ .3f head %+ .3f -> A %+ .3f B %+ .3f"
+            "  (refA %+ .3f refB %+ .3f)",
+            yawBaseA, yawBaseB, g_pose.headYaw, ay, by,
+            g_refYaw, g_refYawB);
+    }
+}
+
+/* Called from the GetKeyboardState hook, i.e. before the game's update/shot
+   step. The direct player-update hook is too late for the shot. */
+static void SteerAimEarly(void)
+{
+    if (!g_directInput || !g_vrExclusive || !InGameplay()) return;
+    if (!g_posed || !g_pose.valid) return;
+    g_twoHanded = XrButton(&g_pose, XRB_L_GRIP) ? TRUE : FALSE;
+    if (g_leftHanded ? XrButton(&g_pose, XRB_L_TRIGGER)
+                     : XrButton(&g_pose, XRB_R_TRIGGER))
+        SteerAimWrite();
 }
 
 // ---------------------------------------------------------------------------
@@ -4740,7 +4780,6 @@ static void DirectInputBuild(BYTE* keys)
         keys[VK_LBUTTON] = 0x80;
         g_fireHeld = TRUE;
         g_flashFrames = 4;
-        SteerAimWrite();                 /* shot -> red laser */
     } else {
         g_fireHeld = FALSE;
     }
@@ -4812,6 +4851,27 @@ static void HookPlayerUpdate(void)
     g_directInput = TRUE;
     Log("INPUT    direct player-update hook installed at IDA 0x413AC4"
         " (input mapper 0x407520 -> update 0x407CF0)");
+}
+
+/* The 20 key codes the game's own config tool writes by default. The mapper
+   expects these; a custom config.dat that puts several actions on one physical
+   key breaks the direct-input image, so VR mode always restores this block in
+   memory. Manual PC mode (0) leaves the user's bindings alone. */
+static const BYTE kDefaultXopsKeys[20] = {
+    0x00, 0x01, 0x02, 0x03,   /* view up/down/left/right */
+    0x36, 0x32, 0x20, 0x23,   /* W / S / A / D */
+    0x10, 0x11,               /* run (Tab) / jump (Space) */
+    0x31, 0x26,               /* reload (R) / drop (G) */
+    0x14, 0x37, 0x39,         /* zoom (Shift) / fire mode (X) / switch (Z) */
+    0x17, 0x18, 0x12, 0x19, 0x00
+};
+
+static void ForceModKeyBindings(void)
+{
+    BYTE* p;
+    if (!g_exeBase) return;
+    p = (BYTE*)g_exeBase + (0x48C380 - 0x400000);
+    memcpy(p, kDefaultXopsKeys, sizeof(kDefaultXopsKeys));
 }
 
 // ---------------------------------------------------------------------------
@@ -5112,6 +5172,7 @@ static void EnsureInit(void)
     else Log("PROJECTION aspect patch disabled by xops_wxr_steer.ini");
     HookInput();
     HookPlayerUpdate();
+    ForceModKeyBindings();
 }
 
 // ---------------------------------------------------------------------------
@@ -8223,7 +8284,15 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
         }
     }
 
-    if ((g_frame % 120) == 0 && g_frame > 60) { WatchDump("periodic"); SteerLog(); }
+    if ((g_frame % 120) == 0 && g_frame > 60) {
+        float ay = 0.0f, by = 0.0f;
+        WatchDump("periodic");
+        SteerLog();
+        if (SafeRead(CamAddr(A_YAW), &ay) && SafeRead(CamAddr(B_YAW), &by))
+            LogD("YAW      A %+ .4f rad (%+ .1f deg)  B %+ .4f (%+ .1f deg)"
+                 "  delta %+ .4f", ay, ay * 57.2957795f, by,
+                 by * 57.2957795f, by - ay);
+    }
 #if XOPS_DEV_BUILD
     BallisticTick();
     IdleTick();

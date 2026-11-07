@@ -30,9 +30,12 @@ left grip two-handed aim, left trigger fire mode, right trigger shoot,
 right grip jump, B reload, A switch, X drop, Y zoom (the laser stays on).
 Left-handed mode swaps only shoot and fire mode.
 Every level start makes the current head position and facing the new origin.
-In gameplay all physical keyboard/mouse input is ignored except ESC and 0.
+In gameplay all physical keyboard/mouse input is ignored except ESC and 0;
+ESC is always valid, even while the game window is unfocused.
 Menus, level objectives, death, victory and intro screens keep physical keys.
 Press 0 on a PC to enable the full desktop keyboard/mouse for manual testing.
+Play resets XOPS's key bindings to the default layout before launching, because
+the direct-input path relies on those bindings.
 Gameplay commands are fed directly into the game's own input handling from
 XrApi; no Wine keyboard events are used.
 If the WinlatorXR left stick is mapped to the arrow keys, the mod turns those

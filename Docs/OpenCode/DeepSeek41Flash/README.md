@@ -472,11 +472,17 @@ from the wrong yaw/height. The fixes:
 
 **7 Nov stopping point.** The AER/menu transition is device-confirmed. Gameplay
 input now runs the game's own input mapper from an XrApi-built image, so no
-Wine keyboard state is involved; it is desktop-smoke-tested (movement and
-weapon switch worked, no crash) and awaits the device pass. The remaining
-spawn/aim question is which yaw is the intended reference: the log prints
-`yaw A raw X -> Y (deg) B Z`, and if the view still faces the wrong way that
-line decides whether to use raw A or B.
+Wine keyboard state is involved. The 01:30 build adds: `ESC`/`0` preserved when
+the window is unfocused; canonical XOPS key bindings enforced in memory and
+written into `config.dat` by the launcher's Play button; `SteerAimWrite` called
+early again, before the game's shot step; and `YAW A/B delta` / `AIM base A/B`
+diagnostics.
+
+The remaining spawn/aim question is which yaw is authoritative. The shot trace
+reads A (`0x404CD5`); movement reads B. If the new log shows A/B diverging on
+the levels that cannot aim at the laser, the next fix is to make the character
+yaw B the single authority and derive A from it (or patch the clamp) instead of
+keeping a separate camera offset.
 
 ### What is still not built
 
@@ -560,10 +566,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  7 2026 00:39:20`, SHA-256
-`b7c27ddbe40e49f52b62173e6407bea1c0123418b0a383fe67cb51ca3b5c53c9`,
-deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 286,208 bytes,
-SHA-256 `0c396d1c34ec9ddd19177477dbbe8fcb5eb6d8adfce4f17e8410dbdd7aca8821`.
+Current handover build: `built Nov  7 2026 01:30:28`, SHA-256
+`509363ba6c1658171728a87eabedaa1a3f2f7ae5dffe4918924a9fb74c838156`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 287,232 bytes,
+SHA-256 `c7e2c0ae04807c08f090d9e960267dbc11c00c083ab231cf7241a41cdbb205d1`.
 
 ---
 

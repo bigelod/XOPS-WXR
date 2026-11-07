@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  7 2026 00:39:20`, SHA-256
-`b7c27ddbe40e49f52b62173e6407bea1c0123418b0a383fe67cb51ca3b5c53c9`.
-Release: 286,208 bytes, SHA-256
-`0c396d1c34ec9ddd19177477dbbe8fcb5eb6d8adfce4f17e8410dbdd7aca8821`.
+**Last build:** `built Nov  7 2026 01:30:28`, SHA-256
+`509363ba6c1658171728a87eabedaa1a3f2f7ae5dffe4918924a9fb74c838156`.
+Release: 287,232 bytes, SHA-256
+`c7e2c0ae04807c08f090d9e960267dbc11c00c083ab231cf7241a41cdbb205d1`.
 
 ---
 
@@ -52,13 +52,24 @@ direct-input build** and the spawn/aim base:
   `INPUT direct player-update hook installed at IDA 0x413AC4`. In gameplay test
   movement, A/B/X/Y, left/right grips and both triggers. The game window is
   usually unfocused under WinlatorXR; that must not matter.
+- **ESC:** confirm ESC still opens the menu / exits even while the game window
+  is unfocused. The mute now preserves `ESC` and `0`.
+- **Controls:** the launcher rewrites the canonical 20-byte key block into
+  `config.dat`, and VR mode also enforces it in memory at `0x48C380`. Confirm
+  after using the launcher's Play button, and try a deliberately custom
+  `config.dat` to ensure it no longer breaks the mod.
 - **Movement:** direct input uses the XrApi left-stick analog fields plus the
   runtime's digital `L_THUMBSTICK_*` bools, so the arrow-key mapping is no
   longer needed. Confirm the stick moves the player and does not swap weapons.
 - **Spawn/aim:** capture the `STEER recentred. yaw A raw X -> Y (deg) B Z` line
   for several levels. If the spawn still faces the wrong way, that line says
-  whether the intended reference is the raw A or B. Confirm shots follow the
-  red laser; the view and shot now share one yaw base.
+  whether the intended reference is the raw A or B.
+- **Aim on every level:** fire on a level that failed before and send the
+  `YAW A ... B ... delta ...` and `AIM base A ... B ... head ... -> A ... B ...`
+  lines. These show whether the game clamps/overwrites A or B. The shot trace
+  reads A (`0x404CD5`); movement reads B. If they diverge, the next fix is to
+  make the character yaw B the single authority and derive A from it (or patch
+  the clamp) rather than keeping a separate camera offset.
 - **Hands:** tilt the head and confirm the hands/gun roll with the presented
   world. Crouch/stand and confirm the render follows the head while the hands
   stay at the level-start/recentre position. Right-stick click re-zeroes XYZ

@@ -736,6 +736,31 @@ INT_PTR CALLBACK MainProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 
 } // namespace
 
+/* The direct-input hook in the mod runs the game's own key mapper, so XOPS
+   must use the canonical default bindings. A custom config.dat that puts
+   several actions on one physical key corrupts that image. Overwrite only the
+   20 key-binding bytes; the video flags and player name stay untouched. */
+static bool ResetXopsControls(const std::wstring& gameDir)
+{
+    static const BYTE keys[20] = {
+        0x00, 0x01, 0x02, 0x03,   /* view up/down/left/right */
+        0x36, 0x32, 0x20, 0x23,   /* W / S / A / D */
+        0x10, 0x11,               /* run / jump */
+        0x31, 0x26,               /* reload / drop */
+        0x14, 0x37, 0x39,         /* zoom / fire mode / switch */
+        0x17, 0x18, 0x12, 0x19, 0x00
+    };
+    const std::wstring path = gameDir + L"\\config.dat";
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD wrote = 0;
+    const BOOL ok = WriteFile(h, keys, sizeof(keys), &wrote, nullptr);
+    CloseHandle(h);
+    return ok && wrote == sizeof(keys);
+}
+
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
 {
     g_exeDir = SelfDir();
@@ -748,6 +773,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
     if (r != ID_PLAY_ACTION) return 0;
 
     if (!FindGame(g_exeDir, g_gameDir, g_gameExe)) return 1;
+
+    if (ResetXopsControls(g_gameDir))
+        Log(L"reset XOPS key bindings to the mod defaults");
+    else
+        Log(L"could not reset XOPS key bindings (config.dat missing or read-only)");
 
     std::wstring cmd = L"\"" + g_gameExe + L"\"";
     std::vector<wchar_t> buf(cmd.begin(), cmd.end());
