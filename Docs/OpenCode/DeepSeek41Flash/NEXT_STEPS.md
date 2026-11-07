@@ -39,44 +39,35 @@ secondary). What is missing is the support hand:
   effect draws to the dominant hand's muzzle point.
 - **Reuse the game's effects**; do not author new ones.
 
-## 4. Quest 3 device pass
+## 4. Quest 3 device pass (next)
 
-PC testing has covered the feature set so far. The first device pass is still
-outstanding:
+Earlier device runs confirmed startup, injection, the DXVK export fix, AER in
+gameplay, the AER/menu transition, `MODE_VR=1` menus in mono and AER,
+world-anchored hands and the always-on laser. The open pass is the **7 Nov
+direct-input build** and the spawn/aim base:
 
 - Container at **1280x960** (native 4:3, no bars) unless testing stereo.
 - Shipped config has `verbose_debug = false`; full log on demand.
-- Check: input mute while unfocused (physical only), XrApi input still works,
-  A/B/X/Y and arrow blocking, full keyboard/mouse isolation in gameplay,
-  `MODE_VR` screens, both hands and their angles, laser and hand-aim,
-  two-handed aim, weapon clone across swaps/drops/pickups and textures, haptics
-  feel, tracking latency/judder.
-- **6DOF / eye height:** crouch and stand and confirm the render follows the
-  head without moving the player, and that the hands **stay at their
-  level-start/recentre position** instead of riding with the current HMD
-  translation. Confirm the right-stick click re-zeroes XYZ and yaw. `pos_scale`
-  defaults to **1.0** (1:1) and is editable in the launcher's Options dialog.
-  Do not change the draw code.
-- **Level start:** begin several levels and confirm the view's XYZ and yaw are
-  relative to the player model at spawn (no inherited yaw/height from the
-  menu), and that shots follow the right hand on every level. The recentre now
-  uses B (player orientation) for both the render reference and the shot,
-  because A (render copy) can lag one frame at spawn.
-- **Commands:** gameplay now runs the game's own input mapper (`0x407520`) with
-  an XrApi-built key image, then the real player update (`0x407CF0`), via a
-  hook at `0x413AC4`. Confirm A/B/X/Y, grips and triggers reach the game while
-  the game window is unfocused. No Wine keyboard state is involved.
-- **Hand roll:** tilt the head and confirm the hands/gun roll with the
-  presented world instead of staying glued to the view. The previous
-  counter-rotation was removed.
-- **Left stick:** with WinlatorXR's current arrow-key mapping the mod now
-  translates arrows to W/A/S/D. Confirm movement and that no arrow reaches the
-  weapon-swap binding. Mapping the stick to the analog XrApi left stick remains
-  the cleaner long-term fix.
-- **Roll:** tilt the head and confirm the world tilts the correct way and the
-  HUD stays fixed. The default is `roll_sign = -1`; if it is inverted on
-  device, set `+1`. If the black corners are visible in the lenses, note it
-  for the stereo pass.
+- **Direct input:** confirm the startup log contains
+  `INPUT direct player-update hook installed at IDA 0x413AC4`. In gameplay test
+  movement, A/B/X/Y, left/right grips and both triggers. The game window is
+  usually unfocused under WinlatorXR; that must not matter.
+- **Movement:** direct input uses the XrApi left-stick analog fields plus the
+  runtime's digital `L_THUMBSTICK_*` bools, so the arrow-key mapping is no
+  longer needed. Confirm the stick moves the player and does not swap weapons.
+- **Spawn/aim:** capture the `STEER recentred. yaw A raw X -> Y (deg) B Z` line
+  for several levels. If the spawn still faces the wrong way, that line says
+  whether the intended reference is the raw A or B. Confirm shots follow the
+  red laser; the view and shot now share one yaw base.
+- **Hands:** tilt the head and confirm the hands/gun roll with the presented
+  world. Crouch/stand and confirm the render follows the head while the hands
+  stay at the level-start/recentre position. Right-stick click re-zeroes XYZ
+  and yaw. `pos_scale` defaults to **1.0**; `eye_height` remains a manual trim.
+- **Input policy:** in gameplay only `ESC` and `0` pass; menus, level
+  objectives, death, victory and intro screens keep physical keys. `ESC` is
+  always allowed. `0` enables full desktop keyboard/mouse in release too.
+- **AER menus:** re-confirm the centre-third panel and hand pointer after the
+  direct-input change; AER itself stays off on menu/death/objective/victory.
 - After this run, create `BUG_FIXES.md` from the device findings.
 
 ## 5. Stereo
@@ -86,12 +77,10 @@ outstanding:
   reproject helpers are now 1:1 metres (the non-indexed `*100` centimetre
   assumption was removed with the height work), so there is no scale left to
   tune; one-line sign if needed.
-- **Menus (mono and AER):** the runtime now stays `MODE_VR=1` for the whole
-  run and only `MODE_3D` drops to 0. Confirm the title/menu/death/objective/
-  victory screens appear as the centre-third floating panel in both stereo
-  modes, AER is visibly off there, and the hand laser pointer + right-trigger
-  click select menu items. This also tests whether the old `MODE_VR 1 -> 0`
-  crash is gone.
+- **Menus (mono and AER):** the runtime stays `MODE_VR=1` for the whole run
+  and only `MODE_3D` drops to 0. Device-confirmed 7 Nov: the old
+  `MODE_VR 1 -> 0` transition is gone. Re-confirm the centre-third panel and
+  hand pointer after the direct-input change.
 - **SBS is deferred.** It needs a double-width game target and a double-width
   container/window so each eye keeps 4:3. Plan: duplicate every world/model
   draw into two viewports with the existing eye shift, draw the HUD per half,

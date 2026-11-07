@@ -1349,3 +1349,7 @@ state at all.
   game reached gameplay, feeder packets with `moveY=1.0` moved the player
   (`h1`/`h2` changed), and feeder A/B presses switched the active weapon
   (FAMAS/MP5 captured). No crash. The old key path is now only a fallback.
+
+**Paused 7 Nov night.** Next session: device-test the 00:39 build (direct
+input), capture `STEER recentred` lines for spawn/aim, and re-confirm the input
+policy. See `CURRENT_STEPS.md` "Where we stopped" and `NEXT_STEPS.md` section 4.
