@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  7 2026 01:30:28`, SHA-256
-`509363ba6c1658171728a87eabedaa1a3f2f7ae5dffe4918924a9fb74c838156`.
+Current dev build: `built Nov  7 2026 01:48:59`, SHA-256
+`9888d85939cf5b6599e829eb42ab9c352a6ed5524f0f426e6e5a9bd8326dacde`.
 Release build: 287,232 bytes, SHA-256
-`c7e2c0ae04807c08f090d9e960267dbc11c00c083ab231cf7241a41cdbb205d1`.
+`8e713d60cb75ea5e3a14947e89d8909242f9591fbdaf8f6d0b231ca94cf758d0`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1350,18 +1350,17 @@ state at all.
   (`h1`/`h2` changed), and feeder A/B presses switched the active weapon
   (FAMAS/MP5 captured). No crash. The old key path is now only a fallback.
 
-**Paused 7 Nov night.** Next session: device-test the 01:30 build (direct
-input, ESC, canonical controls, early aim), capture `STEER recentred`, `YAW`
-and `AIM base` lines for spawn/aim, and re-confirm the input policy. See
-`CURRENT_STEPS.md` "Where we stopped" and `NEXT_STEPS.md` section 4.
-
-### 2026-11-07 - ESC, canonical controls, early aim write
+### 2026-11-07 - ESC/menu, canonical controls, early aim write
 
 Owner findings after the direct-input build:
 
-- **ESC must never be blocked.** The unfocused-window mute was clearing the
-  whole 256-byte array, including ESC. It now clears everything except
-  `ESC` and `0`, and `GetAsyncKeyState`/`GetKeyState` apply the same exception.
+- **ESC must never be blocked, and the XrApi left menu is ESC.** The
+  unfocused-window mute was clearing the whole 256-byte array, including ESC.
+  It now clears everything except `ESC` and `0`, and
+  `GetAsyncKeyState`/`GetKeyState` apply the same exception. The left
+  controller's menu button (`L_MENU`, bool 1) now emits a real ESC by setting
+  `VK_ESCAPE` in the game image and posting `WM_KEYDOWN`/`WM_KEYUP` to the game
+  window. It works on gameplay and menus with no physical keyboard.
 - **XOPS controls must be canonical.** A custom PC `config.dat` can put several
   actions on one physical key, which corrupts the direct-input image. VR mode
   now rewrites the 20-byte key-binding block at `0x48C380` every frame to the
@@ -1371,12 +1370,19 @@ Owner findings after the direct-input build:
   update wrapper, after the game's shot step. It is called again from the
   `GetKeyboardState` hook, before the shot, as the old path did. The late call
   was removed.
-- **Yaw diagnostics.** `YAW A ... B ... delta ...` logs every ~2 s and
-  `AIM base A ... B ... head ... -> A ... B ...` logs on the first shots. The
-  shot trace reads A (`0x404CD5`); movement reads B. These logs will show
-  whether A/B diverge or are clamped on the levels that cannot aim at the
-  laser.
+- **Yaw diagnostics.** `YAW A ... B ... delta ... map <id>` logs every ~2 s and
+  `AIM base A ... B ... head ... -> A ... B ... map <id>` logs on the first
+  shots. The map id is the game's mission index (`0x490A44`), so BUILDING_EXT
+  (known good) and the failing maps can be compared directly. The shot trace
+  reads A (`0x404CD5`); movement reads B. These logs will show whether A/B
+  diverge or are clamped.
 - Open design question: the owner reports we are turning a virtual camera
   offset instead of the in-game character yaw. The likely next fix is to make B
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
+
+**Paused 7 Nov night.** Next session: device-test the 01:48 build (left menu
+as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
+and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
+re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
+`NEXT_STEPS.md` section 4.

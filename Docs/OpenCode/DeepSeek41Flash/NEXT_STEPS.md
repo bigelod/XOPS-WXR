@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  7 2026 01:30:28`, SHA-256
-`509363ba6c1658171728a87eabedaa1a3f2f7ae5dffe4918924a9fb74c838156`.
+**Last build:** `built Nov  7 2026 01:48:59`, SHA-256
+`9888d85939cf5b6599e829eb42ab9c352a6ed5524f0f426e6e5a9bd8326dacde`.
 Release: 287,232 bytes, SHA-256
-`c7e2c0ae04807c08f090d9e960267dbc11c00c083ab231cf7241a41cdbb205d1`.
+`8e713d60cb75ea5e3a14947e89d8909242f9591fbdaf8f6d0b231ca94cf758d0`.
 
 ---
 
@@ -52,8 +52,10 @@ direct-input build** and the spawn/aim base:
   `INPUT direct player-update hook installed at IDA 0x413AC4`. In gameplay test
   movement, A/B/X/Y, left/right grips and both triggers. The game window is
   usually unfocused under WinlatorXR; that must not matter.
-- **ESC:** confirm ESC still opens the menu / exits even while the game window
-  is unfocused. The mute now preserves `ESC` and `0`.
+- **ESC / left menu:** confirm the left controller's menu button acts as ESC on
+  gameplay, menus, death and victory screens. It sets `VK_ESCAPE` and posts
+  `WM_KEYDOWN`/`WM_KEYUP`; it must work even while the game window is
+  unfocused. The physical ESC also stays valid.
 - **Controls:** the launcher rewrites the canonical 20-byte key block into
   `config.dat`, and VR mode also enforces it in memory at `0x48C380`. Confirm
   after using the launcher's Play button, and try a deliberately custom
@@ -65,11 +67,12 @@ direct-input build** and the spawn/aim base:
   for several levels. If the spawn still faces the wrong way, that line says
   whether the intended reference is the raw A or B.
 - **Aim on every level:** fire on a level that failed before and send the
-  `YAW A ... B ... delta ...` and `AIM base A ... B ... head ... -> A ... B ...`
-  lines. These show whether the game clamps/overwrites A or B. The shot trace
-  reads A (`0x404CD5`); movement reads B. If they diverge, the next fix is to
-  make the character yaw B the single authority and derive A from it (or patch
-  the clamp) rather than keeping a separate camera offset.
+  `YAW ... map <id>` and `AIM base ... -> ... map <id>` lines. BUILDING_EXT is
+  the known-good map; compare its map id with the failing ones. The logs show
+  whether the game clamps/overwrites A or B. The shot trace reads A
+  (`0x404CD5`); movement reads B. If they diverge, the next fix is to make the
+  character yaw B the single authority and derive A from it (or patch the
+  clamp) rather than keeping a separate camera offset.
 - **Hands:** tilt the head and confirm the hands/gun roll with the presented
   world. Crouch/stand and confirm the render follows the head while the hands
   stay at the level-start/recentre position. Right-stick click re-zeroes XYZ

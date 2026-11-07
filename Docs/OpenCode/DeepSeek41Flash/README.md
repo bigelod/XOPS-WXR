@@ -472,17 +472,19 @@ from the wrong yaw/height. The fixes:
 
 **7 Nov stopping point.** The AER/menu transition is device-confirmed. Gameplay
 input now runs the game's own input mapper from an XrApi-built image, so no
-Wine keyboard state is involved. The 01:30 build adds: `ESC`/`0` preserved when
-the window is unfocused; canonical XOPS key bindings enforced in memory and
-written into `config.dat` by the launcher's Play button; `SteerAimWrite` called
-early again, before the game's shot step; and `YAW A/B delta` / `AIM base A/B`
-diagnostics.
+Wine keyboard state is involved. The 01:48 build adds: `ESC`/`0` preserved when
+the window is unfocused; the left controller menu button mapped to a real ESC
+(`VK_ESCAPE` plus posted `WM_KEYDOWN`/`WM_KEYUP`); canonical XOPS key bindings
+enforced in memory and written into `config.dat` by the launcher's Play button;
+`SteerAimWrite` called early again, before the game's shot step; and
+`YAW ... map <id>` / `AIM base ... map <id>` diagnostics.
 
 The remaining spawn/aim question is which yaw is authoritative. The shot trace
-reads A (`0x404CD5`); movement reads B. If the new log shows A/B diverging on
-the levels that cannot aim at the laser, the next fix is to make the character
-yaw B the single authority and derive A from it (or patch the clamp) instead of
-keeping a separate camera offset.
+reads A (`0x404CD5`); movement reads B. BUILDING_EXT is the known-good map; the
+new logs include the mission id so the failing maps can be compared directly.
+If A/B diverge, the next fix is to make the character yaw B the single authority
+and derive A from it (or patch the clamp) instead of keeping a separate camera
+offset.
 
 ### What is still not built
 
@@ -566,10 +568,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  7 2026 01:30:28`, SHA-256
-`509363ba6c1658171728a87eabedaa1a3f2f7ae5dffe4918924a9fb74c838156`,
+Current handover build: `built Nov  7 2026 01:48:59`, SHA-256
+`9888d85939cf5b6599e829eb42ab9c352a6ed5524f0f426e6e5a9bd8326dacde`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 287,232 bytes,
-SHA-256 `c7e2c0ae04807c08f090d9e960267dbc11c00c083ab231cf7241a41cdbb205d1`.
+SHA-256 `8e713d60cb75ea5e3a14947e89d8909242f9591fbdaf8f6d0b231ca94cf758d0`.
 
 ---
 

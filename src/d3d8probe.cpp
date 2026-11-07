@@ -95,6 +95,7 @@ static void ManualHandApply(void);
 static void RecaptureWeapon(void);
 static void SteerAimWrite(void);
 static void SteerAimEarly(void);
+static void XrMenuKey(PBYTE p);
 static void CaptureHudBatch(void* dev, UINT start, UINT count);
 static void CaptureHudBatchUP(void* dev, const void* data, UINT count);
 static void ReleaseHudBatches(void);
@@ -1919,6 +1920,7 @@ static BOOL  g_arrowLeft = FALSE, g_arrowRight = FALSE;
 /* TRUE once the direct player-update hook is installed; gameplay then uses
    the game's own input mapper instead of injecting keyboard state. */
 static BOOL  g_directInput = FALSE;
+static int   g_menuKeyPulse = 0;   /* frames to keep the XrApi menu ESC in the VK image */
 static long  g_idleRun      = 0;        /* consecutive idle frames */
 static BOOL  g_idleBaseline = FALSE;    /* have we recorded the run's start? */
 static long  g_idleRuns     = 0;
@@ -2361,6 +2363,7 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
         ManualModeEdge(p);     /* 0 = PC manual input, in every build */
         ProbeKeys(p);          /* our own control keys, read then removed */
         VrExclusiveKeys(p);    /* then the game loses the desktop keyboard */
+        XrMenuKey(p);          /* XrApi left menu = ESC, on every screen */
         if (!g_directInput || !InGameplay()) {
             StickKeys(p);      /* fallback key path if the direct hook failed */
             VrInputKeys(p);
@@ -3755,16 +3758,19 @@ static void SteerAimWrite(void)
     ++g_aimWrites;
     if (g_aimWrites <= 3 || (g_aimWrites % 60) == 0) {
         float ay = 0.0f, by = 0.0f;
+        int mission = -1;
         SafeRead(CamAddr(A_YAW), &ay);
         SafeRead(CamAddr(B_YAW), &by);
+        if (g_exeBase)
+            SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mission);
         LogD("AIM      shot -> hand laser: yaw %+ .4f rad (%+ .1f deg)"
             "  pitch %+ .4f (%+ .1f deg)  [writes %ld]",
             yawOff, yawOff * 57.2957795f,
             pitchOff, pitchOff * 57.2957795f, g_aimWrites);
         LogD("AIM      base A %+ .3f B %+ .3f head %+ .3f -> A %+ .3f B %+ .3f"
-            "  (refA %+ .3f refB %+ .3f)",
+            "  (refA %+ .3f refB %+ .3f)  map %d",
             yawBaseA, yawBaseB, g_pose.headYaw, ay, by,
-            g_refYaw, g_refYawB);
+            g_refYaw, g_refYawB, mission);
     }
 }
 
@@ -4737,6 +4743,24 @@ static PFN_GameVoid g_gameInputMap     = NULL; /* 0x407520 */
 static PFN_GameVoid g_gamePlayerUpdate = NULL; /* 0x407CF0 */
 static BYTE*        g_gameKeys         = NULL; /* 0x48C920, 256-byte VK image */
 
+/* XrApi left menu = ESC. This is the one control that must work on every
+   screen, including when Windows focus is elsewhere and the physical ESC never
+   reaches the game. Set the VK image as well as posting the window message;
+   the game may use either path. */
+static void XrMenuKey(PBYTE p)
+{
+    if (!g_vrExclusive || !g_posed || !g_pose.valid) return;
+    if (!VrEdge(XRB_L_MENU)) return;
+
+    if (p) p[VK_ESCAPE] |= 0x80;
+    g_menuKeyPulse = InGameplay() ? 3 : 0;
+    if (g_gameWnd) {
+        PostMessageA(g_gameWnd, WM_KEYDOWN, VK_ESCAPE, 0x00000001);
+        PostMessageA(g_gameWnd, WM_KEYUP,   VK_ESCAPE, 0xC0000001);
+    }
+    Log("INPUT    XrApi left menu -> ESC");
+}
+
 /* Build the VK image the game's mapper expects from the XrApi frame. The
    mapper is the game's own code, so weapon-specific fire-mode branches and
    edge detection behave exactly as they do for a real keyboard. */
@@ -4749,6 +4773,10 @@ static void DirectInputBuild(BYTE* keys)
     if (!g_posed || !g_pose.valid) return;
 
     ZeroMemory(keys, 256);
+    if (g_menuKeyPulse > 0) {
+        keys[VK_ESCAPE] = 0x80;
+        --g_menuKeyPulse;
+    }
 
     /* Left stick: analog if the runtime sends it, plus the digital stick
        direction bools that WinlatorXR always includes. */
@@ -8286,12 +8314,15 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
 
     if ((g_frame % 120) == 0 && g_frame > 60) {
         float ay = 0.0f, by = 0.0f;
+        int mission = -1;
         WatchDump("periodic");
         SteerLog();
+        if (g_exeBase)
+            SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mission);
         if (SafeRead(CamAddr(A_YAW), &ay) && SafeRead(CamAddr(B_YAW), &by))
             LogD("YAW      A %+ .4f rad (%+ .1f deg)  B %+ .4f (%+ .1f deg)"
-                 "  delta %+ .4f", ay, ay * 57.2957795f, by,
-                 by * 57.2957795f, by - ay);
+                 "  delta %+ .4f  map %d", ay, ay * 57.2957795f, by,
+                 by * 57.2957795f, by - ay, mission);
     }
 #if XOPS_DEV_BUILD
     BallisticTick();
