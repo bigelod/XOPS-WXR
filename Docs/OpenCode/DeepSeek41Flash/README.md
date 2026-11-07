@@ -428,7 +428,7 @@ clamped to ±1 m before the gain; `pos_scale` is that gain (default **1.0** =
 1:1, 0..2, also in the launcher's Options dialog) and `eye_height` is a manual
 float offset (default 0, ±5). A
 **right-stick click** recentres; a level start also calls `SteerRecentre()`
-after a 120-frame grace. The grace lets the game apply its spawn orientation;
+after a 60-frame grace. The grace lets the game apply its spawn orientation;
 the recentre then takes the **camera yaw A** (the view the game presents) as
 the origin and writes both A and B from it. Using the animating body yaw B put
 DUEL_EXT 180 deg into the wall when entered after quitting another level. Head
@@ -453,7 +453,7 @@ from the wrong yaw/height. The fixes:
   into the no-roll head basis, so hands stay at the level-start/recentre
   position. The hand counter-rotation against `SpriteRoll` was removed; hands
   and gun roll with the presented world.
-- Every level start calls `SteerRecentre()` after a 120-frame grace from the
+- Every level start calls `SteerRecentre()` after a 60-frame grace from the
   `LevelActive()` rising edge. The grace lets the game apply its spawn
   orientation (a level entered after quitting another still had the pre-spawn
   yaw at the edge). The recentre then uses the **camera yaw A** as the origin
@@ -480,7 +480,7 @@ from the wrong yaw/height. The fixes:
 
 **7 Nov stopping point.** The AER/menu transition is device-confirmed. Gameplay
 input now runs the game's own input mapper from an XrApi-built image, so no
-Wine keyboard state is involved. The 13:04 build adds: `ESC`/`0` preserved when
+Wine keyboard state is involved. The 13:26 build adds: `ESC`/`0` preserved when
 the window is unfocused; the left controller menu button mapped to the game's
 own ESC consumer (hook at `0x413BA2`, call `0x413CF0` with a fresh ESC edge,
 no Wine key events); the direct-input image preserves the polled
@@ -591,10 +591,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  7 2026 13:04:54`, SHA-256
-`3a28945137d9a86ac48ba1ed4661fb1d5204a4f062691332abc8ecbc8a8303ca`,
+Current handover build: `built Nov  7 2026 13:26:02`, SHA-256
+`9d09c8360c63c6f28ecb743eef454ffe028d7af3261c6d8c30ea91ae3e7982ba`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 289,280 bytes,
-SHA-256 `0c1dd6e03b1eca1c3e5ad694b9c99df70cc920f73e2a155ca8c258609af2ed74`.
+SHA-256 `0e606579ed88ae6c944dbd63d5dfc5ae68fa1e3808530a6a8a529de153f86e97`.
 
 ---
 

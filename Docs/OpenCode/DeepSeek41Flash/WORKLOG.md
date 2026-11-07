@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  7 2026 13:04:54`, SHA-256
-`3a28945137d9a86ac48ba1ed4661fb1d5204a4f062691332abc8ecbc8a8303ca`.
+Current dev build: `built Nov  7 2026 13:26:02`, SHA-256
+`9d09c8360c63c6f28ecb743eef454ffe028d7af3261c6d8c30ea91ae3e7982ba`.
 Release build: 289,280 bytes, SHA-256
-`0c1dd6e03b1eca1c3e5ad694b9c99df70cc920f73e2a155ca8c258609af2ed74`.
+`0e606579ed88ae6c944dbd63d5dfc5ae68fa1e3808530a6a8a529de153f86e97`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,7 +1391,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 13:04 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 13:26 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
@@ -1461,7 +1461,7 @@ wrong value.
 
 Change:
 
-- On the level edge, set a 120-frame grace and do not write yaw. Log
+- On the level edge, set a 60-frame grace and do not write yaw. Log
   `SPAWN grace ... A=... B=...` so the raw spawn is visible.
 - After the grace, `SteerRecentre()` uses the **camera yaw A** as the origin
   (not B) and writes both A and B from it, so the presented spawn view is kept
@@ -1479,7 +1479,14 @@ of stick-forward brings the crates visibly closer (screenshot MAD 14.4).
 BUILDING_EXT still spawns in the corridor and its right-stick recentre leaves
 A/B unchanged.
 
-Build: `built Nov  7 2026 13:04:54`, dev SHA-256
-`3a28945137d9a86ac48ba1ed4661fb1d5204a4f062691332abc8ecbc8a8303ca`;
+The owner confirmed the view on PC and asked for a shorter grace: reduced from
+120 to **60 frames (1 s)**. They also report that aim is still wrong after
+title -> DUEL_EXT, with a marked screenshot showing the laser on the target and
+the impact on the ground. The `AIM` log now also prints the resulting A/B
+pitch. That log is the next thing needed; the screenshot alone cannot tell
+whether A/B held the written pitch or the game replaced it.
+
+Build: `built Nov  7 2026 13:26:02`, dev SHA-256
+`9d09c8360c63c6f28ecb743eef454ffe028d7af3261c6d8c30ea91ae3e7982ba`;
 release 289,280 bytes, SHA-256
-`0c1dd6e03b1eca1c3e5ad694b9c99df70cc920f73e2a155ca8c258609af2ed74`.
+`0e606579ed88ae6c944dbd63d5dfc5ae68fa1e3808530a6a8a529de153f86e97`.

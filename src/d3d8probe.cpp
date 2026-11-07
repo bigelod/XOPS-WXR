@@ -3542,7 +3542,7 @@ static void SteerTick(void)
     /* A new level applies its spawn orientation a few frames after the player
        exists. Writing our yaw during that window pins the map to the stale
        value and leaves the body 180 deg from the view. Leave the game alone
-       for a moment, watch what it writes, then recentre from that. */
+       for 1 s (60 frames), watch what it writes, then recentre from that. */
     if (g_spawnGrace > 0) {
         float ga = 0.0f, gb = 0.0f;
         int gmi = -1;
@@ -3917,10 +3917,12 @@ static void SteerAimWrite(void)
     }
     ++g_aimWrites;
     if (g_aimWrites <= 3 || (g_aimWrites % 60) == 0) {
-        float ay = 0.0f, by = 0.0f;
+        float ay = 0.0f, by = 0.0f, ap = 0.0f, bp = 0.0f;
         int mission = -1;
         SafeRead(CamAddr(A_YAW), &ay);
         SafeRead(CamAddr(B_YAW), &by);
+        SafeRead(CamAddr(A_PITCH), &ap);
+        SafeRead(CamAddr(B_PITCH), &bp);
         if (g_exeBase)
             SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mission);
         LogD("AIM      shot -> hand laser: yaw %+ .4f rad (%+ .1f deg)"
@@ -3928,8 +3930,8 @@ static void SteerAimWrite(void)
             yawOff, yawOff * 57.2957795f,
             pitchOff, pitchOff * 57.2957795f, g_aimWrites);
         LogD("AIM      base A %+ .3f B %+ .3f head %+ .3f -> A %+ .3f B %+ .3f"
-            "  (refA %+ .3f refB %+ .3f)  map %d",
-            yawBaseA, yawBaseB, g_pose.headYaw, ay, by,
+            "  pitch A %+ .3f B %+ .3f  (refA %+ .3f refB %+ .3f)  map %d",
+            yawBaseA, yawBaseB, g_pose.headYaw, ay, by, ap, bp,
             g_refYaw, g_refYawB, mission);
     }
 }
@@ -8336,7 +8338,7 @@ static HRESULT __stdcall hkBeginScene(void* dev)
             if (levelActive && !wasLevelActive) {
                 Log("STEER    level start - waiting for the game's spawn yaw");
                 g_spawnTrace = 120;
-                g_spawnGrace = 120;
+                g_spawnGrace = 60;
                 g_haveRef = FALSE;
             }
             wasLevelActive = levelActive;

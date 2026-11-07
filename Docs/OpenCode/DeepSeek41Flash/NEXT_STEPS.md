@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  7 2026 13:04:54`, SHA-256
-`3a28945137d9a86ac48ba1ed4661fb1d5204a4f062691332abc8ecbc8a8303ca`.
+**Last build:** `built Nov  7 2026 13:26:02`, SHA-256
+`9d09c8360c63c6f28ecb743eef454ffe028d7af3261c6d8c30ea91ae3e7982ba`.
 Release: 289,280 bytes, SHA-256
-`0c1dd6e03b1eca1c3e5ad694b9c99df70cc920f73e2a155ca8c258609af2ed74`.
+`0e606579ed88ae6c944dbd63d5dfc5ae68fa1e3808530a6a8a529de153f86e97`.
 
 ---
 
@@ -68,7 +68,7 @@ direct-input build** and the spawn/aim base:
   longer needed. Confirm the stick moves the player and does not swap weapons.
 - **Spawn/aim:** capture the `STEER recentred. yaw A raw X -> Y (deg) B Z` line
   for several levels, especially the exact failing flow: BUILDING_EXT -> move
-  -> ESC -> DUEL_EXT. The mod now waits 120 frames for the game's spawn yaw,
+  -> ESC -> DUEL_EXT. The mod now waits 60 frames for the game's spawn yaw,
   then uses the camera yaw A as the origin. Confirm the spawn shows the open
   arena (not the gray wall) and that stick-forward moves toward what the
   camera sees. Right-stick recentre should leave the view still and re-zero
@@ -78,7 +78,9 @@ direct-input build** and the spawn/aim base:
   the known-good map; compare its map id with the failing ones. The logs show
   whether the game clamps/overwrites A or B. The shot trace reads A
   (`0x404CD5`); movement reads B, and both are now written from the same
-  origin.
+  origin. For the owner's title -> DUEL_EXT miss, the `AIM` log now also prints
+  `pitch A ... B ...`; capture that line from a bad shot. It distinguishes a
+  stale pitch reference from a write-order problem.
 - **Hands:** tilt the head and confirm the hands/gun roll with the presented
   world. Crouch/stand and confirm the render follows the head while the hands
   stay at the level-start/recentre position. Right-stick click re-zeroes XYZ
