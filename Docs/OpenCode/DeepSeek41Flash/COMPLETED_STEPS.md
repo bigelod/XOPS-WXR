@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 22:41:00`, SHA-256
-`7cc964b18fc78fa459b3748766b3101447c8d9ddc49013e3d50d60ba3c982c01`.
-Release: 283,136 bytes, SHA-256
-`d57bc5ccf3042c186730689cab3b6813775f00071c56f433ef8a8e106531e1ad`.
+**Last build covered:** `built Nov  6 2026 23:02:02`, SHA-256
+`8d2366ab8b569d9233212efe1125018f48a860e5cf743c44290e8e65ae32d271`.
+Release: 284,160 bytes, SHA-256
+`393b777e37e612006f42d60efeefcd7809c2d2077281e24122393e5bd603a643`.
 
 ---
 
@@ -133,15 +133,15 @@ Release: 283,136 bytes, SHA-256
   two-handed aim; left trigger fire mode; right trigger shoot; right grip jump;
   B reload; A switch; X drop; Y zoom (toggle). Left-handed mode swaps only
   shoot and fire mode. **The laser is always on**; Y no longer hides it.
-- **VR input isolation:** in gameplay and on the floating non-VR panel, *all*
-  physical keyboard and mouse input is removed from `GetKeyboardState`, and the
-  window procedure swallows the corresponding `WM_KEY*`/`WM_MOUSE*` messages.
-  Only `ESC` (the way out) and `0` (PC-only manual mode) survive. This fixes
-  the arrow-key -> weapon-swap leak through either input path. Mono and AER
-  menus behave the same: there is no desktop input while the panel is up.
-  The hook now injects the XrApi state even when Wine's real
-  `GetKeyboardState` returns FALSE or the window is unfocused (normal under
-  WinlatorXR); the old code skipped all injection on that failure.
+- **VR input isolation:** in **gameplay only**, all physical keyboard and mouse
+  input is removed from `GetKeyboardState`, and the window procedure swallows
+  the corresponding `WM_KEY*`/`WM_MOUSE*` messages. Only `ESC` (the way out)
+  and `0` (PC-only manual mode) survive. Menus, level objectives, death,
+  victory and intro screens keep physical keys by design. This fixes the
+  arrow-key -> weapon-swap leak through either input path. The hook injects the
+  XrApi state even when Wine's real `GetKeyboardState` returns FALSE or the
+  window is unfocused (normal under WinlatorXR); the old code skipped all
+  injection on that failure. `0` now toggles manual PC mode in release too.
 - **Left-stick-as-arrows fallback:** WinlatorXR currently maps the left stick
   to the arrow keys. Those raw presses are captured before the filter and
   translated to W/A/S/D, so the stick moves the player instead of swapping

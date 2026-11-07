@@ -331,12 +331,12 @@ edge-pulsed; shoot is held. Zoom is a toggle in XOPS, so Y sends a press edge;
 the head still drives the view, so the zoom is head-tracked.
 
 **Steering is on by default.** `3` is only a debug toggle now. Input defaults
-to **VR-only**; `0` enables desktop keyboard/mouse for manual tests without a
-headset or fake XrApi data, and pauses synthetic VR input. **In gameplay and on
-the floating non-VR panel, everything is swallowed except `ESC` and `0`**,
-through both `GetKeyboardState` and the window procedure. Mono and AER menus
-behave the same. A/B/X/Y and the arrows are
-swallowed in VR on every screen. WinlatorXR's left-stick-as-arrow mapping is
+to **VR-only in gameplay**; `0` enables desktop keyboard/mouse for manual tests
+without a headset or fake XrApi data, and pauses synthetic VR input. **In
+gameplay, everything is swallowed except `ESC` and `0`**, through both
+`GetKeyboardState` and the window procedure. Menus, level objectives, death,
+victory and intro screens keep physical keys by design; the floating panel also
+has the hand pointer. WinlatorXR's left-stick-as-arrow mapping is
 captured before the filter and translated to W/A/S/D.
 
 **The game no longer steals the desktop cursor.** XOPS recentres the pointer
@@ -448,11 +448,12 @@ from the wrong yaw/height. The fixes:
   spawn yaw; A is the render copy and can lag one frame, so both references
   use B. The current HMD XYZ and yaw become the new origin against the player
   model. The right-stick click does the same at any time.
-- Gameplay and the floating non-VR panel strip **all** physical keyboard/mouse
-  input from `GetKeyboardState` and swallow the matching `WM_KEY*`/`WM_MOUSE*`
-  messages. Only `ESC` and `0` survive. The hook injects the XrApi state even
-  when Wine's real `GetKeyboardState` returns FALSE or the game window is
-  unfocused, which is the normal state under WinlatorXR. WinlatorXR's left-stick-as-arrows presses are translated to
+- Gameplay strips **all** physical keyboard/mouse input from
+  `GetKeyboardState` and swallows the matching `WM_KEY*`/`WM_MOUSE*` messages;
+  only `ESC` and `0` survive. Menus, level objectives, death, victory and intro
+  screens keep physical keys. The hook injects the XrApi state even when Wine's
+  real `GetKeyboardState` returns FALSE or the game window is unfocused, which
+  is the normal state under WinlatorXR. WinlatorXR's left-stick-as-arrows presses are translated to
   W/A/S/D so movement works and the arrows cannot swap weapons.
 - The laser is always drawn; `Y` is zoom only.
 - `MODE_VR` stays `1` for the whole run in mono and AER (HWXR model) and only
@@ -541,10 +542,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 22:41:00`, SHA-256
-`7cc964b18fc78fa459b3748766b3101447c8d9ddc49013e3d50d60ba3c982c01`,
-deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 283,136 bytes,
-SHA-256 `d57bc5ccf3042c186730689cab3b6813775f00071c56f433ef8a8e106531e1ad`.
+Current handover build: `built Nov  6 2026 23:02:02`, SHA-256
+`8d2366ab8b569d9233212efe1125018f48a860e5cf743c44290e8e65ae32d271`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 284,160 bytes,
+SHA-256 `393b777e37e612006f42d60efeefcd7809c2d2077281e24122393e5bd603a643`.
 
 ---
 

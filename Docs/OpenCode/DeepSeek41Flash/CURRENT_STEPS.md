@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 22:41:00`, SHA-256
-`7cc964b18fc78fa459b3748766b3101447c8d9ddc49013e3d50d60ba3c982c01`,
+**Current build:** `built Nov  6 2026 23:02:02`, SHA-256
+`8d2366ab8b569d9233212efe1125018f48a860e5cf743c44290e8e65ae32d271`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
-Release build: 283,136 bytes, SHA-256
-`d57bc5ccf3042c186730689cab3b6813775f00071c56f433ef8a8e106531e1ad`.
+Release build: 284,160 bytes, SHA-256
+`393b777e37e612006f42d60efeefcd7809c2d2077281e24122393e5bd603a643`.
 
 ---
 
@@ -24,8 +24,10 @@ hands). The dominant hand carries the cloned game weapon and an always-on
 laser. Every level start makes the current HMD XYZ and yaw the new origin, and
 a right-stick click does the same. Haptics, two-handed aim, the input focus
 boundary, verbose logging and the Quest 3 hand-roll default are implemented.
-Gameplay and the floating non-VR panel take **no physical keyboard or mouse**
-except ESC and the PC-only `0`. AER stereo is implemented as an experiment. In
+Gameplay takes **no physical keyboard or mouse** except ESC and the PC-only
+`0`. Menus, level objectives, death, victory and intro screens keep physical
+keys; the floating panel also has the hand pointer. AER stereo is implemented
+as an experiment. In
 both mono and AER the runtime stays `MODE_VR=1` for the whole run; `MODE_3D`
 drops to mono on the title/menu/death/objective/victory screens, and those
 screens are drawn as a floating panel in the centre third with a hand laser
@@ -123,14 +125,16 @@ native frame fills it with no bars or crop.
 
 - **Focus boundary:** unfocused means physical keyboard/mouse and debug keys
   are muted; XrApi sticks/triggers/buttons are still injected.
-- **VR input isolation:** in gameplay and on the floating non-VR panel, *all*
-  physical keyboard and mouse input is removed from `GetKeyboardState`, and
-  the window procedure also swallows the corresponding `WM_KEY*`/`WM_MOUSE*`
-  messages. Only `ESC` (the way out) and `0` (PC-only manual mode) survive.
-  A/B/X/Y and the arrow keys are swallowed in VR on every screen. The hook now
-  injects the XrApi state **even when Wine's real `GetKeyboardState` returns
-  FALSE** (the game window is usually unfocused under WinlatorXR); previously
-  that failure skipped the whole injection block.
+- **VR input isolation:** in **gameplay** only, all physical keyboard and mouse
+  input is removed from `GetKeyboardState`, and the window procedure also
+  swallows the corresponding `WM_KEY*`/`WM_MOUSE*` messages. Only `ESC` (the
+  way out) and `0` (PC-only manual mode) survive. Menus, level objectives,
+  death, victory and intro screens keep physical keys by design. The arrow
+  keys are still translated to movement in gameplay. The hook injects the
+  XrApi state **even when Wine's real `GetKeyboardState` returns FALSE** (the
+  game window is usually unfocused under WinlatorXR); previously that failure
+  skipped the whole injection block. Pressing `0` toggles manual PC mode in
+  every build, restoring the full physical keyboard/mouse.
 - **Left stick as arrows:** WinlatorXR currently maps the left stick to the
   arrow keys rather than the XrApi analog fields. Those raw arrow presses are
   read before the filter and translated to W/A/S/D, so the stick moves the
@@ -233,9 +237,10 @@ interpreting any report.
 - Only `0` remains from the old number keys; numpads, `J/K/N/T/Q/E` are ours.
 - `SetCursorPos` must never move the real cursor when the game is unfocused.
 - No physical input crosses between windows; XrApi input still does.
-- In gameplay and on the floating non-VR panel, no physical key or mouse button
-  reaches the game except `ESC` and `0`; A/B/X/Y and arrows are swallowed in
-  VR on every screen. Manual PC mode is the exception.
+- In gameplay, no physical key or mouse button reaches the game except `ESC`
+  and `0`. Menus, level objectives, death, victory and intro screens keep
+  physical keys; the floating panel's hand pointer is also available. Manual
+  PC mode (`0`) restores everything.
 - `verbose_debug = false` ships; diagnostics never replace errors/state.
 - Normalise every quaternion on ingest; freeze on the last good pose.
 - Never commit XOPS's own data files or binaries.

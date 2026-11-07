@@ -31,6 +31,8 @@ right grip jump, B reload, A switch, X drop, Y zoom (the laser stays on).
 Left-handed mode swaps only shoot and fire mode.
 Every level start makes the current head position and facing the new origin.
 In gameplay all physical keyboard/mouse input is ignored except ESC and 0.
+Menus, level objectives, death, victory and intro screens keep physical keys.
+Press 0 on a PC to enable the full desktop keyboard/mouse for manual testing.
 If the WinlatorXR left stick is mapped to the arrow keys, the mod turns those
 presses into movement, so they cannot change weapons.
 

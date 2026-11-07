@@ -74,6 +74,7 @@ static void StickKeys(PBYTE p);
 static void VrInputKeys(PBYTE p);
 static void VrExclusiveKeys(PBYTE p);
 static void MenuPointerKeys(PBYTE p);
+static void ManualModeEdge(PBYTE p);
 static BOOL MenuPointerPos(float* x, float* y);
 static BOOL VrMenuPanel(void);
 static BOOL InGameplay(void);
@@ -2200,43 +2201,36 @@ static BOOL VrMenuPanel(void)
 static BOOL InputKeyBlocked(int vk)
 {
     if (!g_vrExclusive) return FALSE;
-    /* A/B/X/Y and the arrows are always ours while VR input is on. They are
-       the controller buttons and WinlatorXR's left-stick mapping; XOPS binds
-       the arrows to weapon swaps, so they must never reach it - not even on
-       the flat menu screens. */
-    if (vk == 'A' || vk == 'B' || vk == 'X' || vk == 'Y') return TRUE;
-    if (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT)
-        return TRUE;
-    /* In gameplay the physical keyboard and mouse are not the game's input at
-       all. ESC stays as the one way out, and 0 is the PC-only switch back to
-       desktop mode. The floating non-VR panel is the same: it is driven by the
-       laser pointer, so physical keyboard/mouse would only fight it. */
-    if (InGameplay() || VrMenuPanel())
-        return vk != VK_ESCAPE && vk != '0';
-    return FALSE;
+    /* Gameplay is the only VR-exclusive screen. Menus, level objectives,
+       death, victory and intro screens keep physical keys (they are allowed
+       there by design), and ESC/0 are always allowed anyway. */
+    if (!InGameplay()) return FALSE;
+    return vk != VK_ESCAPE && vk != '0';
 }
 
 static WNDPROC g_origWndProc = NULL;
 
 /* Some of XOPS's keyboard handling may go through its window messages rather
-   than GetKeyboardState. Block the same keys there so the controller mapping
-   can never leak into a weapon swap or a menu action. */
+   than GetKeyboardState. Block the same keys there in gameplay; menus and the
+   other non-gameplay screens keep physical keys by design. */
 static LRESULT CALLBACK VrWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (g_vrExclusive) {
-        const BOOL blockAll = (InGameplay() || VrMenuPanel()) ? TRUE : FALSE;
+        const BOOL gameplay = InGameplay() ? TRUE : FALSE;
+        const BOOL mouseBlocked = (gameplay || VrMenuPanel()) ? TRUE : FALSE;
         switch (msg) {
         case WM_KEYDOWN: case WM_KEYUP:
         case WM_SYSKEYDOWN: case WM_SYSKEYUP:
             if (InputKeyBlocked((int)wp)) return 0;
             break;
         case WM_CHAR: case WM_SYSCHAR:
-            if (blockAll && wp != VK_ESCAPE && wp != '0') return 0;
+            if (gameplay && wp != VK_ESCAPE && wp != '0') return 0;
             break;
         case WM_LBUTTONDOWN: case WM_LBUTTONUP:
             /* Our own laser-pointer messages must pass; physical left clicks
-               are blocked with the rest of the mouse. */
-            if (blockAll) {
+               are blocked with the rest of the mouse on gameplay and on the
+               floating panel. */
+            if (mouseBlocked) {
                 if (g_synthClickMsgs > 0) { --g_synthClickMsgs; break; }
                 return 0;
             }
@@ -2247,7 +2241,7 @@ static LRESULT CALLBACK VrWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         case WM_XBUTTONDOWN: case WM_XBUTTONUP: case WM_XBUTTONDBLCLK:
         case WM_LBUTTONDBLCLK:
         case WM_MOUSEWHEEL: case WM_MOUSEHWHEEL:
-            if (blockAll) return 0;
+            if (mouseBlocked) return 0;
             break;
         }
     }
@@ -2324,28 +2318,15 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
         }
 
 
-        /* WinlatorXR sends A/B/X/Y for the controller buttons, so the physical
-           keys must never also reach the game - on any screen. The arrow keys
-           are its extra controls and are blocked in VR on every screen.
-           Manual PC mode (the 0 key) is a real desktop keyboard and is
-           deliberately exempt, so A/B/X/Y/arrows work there. */
-        if (g_vrExclusive) {
+        /* Gameplay is the VR-exclusive screen: strip the whole physical
+           keyboard/mouse there, then add our synthetic keys below. Menus,
+           level objectives, death, victory and intro screens keep physical
+           keys by design. ESC is the way out and 0 the PC-only switch back to
+           desktop input; both always survive. */
+        if (g_vrExclusive && InGameplay()) {
             int k;
-            p['A'] = 0; p['B'] = 0; p['X'] = 0; p['Y'] = 0;
-            /* Block the arrow keys in VR at all times. WinlatorXR maps the
-               left stick to arrow keys, and XOPS binds up/down to weapon
-               swaps, so allowing them through on any screen still changes
-               the weapon. */
-            p[VK_UP] = 0; p[VK_DOWN] = 0;
-            p[VK_LEFT] = 0; p[VK_RIGHT] = 0;
-            /* Gameplay and the floating non-VR panel are VR-only surfaces.
-               Strip the whole physical keyboard/mouse, then add our synthetic
-               keys below. ESC stays as the way out and 0 as the PC-only
-               switch back to desktop input. */
-            if (InGameplay() || VrMenuPanel()) {
-                for (k = 0; k < 256; ++k)
-                    if (k != VK_ESCAPE && k != '0') p[k] = 0;
-            }
+            for (k = 0; k < 256; ++k)
+                if (k != VK_ESCAPE && k != '0') p[k] = 0;
         }
 
         /* Which keys are down decides whether this interval counts as moving
@@ -2358,6 +2339,7 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
            owner's real keypresses. A stick-supplied W is our own doing and
            must not be counted as evidence. */
 
+        ManualModeEdge(p);     /* 0 = PC manual input, in every build */
         ProbeKeys(p);          /* our own control keys, read then removed */
         VrExclusiveKeys(p);    /* then the game loses the desktop keyboard */
         StickKeys(p);          /* left stick -> movement */
@@ -3968,22 +3950,12 @@ static void HapticTick(BOOL inGameplay, float* outL, float* outR)
 static void VrExclusiveKeys(PBYTE p)
 {
     int vk;
-    /* Unfocused: input is already muted, and synthetic keys must not appear
-       either. */
-    if (g_inputMuted) return;
+    /* XrApi is the source of truth in gameplay: physical keys are removed
+       every frame, focused or not. The synthetic XrApi keys are added back
+       afterwards by StickKeys/VrInputKeys/MenuPointerKeys. Menus and the other
+       non-gameplay screens keep physical keys by design. */
     if (!g_vrExclusive) return;
-
-    /* The controller buttons and the stick-as-arrows mapping are never the
-       game's keys, on any screen. */
-    p['A'] = 0; p['B'] = 0; p['X'] = 0; p['Y'] = 0;
-    p[VK_UP] = 0; p[VK_DOWN] = 0;
-    p[VK_LEFT] = 0; p[VK_RIGHT] = 0;
-
-    /* Gameplay and the floating non-VR panel are VR-only: the game loses the
-       whole physical keyboard and mouse, then our synthetic keys are added
-       back by StickKeys/VrInputKeys/MenuPointerKeys. ESC stays as the one way
-       out and 0 as the PC-only switch back to desktop input. */
-    if (!InGameplay() && !VrMenuPanel()) return;
+    if (!InGameplay()) return;
     for (vk = 0; vk < 256; ++vk) {
         if (vk == VK_ESCAPE || vk == '0') continue;
         p[vk] = 0;
@@ -4342,6 +4314,61 @@ static void ProbeClassify(char kind)
     LogD("");
 }
 
+/* 0 is the manual PC-input switch, not a probe key: it works in release too.
+   When off (g_vrExclusive TRUE) only ESC and 0 pass in gameplay; when on, the
+   desktop owns steering, hands and every key as usual. */
+static void ToggleManualMode(void)
+{
+    g_vrExclusive = !g_vrExclusive;
+    if (g_vrExclusive) {
+        SteerRecentre();
+        /* Back to VR: the XrApi pose owns the hand again. */
+        if (g_manualRight) {
+            g_manualRight = FALSE;
+            Log("HAND     user control OFF - XrApi pose restored");
+        }
+    } else {
+        /* User control just turned ON: default both hands in front of the
+           player so no XrApi stream is needed. */
+        ManualDefaultPose();
+        g_manualRight = TRUE;
+        {
+            HWND w = g_gameWnd ? g_gameWnd : g_wnd;
+            RECT rc;
+            POINT pt;
+            if (w && GetClientRect(w, &rc)) {
+                pt.x = (rc.right - rc.left) / 2;
+                pt.y = (rc.bottom - rc.top) / 2;
+                if (ClientToScreen(w, &pt)) {
+                    SetCursorPos(pt.x, pt.y);
+                    g_lastCursor = pt;
+                    g_cursorKnown = TRUE;
+                }
+            }
+        }
+        Log("HAND     user control ON (numpad drives the right hand;"
+            " hold E to move; cursor centred once; incoming 6DOF ignored)");
+    }
+    Log("INPUT    %s",
+        g_vrExclusive
+          ? "VR input only - desktop keys/mouse suppressed in GAMEPLAY;"
+            " menus/objective/death/victory/intro keep physical keys"
+          : "desktop keyboard/mouse enabled for manual tests;"
+            " VR steering and synthetic input are paused");
+    Log("INPUT    (last frame: %ld SetTransform, %ld indexed, %ld UP"
+        " draws -> %s)", g_lastXforms, g_lastIndexed, g_lastUP,
+        InGameplay() ? "GAMEPLAY" : "a MENU or the title");
+}
+
+static void ManualModeEdge(PBYTE p)
+{
+    static BYTE prev0 = 0;
+    const BYTE now0 = (p && (p['0'] & 0x80)) ? 1 : 0;
+    if (now0 && !prev0 && !g_probeMode) ToggleManualMode();
+    prev0 = now0;
+    if (p) p['0'] = 0;      /* a mod control, never a game key */
+}
+
 static void ProbeKeys(PBYTE p)
 {
 #if !XOPS_DEV_BUILD
@@ -4489,46 +4516,6 @@ static void ProbeKeys(PBYTE p)
                 g_pitchSign = -g_pitchSign;
                 Log("STEER    pitch sign %+.0f", g_pitchSign);
                 SteerSave();
-            } else if (vk == '0' && !g_probeMode) {
-                g_vrExclusive = !g_vrExclusive;
-                if (g_vrExclusive) {
-                    SteerRecentre();
-                    /* Back to VR: the XrApi pose owns the hand again. */
-                    if (g_manualRight) {
-                        g_manualRight = FALSE;
-                        Log("HAND     user control OFF - XrApi pose restored");
-                    }
-                } else {
-                    /* User control just turned ON: default both hands in
-                       front of the player so no XrApi stream is needed. */
-                    ManualDefaultPose();
-                    g_manualRight = TRUE;
-                    {
-                        HWND w = g_gameWnd ? g_gameWnd : g_wnd;
-                        RECT rc;
-                        POINT pt;
-                        if (w && GetClientRect(w, &rc)) {
-                            pt.x = (rc.right - rc.left) / 2;
-                            pt.y = (rc.bottom - rc.top) / 2;
-                            if (ClientToScreen(w, &pt)) {
-                                SetCursorPos(pt.x, pt.y);
-                                g_lastCursor = pt;
-                                g_cursorKnown = TRUE;
-                            }
-                        }
-                    }
-                    Log("HAND     user control ON (numpad drives the right hand;"
-                        " hold E to move; cursor centred once; incoming 6DOF ignored)");
-                }
-                Log("INPUT    %s",
-                    g_vrExclusive
-                      ? "VR input only - desktop keys/mouse suppressed in"
-                        " GAMEPLAY and on the floating menus"
-                      : "desktop keyboard/mouse enabled for manual tests;"
-                        " VR steering and synthetic input are paused");
-                Log("INPUT    (last frame: %ld SetTransform, %ld indexed, %ld UP"
-                    " draws -> %s)", g_lastXforms, g_lastIndexed, g_lastUP,
-                    InGameplay() ? "GAMEPLAY" : "a MENU or the title");
             } else if (vk == '1') {
                 g_stickMove = !g_stickMove;
                 Log("STICK    left stick -> W/A/S/D: %s",
