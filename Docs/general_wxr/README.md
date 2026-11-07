@@ -48,6 +48,7 @@ rather than published with any one of them.
 | **[XRAPI_V0_4_DESC.md](XRAPI_V0_4_DESC.md)** | The protocol: UDP packets, handshake files, haptics, the red sync pixel, presentation modes, and every version 0.1-0.7 | before writing the client |
 | **[TIPS.md](TIPS.md)** | Hard-won advice - architectural decisions and working method | before deciding anything |
 | **[FIRST_STEPS.md](FIRST_STEPS.md)** | Staged plan from zero to 6DOF, with human checkpoints | as the working plan |
+| **[PC_INPUT.md](PC_INPUT.md)** | Why not to use `SendInput`, `mouse_event`, `keybd_event` or posted messages, and what to call instead | before writing any input code |
 | **[TOOLS.md](TOOLS.md)** | Toolchain, injection vectors, testing without a headset | as needed |
 | **[XRAPI_UPGRADE.md](XRAPI_UPGRADE.md)** | Moving an existing port from 0.4/0.5 to 0.6 or 0.7, and why not to rush | only once a port works |
 | **[PROJECT_PLAN.md](PROJECT_PLAN.md)** | Template to copy per game; starts with an owner intake interview | at the start of each port |
@@ -80,6 +81,11 @@ If you read nothing else:
 7. **Measure offsets in the frame you will use them in.** A value that only
    works where it was found means the frame is wrong. Stop tuning and fix the
    frame.
+
+**Input: do not make Windows press the keys for you.** XrApi is the source of
+truth; deliver the action by calling the game's own input/action function, not
+with `SendInput`, `mouse_event`, `keybd_event` or `PostMessage`. Those paths are
+focus-dependent and unreliable under WinlatorXR. See `PC_INPUT.md`.
 
 ## Reference implementations worth reading before writing
 

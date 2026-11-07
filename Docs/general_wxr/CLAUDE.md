@@ -51,6 +51,11 @@ the file rather than working around it.
 - **Freeze on the last good pose** when packets drop. Never zero.
 - **Measure offsets in the frame you will use them in.** If a tuned value only
   works where it was found, the frame is wrong — stop tuning and fix the frame.
+- **Do not synthesize Windows input.** No `SendInput`, `mouse_event`,
+  `keybd_event`, or `PostMessage`/`SendMessage` with `WM_KEY*`/`WM_MOUSE*` in
+  the release path. Call the game's own input/action function in-process, or
+  fill the state its own input code already reads. These APIs are
+  focus-dependent and unreliable under WinlatorXR. See `PC_INPUT.md`.
 
 ## How to work
 

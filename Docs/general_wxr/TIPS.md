@@ -121,6 +121,17 @@ mechanism gets you the feature, use it and document it. Shogo's supersampling
 shipped as *a sentence in the README* rather than a `VRRenderScale` setting,
 and that was the better engineering decision.
 
+### Do not make Windows press the keys for the game
+
+`SendInput`, `mouse_event`, `keybd_event` and `PostMessage`/`SendMessage` with
+`WM_KEY*`/`WM_MOUSE*` go to the foreground window, not necessarily to the game,
+and under WinlatorXR the game is often not the foreground window. `PostMessage`
+is worse: many games never handle keys in their window procedure at all, and
+the mod's own input isolation may filter the message out. Find the function the
+game runs for the action and call it in-process, or fill the state its own
+input code already reads and let it consume that. `PC_INPUT.md` covers the
+patterns, the fallbacks, and the review checklist.
+
 ---
 
 ## Part 2: Working method - how to not lose days
