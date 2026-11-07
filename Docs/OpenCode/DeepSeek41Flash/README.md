@@ -12,9 +12,9 @@ discard its code and its protocol claims.
 
 Evidence tags are the project's own: `[spec]`, `[runtime]`, `[general]`,
 `[derived]`, `[code]`, `[device]`, `[unverified]`. Nothing in this folder is
-`[device]` unless it says so. Startup, injection, the DXVK export fix and AER
-in gameplay have run on a Quest 3; the 6 Nov hand/input changes are built and
-PC-verified but await the next device pass.
+`[device]` unless it says so. Startup, injection, the DXVK export fix, AER in
+gameplay and the AER/menu transition have run on a Quest 3. The 7 Nov direct
+player-input hook is built and desktop-smoke-tested; its device pass is next.
 
 ---
 
@@ -34,7 +34,7 @@ WinlatorXR and no build has been verified on the Quest 3.**
 | Decoupled aim (F-7) | not started - the hardest remaining problem |
 | Height / crouch | **render-side 6DOF implemented**: `CameraOffset` shifts the world draws; right-stick click re-zeroes; game position is not written |
 | Roll | **implemented**: the rendered sprite rotates; hands roll with the world, HUD stays fixed |
-| Stereo | AER experiment implemented; mono is the default until device-verified |
+| Stereo | AER device-verified in gameplay and on the menu transition; mono remains the default |
 
 ### The camera addresses, as inherited
 
@@ -345,8 +345,8 @@ without a headset or fake XrApi data, and pauses synthetic VR input. **In
 gameplay, everything is swallowed except `ESC` and `0`**, through both
 `GetKeyboardState` and the window procedure. Menus, level objectives, death,
 victory and intro screens keep physical keys by design; the floating panel also
-has the hand pointer. WinlatorXR's left-stick-as-arrow mapping is
-captured before the filter and translated to W/A/S/D.
+has the hand pointer. Direct gameplay input now runs the game's own input
+mapper from XrApi (see below), so no Wine keyboard state is involved.
 
 **The game no longer steals the desktop cursor.** XOPS recentres the pointer
 with `SetCursorPos` every frame to read its mouse delta. When another window
@@ -460,10 +460,9 @@ from the wrong yaw/height. The fixes:
 - Gameplay strips **all** physical keyboard/mouse input from
   `GetKeyboardState` and swallows the matching `WM_KEY*`/`WM_MOUSE*` messages;
   only `ESC` and `0` survive. Menus, level objectives, death, victory and intro
-  screens keep physical keys. The hook injects the XrApi state even when Wine's
-  real `GetKeyboardState` returns FALSE or the game window is unfocused, which
-  is the normal state under WinlatorXR. WinlatorXR's left-stick-as-arrows presses are translated to
-  W/A/S/D so movement works and the arrows cannot swap weapons.
+  screens keep physical keys. Gameplay input itself no longer uses Wine's
+  keyboard state: the direct player-update hook rebuilds the game's own VK
+  image from XrApi and runs the game's own input mapper (see above).
 - The laser is always drawn; `Y` is zoom only.
 - `MODE_VR` stays `1` for the whole run in mono and AER (HWXR model) and only
   `MODE_3D` toggles (2 in AER gameplay, 0 on menus/death/objective/victory and
@@ -471,13 +470,23 @@ from the wrong yaw/height. The fixes:
   centre third of the view, with a dominant-hand laser pointer published
   through `GetCursorPos` and a right-trigger click.
 
+**7 Nov stopping point.** The AER/menu transition is device-confirmed. Gameplay
+input now runs the game's own input mapper from an XrApi-built image, so no
+Wine keyboard state is involved; it is desktop-smoke-tested (movement and
+weapon switch worked, no crash) and awaits the device pass. The remaining
+spawn/aim question is which yaw is the intended reference: the log prints
+`yaw A raw X -> Y (deg) B Z`, and if the view still faces the wrong way that
+line decides whether to use raw A or B.
+
 ### What is still not built
 
 **Desktop-verified now:** target-resolution composite, replacement HUD,
 borderless window, exact sync pixel, real FOV, `MODE_VR` state, render-side
-6DOF/eye height, recentre, input isolation, AER and the floating menu panel.
+6DOF/eye height, recentre, input isolation, AER, the floating menu panel and
+the direct player-input hook (movement + weapon switch smoke test).
 **Still not built:** decoupled aim. **Device-verified:** startup, injection,
-DXVK export, AER in gameplay. **Device follow-up still open:** the items in
+DXVK export, AER in gameplay and on the AER/menu transition. **Device follow-up
+still open:** the direct input build, spawn/aim base and the items in
 `NEXT_STEPS.md` section 4.
 
 ---

@@ -1,6 +1,6 @@
 # XOPS-WXR — CURRENT STEPS / handover
 
-**Date:** 6 Nov 2026, DeepSeek V4.1 Flash session.
+**Date:** 7 Nov 2026, DeepSeek V4.1 Flash session.
 **Read with:** `COMPLETED_STEPS.md` (what is done), `NEXT_STEPS.md` (what is
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
@@ -11,6 +11,32 @@ deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 Release build: 286,208 bytes, SHA-256
 `0c396d1c34ec9ddd19177477dbbe8fcb5eb6d8adfce4f17e8410dbdd7aca8821`.
+Latest code commit: `eaaaef3` (not pushed).
+
+## Where we stopped (7 Nov, night)
+
+**Working on device:** AER in gameplay and the AER/menu transition (the old
+`MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
+always-on laser behaved correctly in the 23:02 build; the 00:39 build adds the
+direct input path and has only been smoke-tested on the desktop.
+
+**Built but not yet device-tested:**
+
+- The direct player-update hook (`0x413AC4`): gameplay now calls the game's
+  own input mapper with an XrApi-built key image instead of relying on Wine
+  keyboard state. Desktop feeder test: movement and A/B weapon switch worked,
+  no crash.
+- The current spawn/aim base choice (`g_refYaw = g_refYawB`). The log prints
+  `yaw A raw X -> Y (deg) B Z`; if the spawn still faces the wrong way, that
+  line says whether the intended reference is the raw A or B.
+- Physical-key policy: blocked only in gameplay; menus/level objectives/death/
+  victory/intro keep keys; `ESC` always; `0` toggles manual PC mode in release
+  too.
+
+**Tomorrow's first pass:** copy the 00:39 `d3d8.dll` into the container, confirm
+`INPUT direct player-update hook installed at IDA 0x413AC4` in the log, then
+test movement, A/B/X/Y, grips/triggers, spawn facing and shot alignment. Send
+the `STEER recentred` line plus the button-press frames if anything is wrong.
 
 ---
 
@@ -31,7 +57,8 @@ as an experiment. In
 both mono and AER the runtime stays `MODE_VR=1` for the whole run; `MODE_3D`
 drops to mono on the title/menu/death/objective/victory screens, and those
 screens are drawn as a floating panel in the centre third with a hand laser
-pointer. Mono is the default. Device testing is the next real milestone.
+pointer. Mono is the default. Device verification of the direct input path and
+the spawn/aim base is the next milestone.
 
 ---
 
