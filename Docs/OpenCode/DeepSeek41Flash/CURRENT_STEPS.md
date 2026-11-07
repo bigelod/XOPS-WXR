@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  7 2026 11:49:06`, SHA-256
-`39571b81554eb1710d559bbb294571fea5e34db00326e56d26a5ec34f4a315e9`,
+**Current build:** `built Nov  7 2026 12:24:44`, SHA-256
+`5d246a9c20dc5c71437f30dea796bd5318182134dde7785afcf7541876a3d78c`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
-Release build: 287,744 bytes, SHA-256
-`b96a9659cd02c668a74cf48d84ed2acc72b18f86335cf6dd53b865f73d01b2c4`.
+Release build: 288,256 bytes, SHA-256
+`3851d62744a159c08681ed68d2515ef3aa8cc04135e196abcbd7e7392753b9b5`.
 Latest code commit: `ec434b5` (not pushed).
 
 ## Where we stopped (7 Nov, night)
@@ -18,11 +18,11 @@ Latest code commit: `ec434b5` (not pushed).
 **Working on device:** AER in gameplay and the AER/menu transition (the old
 `MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
 always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
-build was desktop-smoke-tested but not device-tested. The 11:49 build adds the
+build was desktop-smoke-tested but not device-tested. The 12:24 build adds the
 latest fixes below and was desktop-tested end to end (menus, movement, turn,
 fire).
 
-**New in the 11:49 build (not yet device-tested):**
+**New in the 12:24 build (not yet device-tested):**
 
 - **The runtime mouse works on menus again.** The window procedure now blocks
   the mouse in **gameplay only**; menus and the floating panel let the
@@ -43,6 +43,15 @@ fire).
   `0x48C93B` / `0x48C82F` before calling the original consumer. The consumer
   then either sets the message-loop flag `0x491A9C` to 0 (title/menu: quit) or
   calls `0x413C00` (return to title), exactly as a physical ESC would.
+- **Physical ESC works in gameplay again (12:24).** The direct-input rebuild
+  called `ZeroMemory` on the game's shared VK image at `0x48C920`, wiping
+  `keys[VK_ESCAPE]` just before the ESC consumer read `0x48C93B` later in the
+  same frame. `DirectInputBuild` now preserves the polled ESC byte, and
+  `EscConsumerHook` restores the game's saved cur/prev values instead of
+  zeroing them. Desktop-verified: physical ESC logs
+  `ESC consumer: physical ESC edge` and returns to the menu (`A44=61`,
+  `1A6C=1`); the XrApi left menu still logs the injected edge and transitions
+  the same way.
 - **Canonical controls.** VR mode rewrites the game's 20-byte key-binding block
   at `0x48C380` every frame from the default XOPS layout. The launcher's Play
   button also writes those 20 bytes into `config.dat` (preserving the video

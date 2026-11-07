@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  7 2026 11:49:06`, SHA-256
-`39571b81554eb1710d559bbb294571fea5e34db00326e56d26a5ec34f4a315e9`.
-Release: 287,744 bytes, SHA-256
-`b96a9659cd02c668a74cf48d84ed2acc72b18f86335cf6dd53b865f73d01b2c4`.
+**Last build:** `built Nov  7 2026 12:24:44`, SHA-256
+`5d246a9c20dc5c71437f30dea796bd5318182134dde7785afcf7541876a3d78c`.
+Release: 288,256 bytes, SHA-256
+`3851d62744a159c08681ed68d2515ef3aa8cc04135e196abcbd7e7392753b9b5`.
 
 ---
 
@@ -56,7 +56,9 @@ direct-input build** and the spawn/aim base:
   game's own ESC action. The mod hooks the game's native ESC-consumer call at
   `0x413BA2` and calls `0x413CF0` with a fresh ESC edge; it must work on
   gameplay, menus, death and victory, even while the game window is unfocused.
-  The physical ESC also stays valid.
+  The physical ESC also stays valid. Desktop-verified 7 Nov: both paths leave
+  gameplay for the menu after the direct-input image was fixed to preserve
+  `keys[VK_ESCAPE]`.
 - **Controls:** the launcher rewrites the canonical 20-byte key block into
   `config.dat`, and VR mode also enforces it in memory at `0x48C380`. Confirm
   after using the launcher's Play button, and try a deliberately custom

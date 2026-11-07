@@ -4846,26 +4846,51 @@ static BYTE*        g_gameKeys         = NULL; /* 0x48C920, 256-byte VK image */
    0x413C00 (return to title). Hook that call and feed it the ESC edge. */
 typedef void (__cdecl *PFN_EscConsumer)(void);
 static PFN_EscConsumer g_gameEscConsumer = NULL;
+static BOOL g_physEscHeld = FALSE;   /* our own physical-ESC edge tracker */
 
 static void __cdecl EscConsumerHook(void)
 {
     BYTE* cur;
     BYTE* prev;
+    BYTE savedCur = 0;
+    BYTE savedPrev = 0;
 
     if (!g_exeBase || !g_gameEscConsumer) return;
     cur  = (BYTE*)(g_exeBase + (0x48C93B - 0x400000)); /* keys[VK_ESCAPE] */
     prev = (BYTE*)(g_exeBase + (0x48C82F - 0x400000)); /* previous ESC */
+    savedCur  = *cur;
+    savedPrev = *prev;
 
-    if (g_menuEscPending) {
-        g_menuEscPending = FALSE;
-        *cur = 0x80;    /* current ESC pressed */
-        *prev = 0;      /* previous ESC not pressed -> fresh edge */
-        Log("INPUT    ESC consumer: injected a fresh ESC edge");
+    {
+        const BOOL haveAsync = g_inReal[IN_GETASYNCKEYSTATE] ? TRUE : FALSE;
+        const BOOL held = (haveAsync &&
+            (((PFN_GetAsyncKeyState)g_inReal[IN_GETASYNCKEYSTATE])(VK_ESCAPE)
+             & 0x8000)) ? TRUE : FALSE;
+
+        if (g_menuEscPending) {
+            g_menuEscPending = FALSE;
+            *cur = 0x80;    /* current ESC pressed */
+            *prev = 0;      /* previous ESC not pressed -> fresh edge */
+            Log("INPUT    ESC consumer: injected a fresh ESC edge");
+        } else if ((savedCur & 0x80) && !(savedPrev & 0x80)) {
+            Log("INPUT    ESC consumer: physical ESC edge");
+        } else if (haveAsync && held && !g_physEscHeld &&
+                   !(savedCur & 0x80)) {
+            /* Wine can return an empty keyboard array while the container
+               owns focus. ESC must still work, so fall back to its async
+               state and make our own fresh edge. */
+            *cur = 0x80;
+            *prev = 0;
+            Log("INPUT    ESC consumer: physical ESC edge"
+                " (async focus fallback)");
+        }
+        if (haveAsync) g_physEscHeld = held;
     }
     g_gameEscConsumer();
-    /* Leave no held ESC behind; the next input poll rebuilds the arrays. */
-    *cur = 0;
-    *prev = 0;
+    /* Put the game's own state back. Zeroing it here would erase the physical
+       edge the poll just recorded and make the next held frame look fresh. */
+    *cur  = savedCur;
+    *prev = savedPrev;
 }
 
 static void XrMenuKey(PBYTE p)
@@ -4884,11 +4909,18 @@ static void DirectInputBuild(BYTE* keys)
 {
     float mx, my;
     BOOL shoot, fireMode;
+    BYTE physicalEsc;
 
     if (!keys || !g_vrExclusive || !InGameplay()) return;
     if (!g_posed || !g_pose.valid) return;
 
+    /* The game's own poll has just filled this array from GetKeyboardState,
+       including the real ESC. Rebuilding the image must not erase it: the ESC
+       consumer runs later in the same frame and reads this byte. */
+    physicalEsc = keys[VK_ESCAPE];
+
     ZeroMemory(keys, 256);
+    keys[VK_ESCAPE] = physicalEsc;
 
     /* Left stick: analog if the runtime sends it, plus the digital stick
        direction bools that WinlatorXR always includes. */

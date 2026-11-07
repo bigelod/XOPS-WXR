@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  7 2026 11:49:06`, SHA-256
-`39571b81554eb1710d559bbb294571fea5e34db00326e56d26a5ec34f4a315e9`.
-Release build: 287,744 bytes, SHA-256
-`b96a9659cd02c668a74cf48d84ed2acc72b18f86335cf6dd53b865f73d01b2c4`.
+Current dev build: `built Nov  7 2026 12:24:44`, SHA-256
+`5d246a9c20dc5c71437f30dea796bd5318182134dde7785afcf7541876a3d78c`.
+Release build: 288,256 bytes, SHA-256
+`3851d62744a159c08681ed68d2515ef3aa8cc04135e196abcbd7e7392753b9b5`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,7 +1391,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 11:49 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 12:24 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
@@ -1435,7 +1435,20 @@ clicking menus; the block removed a working path.
   - left stick forward: screenshot MAD 40.4 vs neutral (player moved);
   - right stick turn: screenshot MAD 17.9 (view rotated).
 
-Build: `built Nov  7 2026 11:49:06`, dev SHA-256
-`39571b81554eb1710d559bbb294571fea5e34db00326e56d26a5ec34f4a315e9`;
-release 287,744 bytes, SHA-256
-`b96a9659cd02c668a74cf48d84ed2acc72b18f86335cf6dd53b865f73d01b2c4`.
+### Follow-up - physical ESC was dead in gameplay
+
+The direct-input rebuild called `ZeroMemory` on the game's shared VK image at
+`0x48C920`. The ESC consumer reads `keys[VK_ESCAPE]` at `0x48C93B` later in the
+same frame, so the real key had already been erased. `DirectInputBuild` now
+saves and restores the polled ESC byte, and `EscConsumerHook` saves/restores the
+game's cur/prev values around the call instead of zeroing them (zeroing also
+made a held ESC look like a fresh edge every frame).
+
+Desktop-verified: physical ESC logs `ESC consumer: physical ESC edge` and moves
+to the menu (`A44=61`, `1A6C=1`); the XrApi left menu still logs the injected
+edge and transitions the same way.
+
+Build: `built Nov  7 2026 12:24:44`, dev SHA-256
+`5d246a9c20dc5c71437f30dea796bd5318182134dde7785afcf7541876a3d78c`;
+release 288,256 bytes, SHA-256
+`3851d62744a159c08681ed68d2515ef3aa8cc04135e196abcbd7e7392753b9b5`.
