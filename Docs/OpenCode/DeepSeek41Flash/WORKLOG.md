@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  6 2026 18:19:57`, SHA-256
-`bb8a2f709add941f23a4723f1a71586800255474d010db1ed94e785a0ebfcb43`.
+Current dev build: `built Nov  6 2026 22:41:00`, SHA-256
+`7cc964b18fc78fa459b3748766b3101447c8d9ddc49013e3d50d60ba3c982c01`.
 Release build: 283,136 bytes, SHA-256
-`4fa2a83fef7b19b67ab09c908001ac8dab4e8bfd6e0ba27da190c0e7bd652ac0`.
+`d57bc5ccf3042c186730689cab3b6813775f00071c56f433ef8a8e106531e1ad`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1286,3 +1286,29 @@ wrong. Changes:
 - AER -> menu crash was not reproduced in the supplied Wine log: the log ended
   with `MODE_VR -> 0`, two menu frames and a clean `SHUTDOWN`, no Wine page
   fault. Keeping `MODE_VR=1` in both modes may avoid it; needs a device run.
+
+### 2026-11-06 - spawn yaw/aim base and WinlatorXR input injection
+
+Device log `E:\tmp\XOPS\RunLogs\xops_wxr_probe.log` (release 18:20:08):
+
+- **Spawn facing / shot mismatch:** at the level-start edge the log showed
+  `yaw A raw 0.0000 -> 0.0000  B 1.5816` (90.7 deg). A is the render copy the
+  game makes during its update; B is the player's authoritative orientation.
+  A can still be one frame stale at a spawn, so the view used A=0 while the
+  shot and movement used B=90.7 deg. `SteerRecentre` now sets
+  `g_refYaw = g_refYawB` whenever B is readable, so view and shot share a base.
+- **Input injection:** the game's real input path is confirmed by
+  disassembly: `0x406950` copies the previous `0x48c920` array to `0x48c814`
+  and calls `GetKeyboardState(0x48c920)`; `0x407520` turns the configured key
+  mappings into the player input bits at `player+0x10/+0x11`. The configured
+  keys are the ones the mod already pulses (W/S/A/D, R, G, Shift, X, Z, Space,
+  LButton).
+  The failure was in the hook: if Wine's `GetKeyboardState` returned FALSE
+  (normal when WinlatorXR/the container owns focus), the `if (r && p)` block
+  was skipped and **no XrApi key was injected at all**. The hook now zeroes the
+  array on failure and injects the XrApi state anyway, and returns TRUE because
+  it owns the buffer. The arrow capture also happens before the focus mute, so
+  the left-stick-as-arrows mapping survives an unfocused game window.
+- This is direct control of the game's own input handling, not OS-level key
+  synthesis: the game reads the array we fill. No WinlatorXR InputAPI listener
+  is needed for commands.

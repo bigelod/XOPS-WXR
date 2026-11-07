@@ -419,9 +419,10 @@ clamped to ±1 m before the gain; `pos_scale` is that gain (default **1.0** =
 1:1, 0..2, also in the launcher's Options dialog) and `eye_height` is a manual
 float offset (default 0, ±5). A
 **right-stick click** recentres; a level start also calls `SteerRecentre()`
-before `SteerTick` touches the camera, so the untouched spawn yaw is captured
-and the player's current HMD XYZ and facing become the new origin against the
-player model. Head yaw is still written to both camera
+before `SteerTick` touches the camera. B is the player's authoritative spawn
+yaw; A is the render copy and can lag one frame (device log: A=0.0 while
+B=90.7 deg), so both references now use B. The rendered view and the shot then
+share one base. Head yaw is still written to both camera
 clusters, so stick-forward follows the head. All debug keys now require manual
 PC mode
 (`0`), which WinlatorXR does not map by default. Verified with a ±1 m sine
@@ -443,13 +444,15 @@ from the wrong yaw/height. The fixes:
   position. The hand counter-rotation against `SpriteRoll` was removed; hands
   and gun roll with the presented world.
 - Every level start calls `SteerRecentre()` from the `LevelActive()` rising
-  edge, before `SteerTick` writes the camera, so the captured yaw is the
-  untouched spawn yaw. The current HMD XYZ and yaw become the new origin
-  against the player model. The right-stick click does the same at any time.
+  edge, before `SteerTick` writes the camera. B is the player's authoritative
+  spawn yaw; A is the render copy and can lag one frame, so both references
+  use B. The current HMD XYZ and yaw become the new origin against the player
+  model. The right-stick click does the same at any time.
 - Gameplay and the floating non-VR panel strip **all** physical keyboard/mouse
   input from `GetKeyboardState` and swallow the matching `WM_KEY*`/`WM_MOUSE*`
-  messages. Only `ESC` and `0` survive. A/B/X/Y and arrows are blocked in VR on
-  every screen. WinlatorXR's left-stick-as-arrows presses are translated to
+  messages. Only `ESC` and `0` survive. The hook injects the XrApi state even
+  when Wine's real `GetKeyboardState` returns FALSE or the game window is
+  unfocused, which is the normal state under WinlatorXR. WinlatorXR's left-stick-as-arrows presses are translated to
   W/A/S/D so movement works and the arrows cannot swap weapons.
 - The laser is always drawn; `Y` is zoom only.
 - `MODE_VR` stays `1` for the whole run in mono and AER (HWXR model) and only
@@ -538,10 +541,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 18:19:57`, SHA-256
-`bb8a2f709add941f23a4723f1a71586800255474d010db1ed94e785a0ebfcb43`,
+Current handover build: `built Nov  6 2026 22:41:00`, SHA-256
+`7cc964b18fc78fa459b3748766b3101447c8d9ddc49013e3d50d60ba3c982c01`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 283,136 bytes,
-SHA-256 `4fa2a83fef7b19b67ab09c908001ac8dab4e8bfd6e0ba27da190c0e7bd652ac0`.
+SHA-256 `d57bc5ccf3042c186730689cab3b6813775f00071c56f433ef8a8e106531e1ad`.
 
 ---
 

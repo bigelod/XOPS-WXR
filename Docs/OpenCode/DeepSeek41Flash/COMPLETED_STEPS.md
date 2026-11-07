@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  6 2026 18:19:57`, SHA-256
-`bb8a2f709add941f23a4723f1a71586800255474d010db1ed94e785a0ebfcb43`.
+**Last build covered:** `built Nov  6 2026 22:41:00`, SHA-256
+`7cc964b18fc78fa459b3748766b3101447c8d9ddc49013e3d50d60ba3c982c01`.
 Release: 283,136 bytes, SHA-256
-`4fa2a83fef7b19b67ab09c908001ac8dab4e8bfd6e0ba27da190c0e7bd652ac0`.
+`d57bc5ccf3042c186730689cab3b6813775f00071c56f433ef8a8e106531e1ad`.
 
 ---
 
@@ -72,8 +72,10 @@ Release: 283,136 bytes, SHA-256
   manual float offset (default `0`, clamped ±5). A **right-stick click** calls
   `SteerRecentre()`, so the current HMD height becomes the flat game player
   height (`0`); a level start does the same from the `LevelActive()` rising
-  edge **before** `SteerTick` writes the camera, so the untouched spawn yaw is
-  the reference. Head yaw is still written to both camera clusters, so
+  edge **before** `SteerTick` writes the camera. B is the player's
+  authoritative spawn yaw and A is the render copy, so both references use B
+  (the copy can lag a frame; the device log showed A=0.0 against B=90.7 deg).
+  Head yaw is still written to both camera clusters, so
   stick-forward follows the head. This is visual-only and does **not** add
   collision: standing or leaning into geometry can still clip, and the
   intended mitigation is lowering `pos_scale`, not solving world collisions.
@@ -137,6 +139,9 @@ Release: 283,136 bytes, SHA-256
   Only `ESC` (the way out) and `0` (PC-only manual mode) survive. This fixes
   the arrow-key -> weapon-swap leak through either input path. Mono and AER
   menus behave the same: there is no desktop input while the panel is up.
+  The hook now injects the XrApi state even when Wine's real
+  `GetKeyboardState` returns FALSE or the window is unfocused (normal under
+  WinlatorXR); the old code skipped all injection on that failure.
 - **Left-stick-as-arrows fallback:** WinlatorXR currently maps the left stick
   to the arrow keys. Those raw presses are captured before the filter and
   translated to W/A/S/D, so the stick moves the player instead of swapping

@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 18:19:57`, SHA-256
-`bb8a2f709add941f23a4723f1a71586800255474d010db1ed94e785a0ebfcb43`,
+**Current build:** `built Nov  6 2026 22:41:00`, SHA-256
+`7cc964b18fc78fa459b3748766b3101447c8d9ddc49013e3d50d60ba3c982c01`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 Release build: 283,136 bytes, SHA-256
-`4fa2a83fef7b19b67ab09c908001ac8dab4e8bfd6e0ba27da190c0e7bd652ac0`.
+`d57bc5ccf3042c186730689cab3b6813775f00071c56f433ef8a8e106531e1ad`.
 
 ---
 
@@ -98,11 +98,14 @@ native frame fills it with no bars or crop.
 - **Level-start recentre:** `LevelActive()` (the game's mission/result/player
   state, without the draw signature) rises when a player exists in a mission.
   `hkBeginScene` sees that edge **before** `SteerTick` writes the camera and
-  calls `SteerRecentre()`. That captures the untouched spawn yaw, so an old
-  menu/level head offset cannot leak in. A pause-menu round trip leaves
-  `LevelActive` true and does not recentre. It asks the XrApi layer to zero the
-  pose yaw and XYZ, making the player's current head position and facing the
-  new `0,0,0` and zero-yaw origin against the player model.
+  calls `SteerRecentre()`. B is the player's authoritative spawn yaw; A is the
+  render copy the game makes during its update and can still be one frame
+  behind (device log: A=0.0 while B=90.7 deg), so `SteerRecentre` now uses B
+  for both. The rendered view and the shot then share one yaw base instead of
+  facing 90 deg apart. A pause-menu round trip leaves `LevelActive` true and
+  does not recentre. It asks the XrApi layer to zero the pose yaw and XYZ,
+  making the player's current head position and facing the new `0,0,0` and
+  zero-yaw origin against the player model.
 - **Render-side 6DOF / eye height:** the game clamps its camera Y every frame,
   so `SteerTick` writes only yaw/pitch and never position. `CameraOffset()`
   rotates `headP` into the camera frame and the draw copies shift the world
@@ -124,7 +127,10 @@ native frame fills it with no bars or crop.
   physical keyboard and mouse input is removed from `GetKeyboardState`, and
   the window procedure also swallows the corresponding `WM_KEY*`/`WM_MOUSE*`
   messages. Only `ESC` (the way out) and `0` (PC-only manual mode) survive.
-  A/B/X/Y and the arrow keys are swallowed in VR on every screen.
+  A/B/X/Y and the arrow keys are swallowed in VR on every screen. The hook now
+  injects the XrApi state **even when Wine's real `GetKeyboardState` returns
+  FALSE** (the game window is usually unfocused under WinlatorXR); previously
+  that failure skipped the whole injection block.
 - **Left stick as arrows:** WinlatorXR currently maps the left stick to the
   arrow keys rather than the XrApi analog fields. Those raw arrow presses are
   read before the filter and translated to W/A/S/D, so the stick moves the

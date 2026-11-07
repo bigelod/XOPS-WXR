@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  6 2026 18:19:57`, SHA-256
-`bb8a2f709add941f23a4723f1a71586800255474d010db1ed94e785a0ebfcb43`.
+**Last build:** `built Nov  6 2026 22:41:00`, SHA-256
+`7cc964b18fc78fa459b3748766b3101447c8d9ddc49013e3d50d60ba3c982c01`.
 Release: 283,136 bytes, SHA-256
-`4fa2a83fef7b19b67ab09c908001ac8dab4e8bfd6e0ba27da190c0e7bd652ac0`.
+`d57bc5ccf3042c186730689cab3b6813775f00071c56f433ef8a8e106531e1ad`.
 
 ---
 
@@ -59,7 +59,13 @@ outstanding:
   Do not change the draw code.
 - **Level start:** begin several levels and confirm the view's XYZ and yaw are
   relative to the player model at spawn (no inherited yaw/height from the
-  menu), and that shots follow the right hand on every level.
+  menu), and that shots follow the right hand on every level. The recentre now
+  uses B (player orientation) for both the render reference and the shot,
+  because A (render copy) can lag one frame at spawn.
+- **Commands:** confirm A/B/X/Y, grips and triggers reach the game even while
+  the game window is unfocused. `GetKeyboardState` now injects the XrApi array
+  regardless of Wine's return value; the previous code skipped injection when
+  the real call returned FALSE.
 - **Hand roll:** tilt the head and confirm the hands/gun roll with the
   presented world instead of staying glued to the view. The previous
   counter-rotation was removed.

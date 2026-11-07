@@ -2283,7 +2283,28 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
     ++g_inCalls[IN_GETKEYBOARDSTATE]; ++g_inFrame[IN_GETKEYBOARDSTATE];
     if (!g_inReal[IN_GETKEYBOARDSTATE]) return FALSE;
     r = ((PFN_GetKeyboardState)g_inReal[IN_GETKEYBOARDSTATE])(p);
-    if (r && p) {
+    /* Inject even when the real call reports failure. Under WinlatorXR the
+       game window can be unfocused (the runtime/container owns focus) and Wine
+       may return FALSE; the old code skipped the whole block in that case, so
+       no XrApi key ever reached the game. The real failure is not fatal - we
+       supply the array ourselves. */
+    if (p) {
+        if (!r) ZeroMemory(p, 256);
+        /* WinlatorXR's left stick currently arrives as arrow keys, not as the
+           XrApi analog moveX/moveY fields. Capture those presses before the VR
+           filter removes them; StickKeys turns them back into W/A/S/D. This
+           must happen before the focus mute: the runtime/container usually
+           owns focus, and the arrows are controller input, not desktop input.
+           Outside gameplay they stay dead so they cannot drive a menu. */
+        if (g_vrExclusive && InGameplay()) {
+            g_arrowUp    = (p[VK_UP]    & 0x80) ? TRUE : FALSE;
+            g_arrowDown  = (p[VK_DOWN]  & 0x80) ? TRUE : FALSE;
+            g_arrowLeft  = (p[VK_LEFT]  & 0x80) ? TRUE : FALSE;
+            g_arrowRight = (p[VK_RIGHT] & 0x80) ? TRUE : FALSE;
+        } else {
+            g_arrowUp = g_arrowDown = g_arrowLeft = g_arrowRight = FALSE;
+        }
+
         /* Focus is the boundary for DESKTOP input. While another window owns
            the keyboard and mouse the game keeps running (g_noPause), but no
            physical key, button or cursor movement may cross between windows.
@@ -2293,20 +2314,15 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
            muted (ProbeKeys). */
         g_inputMuted = !GameWindowFocused();
         if (g_inputMuted) ZeroMemory(p, 256);
-
-        /* WinlatorXR's left stick currently arrives as arrow keys, not as the
-           XrApi analog moveX/moveY fields. Capture those presses before the VR
-           filter removes them; StickKeys turns them back into W/A/S/D. Outside
-           gameplay they stay dead so they cannot swap weapons or drive a
-           menu. */
-        if (g_vrExclusive && InGameplay() && !g_inputMuted) {
-            g_arrowUp    = (p[VK_UP]    & 0x80) ? TRUE : FALSE;
-            g_arrowDown  = (p[VK_DOWN]  & 0x80) ? TRUE : FALSE;
-            g_arrowLeft  = (p[VK_LEFT]  & 0x80) ? TRUE : FALSE;
-            g_arrowRight = (p[VK_RIGHT] & 0x80) ? TRUE : FALSE;
-        } else {
-            g_arrowUp = g_arrowDown = g_arrowLeft = g_arrowRight = FALSE;
+        {
+            static int focusLogs = 0;
+            if ((!r || g_inputMuted) && focusLogs < 6) {
+                LogD("INPUT    GetKeyboardState real=%d focused=%d -> injecting"
+                     " XrApi state anyway", r, g_inputMuted ? 0 : 1);
+                ++focusLogs;
+            }
         }
+
 
         /* WinlatorXR sends A/B/X/Y for the controller buttons, so the physical
            keys must never also reach the game - on any screen. The arrow keys
@@ -2376,7 +2392,8 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
             }
         }
     }
-    return r;
+    /* p is ours to fill: report success even if Wine's call failed. */
+    return p ? TRUE : r;
 }
 
 static SHORT WINAPI hkGetKeyState(int vk)
@@ -3357,17 +3374,27 @@ static void SteerLoad(void)
 static void SteerRecentre(void)
 {
     float v;
+    float rawA = 0.0f;
+    BOOL haveA = FALSE, haveB = FALSE;
     XrRequestRecenter();
-    if (SafeRead(CamAddr(A_YAW), &v)) g_refYaw = v;
-    if (SafeRead(CamAddr(B_YAW), &v)) g_refYawB = v;
+    haveA = SafeRead(CamAddr(A_YAW), &v) ? TRUE : FALSE;
+    if (haveA) { rawA = v; g_refYaw = v; }
+    haveB = SafeRead(CamAddr(B_YAW), &v) ? TRUE : FALSE;
+    if (haveB) g_refYawB = v;
+    /* A is the render copy the game makes during its update; B is the player's
+       own orientation. At a level spawn the copy can still be one frame behind
+       (A read 0.0 while B held the 90 deg spawn yaw on device), so use B for
+       both. The rendered view and the shot then share one yaw base instead of
+       facing 90 deg apart. */
+    if (haveB) g_refYaw = g_refYawB;
     if (SafeRead(CamAddr(A_H1), &v)) g_refPos[0] = v;
     if (SafeRead(CamAddr(A_Y),  &v)) g_refPos[1] = v;
     if (SafeRead(CamAddr(A_H2), &v)) g_refPos[2] = v;
     g_haveRef = TRUE;
     g_turnYaw = 0.0f;
-    Log("STEER    recentred. yaw A %.4f rad (%.1f deg)  B %.4f, position"
-        " h1=% .3f Y=% .3f h2=% .3f",
-        g_refYaw, g_refYaw * 57.2957795f, g_refYawB,
+    Log("STEER    recentred. yaw A raw %.4f -> %.4f (%.1f deg)  B %.4f,"
+        " position h1=% .3f Y=% .3f h2=% .3f",
+        rawA, g_refYaw, g_refYaw * 57.2957795f, g_refYawB,
         g_refPos[0], g_refPos[1], g_refPos[2]);
     Log("STEER    writing %s", ClusterName(g_cluster));
 }
