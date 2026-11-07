@@ -32,6 +32,7 @@ Left-handed mode swaps only shoot and fire mode.
 Every level start makes the current head position and facing the new origin.
 In gameplay all physical keyboard/mouse input is ignored except ESC and 0;
 ESC is always valid, even while the game window is unfocused.
+The left controller's menu button performs the game's ESC action.
 Menus, level objectives, death, victory and intro screens keep physical keys.
 Press 0 on a PC to enable the full desktop keyboard/mouse for manual testing.
 Play resets XOPS's key bindings to the default layout before launching, because

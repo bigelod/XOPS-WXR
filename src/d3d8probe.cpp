@@ -1920,7 +1920,7 @@ static BOOL  g_arrowLeft = FALSE, g_arrowRight = FALSE;
 /* TRUE once the direct player-update hook is installed; gameplay then uses
    the game's own input mapper instead of injecting keyboard state. */
 static BOOL  g_directInput = FALSE;
-static int   g_menuKeyPulse = 0;   /* frames to keep the XrApi menu ESC in the VK image */
+static BOOL  g_menuEscPending = FALSE; /* XrApi left menu -> game ESC consumer */
 static long  g_idleRun      = 0;        /* consecutive idle frames */
 static BOOL  g_idleBaseline = FALSE;    /* have we recorded the run's start? */
 static long  g_idleRuns     = 0;
@@ -4743,22 +4743,48 @@ static PFN_GameVoid g_gameInputMap     = NULL; /* 0x407520 */
 static PFN_GameVoid g_gamePlayerUpdate = NULL; /* 0x407CF0 */
 static BYTE*        g_gameKeys         = NULL; /* 0x48C920, 256-byte VK image */
 
-/* XrApi left menu = ESC. This is the one control that must work on every
-   screen, including when Windows focus is elsewhere and the physical ESC never
-   reaches the game. Set the VK image as well as posting the window message;
-   the game may use either path. */
+/* XrApi left menu = the game's own ESC consumer. Emitting ESC through Wine
+   does not work, so we call the consumer at its native call site. At IDA
+   0x413BA2 the game calls 0x413CF0; that function reads the ESC edge and either
+   sets the message-loop flag 0x491A9C to 0 (title/menu: quit) or calls
+   0x413C00 (return to title). Hook that call and feed it the ESC edge. */
+typedef void (__cdecl *PFN_EscConsumer)(void);
+static PFN_EscConsumer g_gameEscConsumer = NULL;
+
+static void __cdecl EscConsumerHook(void)
+{
+    BYTE* cur;
+    BYTE* prev;
+
+    if (!g_exeBase || !g_gameEscConsumer) return;
+    cur  = (BYTE*)(g_exeBase + (0x48C93B - 0x400000)); /* keys[VK_ESCAPE] */
+    prev = (BYTE*)(g_exeBase + (0x48C82F - 0x400000)); /* previous ESC */
+
+    if (g_menuEscPending) {
+        g_menuEscPending = FALSE;
+        *cur = 0x80;    /* current ESC pressed */
+        *prev = 0;      /* previous ESC not pressed -> fresh edge */
+        Log("INPUT    ESC consumer: injected a fresh ESC edge");
+    }
+    g_gameEscConsumer();
+    /* Leave no held ESC behind; the next input poll rebuilds the arrays. */
+    *cur = 0;
+    *prev = 0;
+    {
+        int st = -1, mi = -1;
+        SafeReadInt(g_exeBase + (0x491A6C - 0x400000), &st);
+        SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mi);
+        LogD("INPUT    ESC consumer done: state %d mission %d", st, mi);
+    }
+}
+
 static void XrMenuKey(PBYTE p)
 {
+    (void)p;
     if (!g_vrExclusive || !g_posed || !g_pose.valid) return;
     if (!VrEdge(XRB_L_MENU)) return;
-
-    if (p) p[VK_ESCAPE] |= 0x80;
-    g_menuKeyPulse = InGameplay() ? 3 : 0;
-    if (g_gameWnd) {
-        PostMessageA(g_gameWnd, WM_KEYDOWN, VK_ESCAPE, 0x00000001);
-        PostMessageA(g_gameWnd, WM_KEYUP,   VK_ESCAPE, 0xC0000001);
-    }
-    Log("INPUT    XrApi left menu -> ESC");
+    Log("INPUT    XrApi left menu pressed");
+    g_menuEscPending = TRUE;
 }
 
 /* Build the VK image the game's mapper expects from the XrApi frame. The
@@ -4773,10 +4799,6 @@ static void DirectInputBuild(BYTE* keys)
     if (!g_posed || !g_pose.valid) return;
 
     ZeroMemory(keys, 256);
-    if (g_menuKeyPulse > 0) {
-        keys[VK_ESCAPE] = 0x80;
-        --g_menuKeyPulse;
-    }
 
     /* Left stick: analog if the runtime sends it, plus the digital stick
        direction bools that WinlatorXR always includes. */
@@ -4879,6 +4901,41 @@ static void HookPlayerUpdate(void)
     g_directInput = TRUE;
     Log("INPUT    direct player-update hook installed at IDA 0x413AC4"
         " (input mapper 0x407520 -> update 0x407CF0)");
+}
+
+/* Patch the game's own ESC-consumer call at IDA 0x413BA2 (call 0x413CF0). */
+static void HookEscConsumer(void)
+{
+    BYTE* callSite;
+    BYTE* target;
+    LONG rel;
+    DWORD old;
+
+    if (!g_exeBase) return;
+    g_gameEscConsumer = (PFN_EscConsumer)(g_exeBase + (0x413CF0 - 0x400000));
+    callSite = (BYTE*)(g_exeBase + (0x413BA2 - 0x400000));
+    if (callSite[0] != 0xE8) {
+        Log("INPUT ESC hook: expected E8 at IDA 0x413BA2, found 0x%02X",
+            callSite[0]);
+        return;
+    }
+    rel = *(LONG*)(callSite + 1);
+    target = callSite + 5 + rel;
+    if (target != (BYTE*)g_gameEscConsumer) {
+        Log("INPUT ESC hook: call at 0x413BA2 targets %p, expected %p",
+            target, (void*)g_gameEscConsumer);
+        return;
+    }
+    if (!VirtualProtect(callSite, 5, PAGE_EXECUTE_READWRITE, &old)) {
+        Log("INPUT ESC hook: VirtualProtect failed (err %lu)", GetLastError());
+        return;
+    }
+    rel = (LONG)((BYTE*)EscConsumerHook - (callSite + 5));
+    *(LONG*)(callSite + 1) = rel;
+    VirtualProtect(callSite, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), callSite, 5);
+    Log("INPUT    ESC consumer hook installed at IDA 0x413BA2"
+        " (calls the game's own 0x413CF0)");
 }
 
 /* The 20 key codes the game's own config tool writes by default. The mapper
@@ -5200,6 +5257,7 @@ static void EnsureInit(void)
     else Log("PROJECTION aspect patch disabled by xops_wxr_steer.ini");
     HookInput();
     HookPlayerUpdate();
+    HookEscConsumer();
     ForceModKeyBindings();
 }
 

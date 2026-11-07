@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  7 2026 01:48:59`, SHA-256
-`9888d85939cf5b6599e829eb42ab9c352a6ed5524f0f426e6e5a9bd8326dacde`,
+**Current build:** `built Nov  7 2026 02:17:23`, SHA-256
+`b8c8e5252414c3d6163f10743a3f8f0ece489f3325e74941dd0cb37152184143`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
-Release build: 287,232 bytes, SHA-256
-`8e713d60cb75ea5e3a14947e89d8909242f9591fbdaf8f6d0b231ca94cf758d0`.
+Release build: 287,744 bytes, SHA-256
+`00b543723f99c037c0f4882e86f476916277d7f80bb9f8f299cae33fc8588dbd`.
 Latest code commit: `86159df` (not pushed).
 
 ## Where we stopped (7 Nov, night)
@@ -18,17 +18,19 @@ Latest code commit: `86159df` (not pushed).
 **Working on device:** AER in gameplay and the AER/menu transition (the old
 `MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
 always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
-build was desktop-smoke-tested but not device-tested. The 01:48 build adds the
+build was desktop-smoke-tested but not device-tested. The 02:17 build adds the
 latest fixes below.
 
-**New in the 01:48 build (not yet device-tested):**
+**New in the 02:17 build (not yet device-tested):**
 
-- **ESC is never blocked, and the XrApi left menu is ESC.** When the game
-  window is unfocused, the input mute now clears everything except `ESC` and
-  `0`. The left controller's menu button (`L_MENU`, XrApi bool 1) now emits a
-  real ESC: it sets `VK_ESCAPE` in the game's keyboard image and posts
-  `WM_KEYDOWN`/`WM_KEYUP` to the game window. This works in gameplay and on
-  menus, even when the physical keyboard is absent.
+- **ESC is never blocked, and the XrApi left menu runs the game's own ESC
+  consumer.** When the game window is unfocused, the input mute now clears
+  everything except `ESC` and `0`. Emitting ESC through Wine did not work on
+  device, so the mod hooks the game's native ESC-consumer call at IDA
+  `0x413BA2` (the game's `call 0x413CF0`) and injects a fresh ESC edge into
+  `0x48C93B` / `0x48C82F` before calling the original consumer. The consumer
+  then either sets the message-loop flag `0x491A9C` to 0 (title/menu: quit) or
+  calls `0x413C00` (return to title), exactly as a physical ESC would.
 - **Canonical controls.** VR mode rewrites the game's 20-byte key-binding block
   at `0x48C380` every frame from the default XOPS layout. The launcher's Play
   button also writes those 20 bytes into `config.dat` (preserving the video
@@ -50,7 +52,7 @@ directly. If A and B diverge, the likely fix is to make the character yaw B the
 single authority and derive A from it (or patch the clamp), not to keep a
 separate camera offset.
 
-**Tomorrow's first pass:** copy the 01:48 `d3d8.dll` into the container, confirm
+**Tomorrow's first pass:** copy the 02:17 `d3d8.dll` into the container, confirm
 `INPUT direct player-update hook installed at IDA 0x413AC4`, test the left menu
 button as ESC, movement, A/B/X/Y/grips/triggers, spawn facing and shot
 alignment, and send the `STEER recentred`, `YAW ... map`, and `AIM base ... map`

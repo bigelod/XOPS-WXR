@@ -472,9 +472,10 @@ from the wrong yaw/height. The fixes:
 
 **7 Nov stopping point.** The AER/menu transition is device-confirmed. Gameplay
 input now runs the game's own input mapper from an XrApi-built image, so no
-Wine keyboard state is involved. The 01:48 build adds: `ESC`/`0` preserved when
-the window is unfocused; the left controller menu button mapped to a real ESC
-(`VK_ESCAPE` plus posted `WM_KEYDOWN`/`WM_KEYUP`); canonical XOPS key bindings
+Wine keyboard state is involved. The 02:17 build adds: `ESC`/`0` preserved when
+the window is unfocused; the left controller menu button mapped to the game's
+own ESC consumer (hook at `0x413BA2`, call `0x413CF0` with a fresh ESC edge,
+no Wine key events); canonical XOPS key bindings
 enforced in memory and written into `config.dat` by the launcher's Play button;
 `SteerAimWrite` called early again, before the game's shot step; and
 `YAW ... map <id>` / `AIM base ... map <id>` diagnostics.
@@ -568,10 +569,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  7 2026 01:48:59`, SHA-256
-`9888d85939cf5b6599e829eb42ab9c352a6ed5524f0f426e6e5a9bd8326dacde`,
-deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 287,232 bytes,
-SHA-256 `8e713d60cb75ea5e3a14947e89d8909242f9591fbdaf8f6d0b231ca94cf758d0`.
+Current handover build: `built Nov  7 2026 02:17:23`, SHA-256
+`b8c8e5252414c3d6163f10743a3f8f0ece489f3325e74941dd0cb37152184143`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 287,744 bytes,
+SHA-256 `00b543723f99c037c0f4882e86f476916277d7f80bb9f8f299cae33fc8588dbd`.
 
 ---
 

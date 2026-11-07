@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  7 2026 01:48:59`, SHA-256
-`9888d85939cf5b6599e829eb42ab9c352a6ed5524f0f426e6e5a9bd8326dacde`.
-Release: 287,232 bytes, SHA-256
-`8e713d60cb75ea5e3a14947e89d8909242f9591fbdaf8f6d0b231ca94cf758d0`.
+**Last build covered:** `built Nov  7 2026 02:17:23`, SHA-256
+`b8c8e5252414c3d6163f10743a3f8f0ece489f3325e74941dd0cb37152184143`.
+Release: 287,744 bytes, SHA-256
+`00b543723f99c037c0f4882e86f476916277d7f80bb9f8f299cae33fc8588dbd`.
 
 ---
 
@@ -145,8 +145,9 @@ Release: 287,232 bytes, SHA-256
   custom PC config cannot corrupt the direct-input image.
 - **ESC:** preserved even when the game window is unfocused; the mute only
   removes the other physical keys. `ESC` is always valid. The XrApi left menu
-  button (`L_MENU`, bool 1) also emits a real ESC by setting `VK_ESCAPE` and
-  posting `WM_KEYDOWN`/`WM_KEYUP`, so it works with no physical keyboard.
+  button (`L_MENU`, bool 1) runs the game's own ESC consumer: the mod hooks the
+  native call at `0x413BA2` and calls `0x413CF0` with a fresh ESC edge. No Wine
+  key events are used.
 - **VR input isolation:** in **gameplay only**, all physical keyboard and mouse
   input is removed from `GetKeyboardState`, and the window procedure swallows
   the corresponding `WM_KEY*`/`WM_MOUSE*` messages. Only `ESC` (the way out)

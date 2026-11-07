@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  7 2026 01:48:59`, SHA-256
-`9888d85939cf5b6599e829eb42ab9c352a6ed5524f0f426e6e5a9bd8326dacde`.
-Release: 287,232 bytes, SHA-256
-`8e713d60cb75ea5e3a14947e89d8909242f9591fbdaf8f6d0b231ca94cf758d0`.
+**Last build:** `built Nov  7 2026 02:17:23`, SHA-256
+`b8c8e5252414c3d6163f10743a3f8f0ece489f3325e74941dd0cb37152184143`.
+Release: 287,744 bytes, SHA-256
+`00b543723f99c037c0f4882e86f476916277d7f80bb9f8f299cae33fc8588dbd`.
 
 ---
 
@@ -52,10 +52,11 @@ direct-input build** and the spawn/aim base:
   `INPUT direct player-update hook installed at IDA 0x413AC4`. In gameplay test
   movement, A/B/X/Y, left/right grips and both triggers. The game window is
   usually unfocused under WinlatorXR; that must not matter.
-- **ESC / left menu:** confirm the left controller's menu button acts as ESC on
-  gameplay, menus, death and victory screens. It sets `VK_ESCAPE` and posts
-  `WM_KEYDOWN`/`WM_KEYUP`; it must work even while the game window is
-  unfocused. The physical ESC also stays valid.
+- **ESC / left menu:** confirm the left controller's menu button performs the
+  game's own ESC action. The mod hooks the game's native ESC-consumer call at
+  `0x413BA2` and calls `0x413CF0` with a fresh ESC edge; it must work on
+  gameplay, menus, death and victory, even while the game window is unfocused.
+  The physical ESC also stays valid.
 - **Controls:** the launcher rewrites the canonical 20-byte key block into
   `config.dat`, and VR mode also enforces it in memory at `0x48C380`. Confirm
   after using the launcher's Play button, and try a deliberately custom

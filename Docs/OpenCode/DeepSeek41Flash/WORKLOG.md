@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  7 2026 01:48:59`, SHA-256
-`9888d85939cf5b6599e829eb42ab9c352a6ed5524f0f426e6e5a9bd8326dacde`.
-Release build: 287,232 bytes, SHA-256
-`8e713d60cb75ea5e3a14947e89d8909242f9591fbdaf8f6d0b231ca94cf758d0`.
+Current dev build: `built Nov  7 2026 02:17:23`, SHA-256
+`b8c8e5252414c3d6163f10743a3f8f0ece489f3325e74941dd0cb37152184143`.
+Release build: 287,744 bytes, SHA-256
+`00b543723f99c037c0f4882e86f476916277d7f80bb9f8f299cae33fc8588dbd`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1354,13 +1354,15 @@ state at all.
 
 Owner findings after the direct-input build:
 
-- **ESC must never be blocked, and the XrApi left menu is ESC.** The
-  unfocused-window mute was clearing the whole 256-byte array, including ESC.
-  It now clears everything except `ESC` and `0`, and
-  `GetAsyncKeyState`/`GetKeyState` apply the same exception. The left
-  controller's menu button (`L_MENU`, bool 1) now emits a real ESC by setting
-  `VK_ESCAPE` in the game image and posting `WM_KEYDOWN`/`WM_KEYUP` to the game
-  window. It works on gameplay and menus with no physical keyboard.
+- **ESC must never be blocked, and the XrApi left menu runs the game's ESC
+  consumer.** The unfocused-window mute was clearing the whole 256-byte array,
+  including ESC. It now clears everything except `ESC` and `0`, and
+  `GetAsyncKeyState`/`GetKeyState` apply the same exception. Emitting ESC via
+  Wine did not work, so the mod hooks the game's native ESC-consumer call at
+  `0x413BA2` (the game's `call 0x413CF0`), injects a fresh ESC edge into
+  `0x48C93B`/`0x48C82F`, and calls the original consumer. It either sets the
+  message-loop flag `0x491A9C` to 0 (title/menu: quit) or calls `0x413C00`
+  (return to title), exactly as a physical ESC.
 - **XOPS controls must be canonical.** A custom PC `config.dat` can put several
   actions on one physical key, which corrupts the direct-input image. VR mode
   now rewrites the 20-byte key-binding block at `0x48C380` every frame to the
@@ -1381,7 +1383,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 01:48 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 02:17 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
