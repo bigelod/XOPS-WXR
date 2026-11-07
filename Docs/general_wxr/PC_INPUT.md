@@ -145,6 +145,12 @@ Limits to remember:
 - It is not a substitute for reading XrApi poses/buttons.
 - Prefer an in-process call or state hook when the mod already runs in the
   game process.
+Two example projects that use the InputAPI:
+
+- **[XeRxKEYs](https://github.com/bigelod/XeRxKEYs)** — a generic background
+  app and editor for gesture-based control simulation; experimental.
+- **[WXRKeyboard](https://github.com/bigelod/WXRKeyboard)** — a simple
+  on-screen keyboard that runs inside the container; a prototype.
 
 ---
 
