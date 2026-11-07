@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  7 2026 02:17:23`, SHA-256
-`b8c8e5252414c3d6163f10743a3f8f0ece489f3325e74941dd0cb37152184143`.
-Release: 287,744 bytes, SHA-256
-`00b543723f99c037c0f4882e86f476916277d7f80bb9f8f299cae33fc8588dbd`.
+**Last build covered:** `built Nov  7 2026 02:32:18`, SHA-256
+`66c54a5bd2ab693552edab1e5a809b7618bb018979af6f196c31dddfdd5521d2`.
+Release: 286,208 bytes, SHA-256
+`71f9cff3306e71ee869cdc42ff76045571b32f1ae658a83c0a6bd61564329b98`.
 
 ---
 
@@ -139,6 +139,11 @@ Release: 287,744 bytes, SHA-256
   update `0x407CF0`. No Wine keyboard state or OS key events are involved; the
   game's weapon-specific fire-mode and edge logic run unchanged. If the call
   site does not match, it logs and uses the old key fallback.
+- **Release input audit:** release never injects synthetic keyboard state. The
+  old `StickKeys`/`VrInputKeys` path is compiled and called only under
+  `XOPS_DEV_BUILD`. `PostMessage` menu clicks are gone; the menu pointer now
+  supplies only the game's own `VK_LBUTTON` state and cursor. Debug-only paths:
+  `ProbeKeys`, `ManualHandKeys`, numpad hand controls, manual cursor centring.
 - **Canonical controls:** VR mode rewrites the 20-byte key-binding block at
   `0x48C380` every frame to the default XOPS layout. The launcher's Play button
   writes the same 20 bytes into `config.dat` (video flags/name preserved), so a

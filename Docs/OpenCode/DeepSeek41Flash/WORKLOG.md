@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  7 2026 02:17:23`, SHA-256
-`b8c8e5252414c3d6163f10743a3f8f0ece489f3325e74941dd0cb37152184143`.
-Release build: 287,744 bytes, SHA-256
-`00b543723f99c037c0f4882e86f476916277d7f80bb9f8f299cae33fc8588dbd`.
+Current dev build: `built Nov  7 2026 02:32:18`, SHA-256
+`66c54a5bd2ab693552edab1e5a809b7618bb018979af6f196c31dddfdd5521d2`.
+Release build: 286,208 bytes, SHA-256
+`71f9cff3306e71ee869cdc42ff76045571b32f1ae658a83c0a6bd61564329b98`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1378,12 +1378,20 @@ Owner findings after the direct-input build:
   (known good) and the failing maps can be compared directly. The shot trace
   reads A (`0x404CD5`); movement reads B. These logs will show whether A/B
   diverge or are clamped.
+- **Input audit (release):** release no longer injects synthetic keyboard
+  state. The old `StickKeys`/`VrInputKeys` path is compiled/called only under
+  `XOPS_DEV_BUILD` as a hook-failure fallback. `PostMessage` menu clicks were
+  removed; the menu pointer supplies only the game's own `VK_LBUTTON` state and
+  cursor. Debug-only: `ProbeKeys`, `ManualHandKeys`, numpad controls, manual
+  cursor centring. Remaining non-debug Windows mouse path: the menu
+  `GetCursorPos`/`ScreenToClient` hit-test; next step is to call `0x411F80`
+  directly with a chosen `0x490A44` hotspot.
 - Open design question: the owner reports we are turning a virtual camera
   offset instead of the in-game character yaw. The likely next fix is to make B
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 02:17 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 02:32 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and

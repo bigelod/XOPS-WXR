@@ -1910,7 +1910,6 @@ static BOOL  g_menuPointerValid = FALSE;
 static float g_menuPointerX     = 320.0f;
 static float g_menuPointerY     = 240.0f;
 static int   g_menuClickPulse   = 0;
-static int   g_synthClickMsgs   = 0;   /* let our own posted clicks through */
 /* WinlatorXR's current left-stick mapping arrives as the arrow keys, not as
    XrApi analog moveX/moveY. Capture those raw presses before the VR filter
    removes them, and turn them back into movement. This also means an arrow
@@ -2235,13 +2234,10 @@ static LRESULT CALLBACK VrWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (gameplay && wp != VK_ESCAPE && wp != '0') return 0;
             break;
         case WM_LBUTTONDOWN: case WM_LBUTTONUP:
-            /* Our own laser-pointer messages must pass; physical left clicks
-               are blocked with the rest of the mouse on gameplay and on the
-               floating panel. */
-            if (mouseBlocked) {
-                if (g_synthClickMsgs > 0) { --g_synthClickMsgs; break; }
-                return 0;
-            }
+            /* Physical left clicks are blocked with the rest of the mouse on
+               gameplay and on the floating panel. The menu click is supplied
+               through the game's own GetKeyboardState image, not a message. */
+            if (mouseBlocked) return 0;
             break;
         case WM_MOUSEMOVE:
         case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
@@ -2364,16 +2360,30 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
         ProbeKeys(p);          /* our own control keys, read then removed */
         VrExclusiveKeys(p);    /* then the game loses the desktop keyboard */
         XrMenuKey(p);          /* XrApi left menu = ESC, on every screen */
-        if (!g_directInput || !InGameplay()) {
-            StickKeys(p);      /* fallback key path if the direct hook failed */
-            VrInputKeys(p);
-        } else {
+        if (g_directInput && InGameplay()) {
             g_arrowUp = g_arrowDown = g_arrowLeft = g_arrowRight = FALSE;
             /* Aim must be written in the input phase, before the game's shot
                step. The direct player-update hook runs after the shot, so this
                early write is what makes the shot follow the red laser. */
             SteerAimEarly();
         }
+#if XOPS_DEV_BUILD
+        else if (InGameplay()) {
+            /* Dev-only fallback if the direct-input hook failed to install.
+               Release never sends synthetic keyboard state. */
+            StickKeys(p);
+            VrInputKeys(p);
+        }
+#else
+        else if (InGameplay() && !g_directInput) {
+            static int warned = 0;
+            if (!warned) {
+                warned = 1;
+                Log("INPUT    direct hook missing - no synthetic key fallback"
+                    " in release");
+            }
+        }
+#endif
         ManualHandKeys(p);     /* numpad right hand, 0 mode only */
         MenuPointerKeys(p);    /* floating panel: trigger -> left click */
         /* Fire state for the muzzle flash, and the hand-aim shot. In VR the
@@ -4119,31 +4129,17 @@ static void VrInputKeys(PBYTE p)
    game polls GetKeyboardState once per frame. */
 static void MenuPointerKeys(PBYTE p)
 {
-    LPARAM lp;
     if (!g_vrExclusive || !g_posed || !g_pose.valid) return;
     if (!VrMenuPanel()) return;
-
-    lp = MAKELPARAM((int)(g_menuPointerX * g_displayScaleX),
-                    (int)(g_menuPointerY * g_displayScaleY));
 
     if (g_menuClickPulse > 0) {
         p[VK_LBUTTON] |= 0x80;
         --g_menuClickPulse;
-        if (g_menuClickPulse == 0 && g_gameWnd) {
-            ++g_synthClickMsgs;
-            PostMessageA(g_gameWnd, WM_LBUTTONUP, 0, lp);
-        }
     } else if (g_menuPointerValid && VrEdge(XRB_R_TRIGGER)) {
         g_menuClickPulse = 3;
         p[VK_LBUTTON] |= 0x80;
         --g_menuClickPulse;
         LogD("MENU     laser click at %.0f,%.0f", g_menuPointerX, g_menuPointerY);
-        if (g_gameWnd) {
-            /* Some of the flat screens read clicks from the window procedure,
-               not from GetKeyboardState. Send both so either path works. */
-            ++g_synthClickMsgs;
-            PostMessageA(g_gameWnd, WM_LBUTTONDOWN, MK_LBUTTON, lp);
-        }
     }
 }
 

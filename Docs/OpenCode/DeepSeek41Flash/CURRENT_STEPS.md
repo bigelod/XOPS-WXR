@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  7 2026 02:17:23`, SHA-256
-`b8c8e5252414c3d6163f10743a3f8f0ece489f3325e74941dd0cb37152184143`,
+**Current build:** `built Nov  7 2026 02:32:18`, SHA-256
+`66c54a5bd2ab693552edab1e5a809b7618bb018979af6f196c31dddfdd5521d2`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
-Release build: 287,744 bytes, SHA-256
-`00b543723f99c037c0f4882e86f476916277d7f80bb9f8f299cae33fc8588dbd`.
+Release build: 286,208 bytes, SHA-256
+`71f9cff3306e71ee869cdc42ff76045571b32f1ae658a83c0a6bd61564329b98`.
 Latest code commit: `fe8d288` (not pushed).
 
 ## Where we stopped (7 Nov, night)
@@ -18,10 +18,10 @@ Latest code commit: `fe8d288` (not pushed).
 **Working on device:** AER in gameplay and the AER/menu transition (the old
 `MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
 always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
-build was desktop-smoke-tested but not device-tested. The 02:17 build adds the
+build was desktop-smoke-tested but not device-tested. The 02:32 build adds the
 latest fixes below.
 
-**New in the 02:17 build (not yet device-tested):**
+**New in the 02:32 build (not yet device-tested):**
 
 - **ESC is never blocked, and the XrApi left menu runs the game's own ESC
   consumer.** When the game window is unfocused, the input mute now clears
@@ -45,6 +45,28 @@ latest fixes below.
   The map id is the game's mission index (`0x490A44`), so BUILDING_EXT and the
   failing maps can be compared directly.
 
+**Input audit (release, non-debug):**
+
+- **Gameplay:** no synthetic keyboard state. `DirectInputBuild` runs the game's
+  own mapper `0x407520` with an XrApi-built image, then the real player update
+  `0x407CF0`. ESC uses the game's own consumer at `0x413BA2`/`0x413CF0`.
+  Movement/buttons come from XrApi; no `SendInput`, `keybd_event`, `mouse_event`
+  or `PostMessage` is used.
+- **Dev fallback:** `StickKeys`/`VrInputKeys` (synthetic W/A/S/D and command
+  keys) are compiled and called only under `XOPS_DEV_BUILD`, for the case where
+  the direct hook fails to install. Release logs that case and does nothing.
+- **Debug-only:** `ProbeKeys`, `ManualHandKeys`, the numpad hand controls and
+  the one-time `SetCursorPos` centring in manual mode (`0`).
+- **Remaining non-debug Windows input:** the menu pointer. It still feeds the
+  game's own `GetCursorPos`/`ScreenToClient` and `VK_LBUTTON` state so the
+  existing menu hit-testing works. No window messages are posted now. The next
+  step is to bypass this too: the title/mission-select handler at state 1 reads
+  the cursor and calls `0x411F80` for a valid mission hotspot. Direct menu
+  selection should call that target with a chosen `0x490A44` value.
+- **Isolation, not action control:** `GetCursorPos`/`SetCursorPos` hooks in
+  gameplay only freeze the physical mouse so it cannot turn the view; they do
+  not drive game actions.
+
 **Open aim question:** the shot trace reads A (`0x404CD5`), while the character
 movement reads B. The owner reports aim works on BUILDING_EXT but not on the
 other maps tested; the map id in the new yaw log lets those maps be compared
@@ -52,7 +74,7 @@ directly. If A and B diverge, the likely fix is to make the character yaw B the
 single authority and derive A from it (or patch the clamp), not to keep a
 separate camera offset.
 
-**Tomorrow's first pass:** copy the 02:17 `d3d8.dll` into the container, confirm
+**Tomorrow's first pass:** copy the 02:32 `d3d8.dll` into the container, confirm
 `INPUT direct player-update hook installed at IDA 0x413AC4`, test the left menu
 button as ESC, movement, A/B/X/Y/grips/triggers, spawn facing and shot
 alignment, and send the `STEER recentred`, `YAW ... map`, and `AIM base ... map`

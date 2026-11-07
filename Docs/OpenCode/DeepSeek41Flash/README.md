@@ -472,7 +472,7 @@ from the wrong yaw/height. The fixes:
 
 **7 Nov stopping point.** The AER/menu transition is device-confirmed. Gameplay
 input now runs the game's own input mapper from an XrApi-built image, so no
-Wine keyboard state is involved. The 02:17 build adds: `ESC`/`0` preserved when
+Wine keyboard state is involved. The 02:32 build adds: `ESC`/`0` preserved when
 the window is unfocused; the left controller menu button mapped to the game's
 own ESC consumer (hook at `0x413BA2`, call `0x413CF0` with a fresh ESC edge,
 no Wine key events); canonical XOPS key bindings
@@ -486,6 +486,17 @@ new logs include the mission id so the failing maps can be compared directly.
 If A/B diverge, the next fix is to make the character yaw B the single authority
 and derive A from it (or patch the clamp) instead of keeping a separate camera
 offset.
+
+**Input audit (release):** gameplay no longer sends synthetic keyboard state;
+the direct mapper and the game's ESC consumer are called in-process. The old
+`StickKeys`/`VrInputKeys` key injection is compiled/called only under
+`XOPS_DEV_BUILD` as a fallback if the direct hook fails to install. Debug-only
+paths are `ProbeKeys`, `ManualHandKeys`, the numpad hand controls and the manual
+cursor centring. The one remaining non-debug Windows mouse path is the menu
+pointer, which feeds the game's own `GetCursorPos`/`ScreenToClient` and
+`VK_LBUTTON` state to the existing menu hit-testing; no window messages are
+posted now. The next step there is to call the title/mission-select action
+`0x411F80` with a chosen hotspot instead.
 
 ### What is still not built
 
@@ -569,10 +580,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  7 2026 02:17:23`, SHA-256
-`b8c8e5252414c3d6163f10743a3f8f0ece489f3325e74941dd0cb37152184143`,
-deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 287,744 bytes,
-SHA-256 `00b543723f99c037c0f4882e86f476916277d7f80bb9f8f299cae33fc8588dbd`.
+Current handover build: `built Nov  7 2026 02:32:18`, SHA-256
+`66c54a5bd2ab693552edab1e5a809b7618bb018979af6f196c31dddfdd5521d2`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 286,208 bytes,
+SHA-256 `71f9cff3306e71ee869cdc42ff76045571b32f1ae658a83c0a6bd61564329b98`.
 
 ---
 
