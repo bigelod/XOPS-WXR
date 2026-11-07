@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  7 2026 12:24:44`, SHA-256
-`5d246a9c20dc5c71437f30dea796bd5318182134dde7785afcf7541876a3d78c`.
-Release: 288,256 bytes, SHA-256
-`3851d62744a159c08681ed68d2515ef3aa8cc04135e196abcbd7e7392753b9b5`.
+**Last build:** `built Nov  7 2026 13:04:54`, SHA-256
+`3a28945137d9a86ac48ba1ed4661fb1d5204a4f062691332abc8ecbc8a8303ca`.
+Release: 289,280 bytes, SHA-256
+`0c1dd6e03b1eca1c3e5ad694b9c99df70cc920f73e2a155ca8c258609af2ed74`.
 
 ---
 
@@ -67,15 +67,18 @@ direct-input build** and the spawn/aim base:
   runtime's digital `L_THUMBSTICK_*` bools, so the arrow-key mapping is no
   longer needed. Confirm the stick moves the player and does not swap weapons.
 - **Spawn/aim:** capture the `STEER recentred. yaw A raw X -> Y (deg) B Z` line
-  for several levels. If the spawn still faces the wrong way, that line says
-  whether the intended reference is the raw A or B.
+  for several levels, especially the exact failing flow: BUILDING_EXT -> move
+  -> ESC -> DUEL_EXT. The mod now waits 120 frames for the game's spawn yaw,
+  then uses the camera yaw A as the origin. Confirm the spawn shows the open
+  arena (not the gray wall) and that stick-forward moves toward what the
+  camera sees. Right-stick recentre should leave the view still and re-zero
+  the HMD XYZ/yaw.
 - **Aim on every level:** fire on a level that failed before and send the
   `YAW ... map <id>` and `AIM base ... -> ... map <id>` lines. BUILDING_EXT is
   the known-good map; compare its map id with the failing ones. The logs show
   whether the game clamps/overwrites A or B. The shot trace reads A
-  (`0x404CD5`); movement reads B. If they diverge, the next fix is to make the
-  character yaw B the single authority and derive A from it (or patch the
-  clamp) rather than keeping a separate camera offset.
+  (`0x404CD5`); movement reads B, and both are now written from the same
+  origin.
 - **Hands:** tilt the head and confirm the hands/gun roll with the presented
   world. Crouch/stand and confirm the render follows the head while the hands
   stay at the level-start/recentre position. Right-stick click re-zeroes XYZ

@@ -80,6 +80,8 @@ static BOOL VrMenuPanel(void);
 static BOOL InGameplay(void);
 static BOOL LevelActive(void);
 static BOOL g_steer = TRUE;    /* always-on by default; 3 is a debug toggle */
+static int  g_spawnTrace = 0;  /* frames left of A/B spawn-yaw logging */
+static int  g_spawnGrace = 0;  /* frames to leave the game's spawn yaw alone */
 
 static void SteerRecentre(void);
 static void SteerSave(void);
@@ -1909,6 +1911,8 @@ static BOOL  g_cursorKnown  = FALSE;
 static BOOL  g_menuPointerValid = FALSE;
 static float g_menuPointerX     = 320.0f;
 static float g_menuPointerY     = 240.0f;
+static float g_menuLogicalX     = 320.0f;  /* last point published to the game */
+static float g_menuLogicalY     = 240.0f;
 static int   g_menuClickPulse   = 0;
 /* The runtime's own mouse is a valid menu pointer too (WinlatorXR supplies one
    for the flat screens). Track the last frame each pointer moved, so the most
@@ -2539,6 +2543,8 @@ static BOOL WINAPI hkGetCursorPos(LPPOINT p)
             *p = q;
             g_lastCursor = q;
             g_cursorKnown = TRUE;
+            g_menuLogicalX = rx;
+            g_menuLogicalY = ry;
             return TRUE;
         }
 
@@ -2560,6 +2566,8 @@ static BOOL WINAPI hkGetCursorPos(LPPOINT p)
             *p = q;
             g_lastCursor = q;
             g_cursorKnown = TRUE;
+            g_menuLogicalX = mx;
+            g_menuLogicalY = my;
             return TRUE;
         }
     }
@@ -3504,21 +3512,24 @@ static void SteerRecentre(void)
     if (haveA) { rawA = v; g_refYaw = v; }
     haveB = SafeRead(CamAddr(B_YAW), &v) ? TRUE : FALSE;
     if (haveB) g_refYawB = v;
-    /* A is the render copy the game makes during its update; B is the player's
-       own orientation. At a level spawn the copy can still be one frame behind
-       (A read 0.0 while B held the 90 deg spawn yaw on device), so use B for
-       both. The rendered view and the shot then share one yaw base instead of
-       facing 90 deg apart. */
-    if (haveB) g_refYaw = g_refYawB;
+    /* A is the view the game actually presents at spawn; B is the player body
+       and can lag or still be animating. Take the view as the origin and make
+       the body follow it, so forward movement matches what the player sees
+       and the spawn view is not rotated by a stale body yaw. */
+    if (haveA) g_refYawB = g_refYaw;
     if (SafeRead(CamAddr(A_H1), &v)) g_refPos[0] = v;
     if (SafeRead(CamAddr(A_Y),  &v)) g_refPos[1] = v;
     if (SafeRead(CamAddr(A_H2), &v)) g_refPos[2] = v;
     g_haveRef = TRUE;
     g_turnYaw = 0.0f;
-    Log("STEER    recentred. yaw A raw %.4f -> %.4f (%.1f deg)  B %.4f,"
-        " position h1=% .3f Y=% .3f h2=% .3f",
-        rawA, g_refYaw, g_refYaw * 57.2957795f, g_refYawB,
-        g_refPos[0], g_refPos[1], g_refPos[2]);
+    {
+        int mi = -1;
+        SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mi);
+        Log("STEER    recentred. map %d  yaw A raw %.4f -> %.4f (%.1f deg)"
+            "  B %.4f, position h1=% .3f Y=% .3f h2=% .3f",
+            mi, rawA, g_refYaw, g_refYaw * 57.2957795f, g_refYawB,
+            g_refPos[0], g_refPos[1], g_refPos[2]);
+    }
     Log("STEER    writing %s", ClusterName(g_cluster));
 }
 
@@ -3527,6 +3538,30 @@ static void SteerRecentre(void)
 static void SteerTick(void)
 {
     float yaw, pitch;
+
+    /* A new level applies its spawn orientation a few frames after the player
+       exists. Writing our yaw during that window pins the map to the stale
+       value and leaves the body 180 deg from the view. Leave the game alone
+       for a moment, watch what it writes, then recentre from that. */
+    if (g_spawnGrace > 0) {
+        float ga = 0.0f, gb = 0.0f;
+        int gmi = -1;
+        if (!g_vrExclusive || !g_steer) {
+            g_spawnGrace = 0;
+        } else {
+            --g_spawnGrace;
+            SafeRead(CamAddr(A_YAW), &ga);
+            SafeRead(CamAddr(B_YAW), &gb);
+            SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &gmi);
+            LogD("SPAWN    grace %d map=%d A=%+.4f B=%+.4f delta(B-A)=%+.4f",
+                 g_spawnGrace, gmi, ga, gb, gb - ga);
+            if (g_spawnGrace == 0) {
+                Log("STEER    spawn grace over - recentring from the game's yaw");
+                SteerRecentre();
+            }
+            return;
+        }
+    }
 
     if (!g_steer || !g_posed || !g_pose.valid) return;
     if (!g_vrExclusive) return;     /* desktop test mode: mouse owns the view */
@@ -3559,6 +3594,21 @@ static void SteerTick(void)
            input design: forward is where you are looking. */
         SafeWrite(CamAddr(B_YAW),   g_refYawB + g_turnYaw + g_yawSign * g_pose.headYaw);
         SafeWrite(CamAddr(B_PITCH), pitch);
+    }
+
+    /* First frames after a level start: show what the game did to A and B
+       relative to the head. A 180 deg body/HMD split shows up here as A and B
+       disagreeing, rather than being guessed from a screenshot. */
+    if (g_spawnTrace > 0) {
+        float a = 0.0f, b = 0.0f;
+        int mi = -1;
+        SafeRead(CamAddr(A_YAW), &a);
+        SafeRead(CamAddr(B_YAW), &b);
+        SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mi);
+        LogD("SPAWN    f=%ld map=%d head=%+.4f A=%+.4f B=%+.4f"
+             " delta(B-A)=%+.4f",
+             g_frame, mi, g_pose.headYaw, a, b, b - a);
+        --g_spawnTrace;
     }
 
     /* The HMD translation (including Y) is applied at render time in
@@ -8284,8 +8334,10 @@ static HRESULT __stdcall hkBeginScene(void* dev)
             static BOOL wasLevelActive = FALSE;
             const BOOL levelActive = LevelActive();
             if (levelActive && !wasLevelActive) {
-                Log("STEER    level start - recentring HMD XYZ/yaw to spawn");
-                SteerRecentre();
+                Log("STEER    level start - waiting for the game's spawn yaw");
+                g_spawnTrace = 120;
+                g_spawnGrace = 120;
+                g_haveRef = FALSE;
             }
             wasLevelActive = levelActive;
         }
@@ -8504,6 +8556,18 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
                  "  delta %+ .4f  map %d", ay, ay * 57.2957795f, by,
                  by * 57.2957795f, by - ay, mission);
     }
+#if XOPS_DEV_BUILD
+    /* Mission-select hover: 0x490A44 is the hotspot under the published
+       cursor. Lets a desktop scan find a mission's map coordinate without
+       clicking blindly. */
+    if (!InGameplay() && (g_frame % 10) == 0) {
+        int hover = -1;
+        if (g_exeBase)
+            SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &hover);
+        LogD("MENU     hover %d at logical %.0f,%.0f", hover,
+             g_menuLogicalX, g_menuLogicalY);
+    }
+#endif
 #if XOPS_DEV_BUILD
     BallisticTick();
     IdleTick();

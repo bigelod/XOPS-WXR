@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  7 2026 12:24:44`, SHA-256
-`5d246a9c20dc5c71437f30dea796bd5318182134dde7785afcf7541876a3d78c`.
-Release build: 288,256 bytes, SHA-256
-`3851d62744a159c08681ed68d2515ef3aa8cc04135e196abcbd7e7392753b9b5`.
+Current dev build: `built Nov  7 2026 13:04:54`, SHA-256
+`3a28945137d9a86ac48ba1ed4661fb1d5204a4f062691332abc8ecbc8a8303ca`.
+Release build: 289,280 bytes, SHA-256
+`0c1dd6e03b1eca1c3e5ad694b9c99df70cc920f73e2a155ca8c258609af2ed74`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,7 +1391,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 12:24 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 13:04 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
@@ -1448,7 +1448,38 @@ Desktop-verified: physical ESC logs `ESC consumer: physical ESC edge` and moves
 to the menu (`A44=61`, `1A6C=1`); the XrApi left menu still logs the injected
 edge and transitions the same way.
 
-Build: `built Nov  7 2026 12:24:44`, dev SHA-256
-`5d246a9c20dc5c71437f30dea796bd5318182134dde7785afcf7541876a3d78c`;
-release 288,256 bytes, SHA-256
-`3851d62744a159c08681ed68d2515ef3aa8cc04135e196abcbd7e7392753b9b5`.
+### Follow-up - spawn yaw on a level entered after quitting another
+
+Repro: BUILDING_EXT -> sticks -> ESC -> DUEL_EXT. The player faced the gray
+wall and stick-forward moved backwards.
+
+Cause: `LevelActive()` goes true before DUEL_EXT applies its spawn orientation.
+The old recentre ran on that edge, read A~0/B~0, and then used the player-body
+yaw **B** as the origin. On the next frames the game's own spawn view settled
+at A~180 deg while B animated elsewhere, and the mod pinned the camera to the
+wrong value.
+
+Change:
+
+- On the level edge, set a 120-frame grace and do not write yaw. Log
+  `SPAWN grace ... A=... B=...` so the raw spawn is visible.
+- After the grace, `SteerRecentre()` uses the **camera yaw A** as the origin
+  (not B) and writes both A and B from it, so the presented spawn view is kept
+  and the body/movement follows the view.
+- Right-stick recentre uses the same path; the HMD XYZ/yaw becomes the origin
+  and the game's spawn Y is the default player height.
+- A dev-only mission-select hover log (`MENU hover <id> at logical x,y`) was
+  added; it found DUEL_EXT (hotspot 6) at 640x480 `(330,358)`. The temporary
+  forced-mission shortcut used during the investigation was removed before the
+  final build.
+
+Desktop-verified on the exact repro: after grace the spawn shows the open arena
+with crates and enemies instead of the gray wall; `A=B=179.8 deg`; one second
+of stick-forward brings the crates visibly closer (screenshot MAD 14.4).
+BUILDING_EXT still spawns in the corridor and its right-stick recentre leaves
+A/B unchanged.
+
+Build: `built Nov  7 2026 13:04:54`, dev SHA-256
+`3a28945137d9a86ac48ba1ed4661fb1d5204a4f062691332abc8ecbc8a8303ca`;
+release 289,280 bytes, SHA-256
+`0c1dd6e03b1eca1c3e5ad694b9c99df70cc920f73e2a155ca8c258609af2ed74`.

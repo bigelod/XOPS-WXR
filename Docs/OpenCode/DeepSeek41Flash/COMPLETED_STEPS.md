@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  7 2026 12:24:44`, SHA-256
-`5d246a9c20dc5c71437f30dea796bd5318182134dde7785afcf7541876a3d78c`.
-Release: 288,256 bytes, SHA-256
-`3851d62744a159c08681ed68d2515ef3aa8cc04135e196abcbd7e7392753b9b5`.
+**Last build covered:** `built Nov  7 2026 13:04:54`, SHA-256
+`3a28945137d9a86ac48ba1ed4661fb1d5204a4f062691332abc8ecbc8a8303ca`.
+Release: 289,280 bytes, SHA-256
+`0c1dd6e03b1eca1c3e5ad694b9c99df70cc920f73e2a155ca8c258609af2ed74`.
 
 ---
 
@@ -71,12 +71,14 @@ Release: 288,256 bytes, SHA-256
   also editable in the launcher's Options dialog); `eye_height` is a separate
   manual float offset (default `0`, clamped ±5). A **right-stick click** calls
   `SteerRecentre()`, so the current HMD height becomes the flat game player
-  height (`0`); a level start does the same from the `LevelActive()` rising
-  edge **before** `SteerTick` writes the camera. B is the player's
-  authoritative spawn yaw and A is the render copy, so both references use B
-  (the copy can lag a frame; the device log showed A=0.0 against B=90.7 deg).
-  Head yaw is still written to both camera clusters, so
-  stick-forward follows the head. This is visual-only and does **not** add
+  height (`0`); a level start does the same after a short grace. The game
+  applies its spawn orientation a few frames after the player exists, so the
+  mod leaves A/B alone for 120 frames, then takes the **camera yaw A** (the
+  view the game actually presents) as the origin and writes both A and B from
+  it. Taking the animating body yaw B instead put DUEL_EXT's camera 180 deg
+  into the wall when a level was entered after quitting another. Head yaw is
+  still written to both camera clusters, so stick-forward follows the head.
+  This is visual-only and does **not** add
   collision: standing or leaning into geometry can still clip, and the
   intended mitigation is lowering `pos_scale`, not solving world collisions.
   Verified with a ±1 m sine feed at `pos_scale = 1.0` (log `dy` tracked `hmdY`
