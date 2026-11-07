@@ -145,12 +145,47 @@ Limits to remember:
 - It is not a substitute for reading XrApi poses/buttons.
 - Prefer an in-process call or state hook when the mod already runs in the
   game process.
-Two example projects that use the InputAPI:
 
-- **[XeRxKEYs](https://github.com/bigelod/XeRxKEYs)** — a generic background
-  app and editor for gesture-based control simulation; experimental.
-- **[WXRKeyboard](https://github.com/bigelod/WXRKeyboard)** — a simple
-  on-screen keyboard that runs inside the container; a prototype.
+### 3.4 Reference implementations of the InputAPI
+
+Neither of these is an XrApi pose-and-matrix mod like the one you are probably
+writing. Both are **external input injectors**: they run alongside the game
+inside the container and ask the runtime to inject keys and clicks at the
+Android/container level, instead of synthesising input inside Wine. That is
+exactly the fallback path above, and their wire format is short enough to copy.
+
+- **[XeRxKEYs](https://github.com/bigelod/XeRxKEYs)** — turns controller
+  gestures into keyboard and mouse actions. It is a full XrApi client:
+  `WinXrUDP` receives the pose stream on 7872 (7873 fallback) and sends the
+  7278 state/haptics packet; `WinXRApi` parses head and hand poses and tracks
+  them; a gesture profile matches motion, and the matching action is dispatched
+  through a pluggable output module. `WinXROut` is the InputAPI module; the
+  same tool also ships `SendInput`, `SendKeys` and `MouseEvent` modules, which
+  is the contrast this document is about. The file worth taking is
+  `XKeycode.cs`: it maps Windows key names to the X11 keycodes the runtime
+  expects and emits `K,<code>[,<code>...]`. Mouse buttons and scroll become
+  `M,<L><R><M><Up><Down>` with `T`/`F` flags.
+- **[WXRKeyboard](https://github.com/bigelod/WXRKeyboard)** — the minimal
+  InputAPI client. It draws an on-screen keyboard inside the container and
+  sends one line per press; there is no pose parsing at all.
+  `OnScreenKeyboardDemo/WXR/WXRInputAPI.cs` is about 130 lines: open a
+  `UdpClient`, send ASCII to `127.0.0.1:7728`, write `Z:/tmp/xr/version`
+  (`0.5`) and `input_version` (`0.1`) so the runtime knows an InputAPI client
+  is present, and delete `input_version` on shutdown. Write `version` from a
+  standalone injector too: XeRxKEYs only writes it in its XrApi pose module
+  and leaves the `WinXROut` module to write `input_version` alone. Its README
+  states the design goal directly: inject "at a top level from the Android
+  side, rather than within Wine via SendKeys (which may not work with many
+  games and apps)".
+  `FrmMain.cs` shows the whole surface: `K,<x11 keycode>` for keys and
+  `M,TFFFF` / `M,FTFFF` / `M,FFTFF` / `M,FFFTF` / `M,FFFFT` for left, right,
+  middle, scroll up and scroll down.
+
+For an in-process mod this is still the weaker option: you are asking the
+runtime to inject what you could call directly. Use it when you cannot patch
+the game at all, or as a last resort for a specific UI that has no callable
+action.
+
 
 ---
 
