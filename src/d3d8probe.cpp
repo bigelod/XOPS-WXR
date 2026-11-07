@@ -110,6 +110,7 @@ static UINT_PTR WatchAddr(int i);
 static const char* PhaseName(int p);
 static void DumpImports(void);
 static void HookInput(void);
+static void HookPlayerUpdate(void);
 
 #include "xrapi.h"
 
@@ -1913,6 +1914,9 @@ static int   g_synthClickMsgs   = 0;   /* let our own posted clicks through */
    press can never reach XOPS's weapon-swap binding. */
 static BOOL  g_arrowUp = FALSE, g_arrowDown = FALSE;
 static BOOL  g_arrowLeft = FALSE, g_arrowRight = FALSE;
+/* TRUE once the direct player-update hook is installed; gameplay then uses
+   the game's own input mapper instead of injecting keyboard state. */
+static BOOL  g_directInput = FALSE;
 static long  g_idleRun      = 0;        /* consecutive idle frames */
 static BOOL  g_idleBaseline = FALSE;    /* have we recorded the run's start? */
 static long  g_idleRuns     = 0;
@@ -2342,9 +2346,13 @@ static BOOL WINAPI hkGetKeyboardState(PBYTE p)
         ManualModeEdge(p);     /* 0 = PC manual input, in every build */
         ProbeKeys(p);          /* our own control keys, read then removed */
         VrExclusiveKeys(p);    /* then the game loses the desktop keyboard */
-        StickKeys(p);          /* left stick -> movement */
+        if (!g_directInput || !InGameplay()) {
+            StickKeys(p);      /* fallback key path if the direct hook failed */
+            VrInputKeys(p);
+        } else {
+            g_arrowUp = g_arrowDown = g_arrowLeft = g_arrowRight = FALSE;
+        }
         ManualHandKeys(p);     /* numpad right hand, 0 mode only */
-        VrInputKeys(p);        /* buttons, two-hand grip, shoot, zoom, edges */
         MenuPointerKeys(p);    /* floating panel: trigger -> left click */
         /* Fire state for the muzzle flash, and the hand-aim shot. In VR the
            trigger sets LButton above; in user mode it is the real mouse. */
@@ -4672,6 +4680,140 @@ static void PatchProjectionAspect(void)
         oldAspect, aspect, g_outFovX, g_outFovY);
 }
 
+/* ---------------------------------------------------------------------------
+ * Direct player-input hook
+ *
+ * Wine/WinlatorXR does not deliver synthetic keyboard state reliably to the
+ * game. XrApi is the source of truth, so instead of sending keys we rebuild the
+ * game's own key image and run the game's own input mapper with it, then run
+ * the player update. The patched call is the one at IDA 0x413AC4, immediately
+ * after the game's own 0x407520 input-mapping call and immediately before
+ * 0x407CF0 (the player update). No OS key events are involved.
+ * --------------------------------------------------------------------------- */
+
+typedef void (__cdecl *PFN_GameVoid)(void);
+
+static PFN_GameVoid g_gameInputMap     = NULL; /* 0x407520 */
+static PFN_GameVoid g_gamePlayerUpdate = NULL; /* 0x407CF0 */
+static BYTE*        g_gameKeys         = NULL; /* 0x48C920, 256-byte VK image */
+
+/* Build the VK image the game's mapper expects from the XrApi frame. The
+   mapper is the game's own code, so weapon-specific fire-mode branches and
+   edge detection behave exactly as they do for a real keyboard. */
+static void DirectInputBuild(BYTE* keys)
+{
+    float mx, my;
+    BOOL shoot, fireMode;
+
+    if (!keys || !g_vrExclusive || !InGameplay()) return;
+    if (!g_posed || !g_pose.valid) return;
+
+    ZeroMemory(keys, 256);
+
+    /* Left stick: analog if the runtime sends it, plus the digital stick
+       direction bools that WinlatorXR always includes. */
+    mx = g_pose.moveX;
+    my = g_pose.moveY;
+    if (my >  STICK_DEAD || XrButton(&g_pose, 5)) keys['W'] = 0x80;
+    if (my < -STICK_DEAD || XrButton(&g_pose, 6)) keys['S'] = 0x80;
+    if (mx < -STICK_DEAD || XrButton(&g_pose, 3)) keys['A'] = 0x80;
+    if (mx >  STICK_DEAD || XrButton(&g_pose, 4)) keys['D'] = 0x80;
+
+    g_twoHanded = XrButton(&g_pose, XRB_L_GRIP) ? TRUE : FALSE;
+
+    /* Right-stick click recentres. */
+    if (VrEdge(XRB_R_STICK)) {
+        Log("STEER    recentre requested by the right stick click");
+        SteerRecentre();
+    }
+
+    /* Shoot is held; fire mode is an edge. Left-handed swaps the triggers,
+       exactly as the previous key mapping did. */
+    if (!g_leftHanded) {
+        shoot = XrButton(&g_pose, XRB_R_TRIGGER) ? TRUE : FALSE;
+        fireMode = VrEdge(XRB_L_TRIGGER);
+    } else {
+        shoot = XrButton(&g_pose, XRB_L_TRIGGER) ? TRUE : FALSE;
+        fireMode = VrEdge(XRB_R_TRIGGER);
+    }
+    if (shoot) {
+        keys[VK_LBUTTON] = 0x80;
+        g_fireHeld = TRUE;
+        g_flashFrames = 4;
+        SteerAimWrite();                 /* shot -> red laser */
+    } else {
+        g_fireHeld = FALSE;
+    }
+    if (fireMode) keys['X'] = 0x80;      /* fire-mode toggle */
+    /* The shoot trigger is held, so keep its edge table in step for the menu
+       pointer when the player later opens a menu. */
+    g_prevVrBtn[g_leftHanded ? XRB_L_TRIGGER : XRB_R_TRIGGER] =
+        (BYTE)(shoot ? 1 : 0);
+
+    if (VrEdge(XRB_R_GRIP)) keys[VK_SPACE] = 0x80;   /* jump */
+    if (VrEdge(XRB_B))      keys['R'] = 0x80;        /* reload */
+    if (VrEdge(XRB_X))      keys['G'] = 0x80;        /* drop */
+    if (VrEdge(XRB_A))      keys['Z'] = 0x80;        /* switch weapon */
+    if (VrEdge(XRB_Y)) {
+        keys[VK_SHIFT] = 0x80;                       /* zoom */
+        g_zoomOn = !g_zoomOn;
+        Log("HAND     zoom %s", g_zoomOn ? "ON" : "off");
+    }
+}
+
+/* Runs in place of the game's call to the player update. The game's own input
+   mapper is called a second time with the XrApi key image, so the flags the
+   player update reads are ours. The image is left in 0x48C920 on purpose: the
+   next frame's input poll copies it to the previous-state buffer, giving the
+   mapper exactly the same edge behaviour as a real held key. */
+static void __cdecl PlayerUpdateHook(void)
+{
+    if (g_directInput && g_vrExclusive && InGameplay() &&
+        g_posed && g_pose.valid && g_gameKeys && g_gameInputMap) {
+        DirectInputBuild(g_gameKeys);
+        g_gameInputMap();
+    }
+    if (g_gamePlayerUpdate) g_gamePlayerUpdate();
+}
+
+static void HookPlayerUpdate(void)
+{
+    BYTE* callSite;
+    BYTE* target;
+    LONG rel;
+    DWORD old;
+
+    if (!g_exeBase) return;
+    g_gameInputMap = (PFN_GameVoid)(g_exeBase + (0x407520 - 0x400000));
+    g_gamePlayerUpdate = (PFN_GameVoid)(g_exeBase + (0x407CF0 - 0x400000));
+    g_gameKeys = (BYTE*)(g_exeBase + (0x48C920 - 0x400000));
+
+    callSite = (BYTE*)(g_exeBase + (0x413AC4 - 0x400000));
+    if (callSite[0] != 0xE8) {
+        Log("INPUT direct hook: expected E8 at IDA 0x413AC4, found 0x%02X",
+            callSite[0]);
+        return;
+    }
+    rel = *(LONG*)(callSite + 1);
+    target = callSite + 5 + rel;
+    if (target != (BYTE*)g_gamePlayerUpdate) {
+        Log("INPUT direct hook: call at 0x413AC4 targets %p, expected %p",
+            target, (void*)g_gamePlayerUpdate);
+        return;
+    }
+    if (!VirtualProtect(callSite, 5, PAGE_EXECUTE_READWRITE, &old)) {
+        Log("INPUT direct hook: VirtualProtect failed (err %lu)", GetLastError());
+        return;
+    }
+    rel = (LONG)((BYTE*)PlayerUpdateHook - (callSite + 5));
+    *(LONG*)(callSite + 1) = rel;
+    VirtualProtect(callSite, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), callSite, 5);
+    g_directInput = TRUE;
+    Log("INPUT    direct player-update hook installed at IDA 0x413AC4"
+        " (input mapper 0x407520 -> update 0x407CF0)");
+}
+
 // ---------------------------------------------------------------------------
 // Virtual hand / laser config
 //
@@ -4969,6 +5111,7 @@ static void EnsureInit(void)
     if (g_patchAspect) PatchProjectionAspect();
     else Log("PROJECTION aspect patch disabled by xops_wxr_steer.ini");
     HookInput();
+    HookPlayerUpdate();
 }
 
 // ---------------------------------------------------------------------------

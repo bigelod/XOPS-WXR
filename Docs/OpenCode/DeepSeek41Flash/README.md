@@ -321,6 +321,15 @@ respawn switches back to 1, and DUEL_EXT's low 39-indexed draw count no longer
 drops head tracking. The internal renderer is still 640x480 - this is a
 stretched output, not native yet.
 
+**Direct gameplay input (7 Nov).** Gameplay no longer depends on Wine's
+keyboard state. The mod patches the game's `call 0x407CF0` player-update site
+at IDA `0x413AC4`; the wrapper rebuilds the game's own 256-byte VK image at
+`0x48C920` from XrApi, calls the game's own input mapper `0x407520`, then runs
+the original player update. Movement, jump, reload, drop, weapon switch, zoom,
+fire mode and shoot therefore use the game's own weapon-specific branches and
+edge detection, entirely in-process. If the call site does not match, it falls
+back to the old key path and logs that.
+
 **VR controller mapping (6 Nov).** Left stick moves, right stick turns the body
 by a yaw offset (120 deg/s, `turnSpeed` in the INI), left grip switches to
 two-handed aim, right grip jumps, B reloads, A switches, X drops, Y toggles
@@ -542,10 +551,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  6 2026 23:02:02`, SHA-256
-`8d2366ab8b569d9233212efe1125018f48a860e5cf743c44290e8e65ae32d271`,
-deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 284,160 bytes,
-SHA-256 `393b777e37e612006f42d60efeefcd7809c2d2077281e24122393e5bd603a643`.
+Current handover build: `built Nov  7 2026 00:39:20`, SHA-256
+`b7c27ddbe40e49f52b62173e6407bea1c0123418b0a383fe67cb51ca3b5c53c9`,
+deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 286,208 bytes,
+SHA-256 `0c396d1c34ec9ddd19177477dbbe8fcb5eb6d8adfce4f17e8410dbdd7aca8821`.
 
 ---
 

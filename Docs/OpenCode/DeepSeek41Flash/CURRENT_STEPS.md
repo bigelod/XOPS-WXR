@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  6 2026 23:02:02`, SHA-256
-`8d2366ab8b569d9233212efe1125018f48a860e5cf743c44290e8e65ae32d271`,
+**Current build:** `built Nov  7 2026 00:39:20`, SHA-256
+`b7c27ddbe40e49f52b62173e6407bea1c0123418b0a383fe67cb51ca3b5c53c9`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
-Release build: 284,160 bytes, SHA-256
-`393b777e37e612006f42d60efeefcd7809c2d2077281e24122393e5bd603a643`.
+Release build: 286,208 bytes, SHA-256
+`0c396d1c34ec9ddd19177477dbbe8fcb5eb6d8adfce4f17e8410dbdd7aca8821`.
 
 ---
 
@@ -125,16 +125,20 @@ native frame fills it with no bars or crop.
 
 - **Focus boundary:** unfocused means physical keyboard/mouse and debug keys
   are muted; XrApi sticks/triggers/buttons are still injected.
+- **Direct gameplay input:** the mod no longer sends keys in gameplay. It
+  patches the call at IDA `0x413AC4` (the game's `call 0x407CF0` player
+  update) to a wrapper. The wrapper rebuilds the game's own 256-byte VK image
+  at `0x48C920` from XrApi (movement, jump, reload, drop, switch, zoom, fire
+  mode, shoot), calls the game's own input mapper `0x407520`, and then the real
+  player update `0x407CF0`. This is in-process and uses no Wine keyboard state.
+  If the call site does not match, it logs and falls back to the old key path.
 - **VR input isolation:** in **gameplay** only, all physical keyboard and mouse
   input is removed from `GetKeyboardState`, and the window procedure also
   swallows the corresponding `WM_KEY*`/`WM_MOUSE*` messages. Only `ESC` (the
   way out) and `0` (PC-only manual mode) survive. Menus, level objectives,
-  death, victory and intro screens keep physical keys by design. The arrow
-  keys are still translated to movement in gameplay. The hook injects the
-  XrApi state **even when Wine's real `GetKeyboardState` returns FALSE** (the
-  game window is usually unfocused under WinlatorXR); previously that failure
-  skipped the whole injection block. Pressing `0` toggles manual PC mode in
-  every build, restoring the full physical keyboard/mouse.
+  death, victory and intro screens keep physical keys by design. Pressing `0`
+  toggles manual PC mode in every build, restoring the full physical
+  keyboard/mouse.
 - **Left stick as arrows:** WinlatorXR currently maps the left stick to the
   arrow keys rather than the XrApi analog fields. Those raw arrow presses are
   read before the filter and translated to W/A/S/D, so the stick moves the
