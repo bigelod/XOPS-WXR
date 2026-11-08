@@ -3542,7 +3542,7 @@ static void SteerTick(void)
     /* A new level applies its spawn orientation a few frames after the player
        exists. Writing our yaw during that window pins the map to the stale
        value and leaves the body 180 deg from the view. Leave the game alone
-       for 1 s (60 frames), watch what it writes, then recentre from that. */
+       for 0.3 s (18 frames), watch what it writes, then recentre from that. */
     if (g_spawnGrace > 0) {
         float ga = 0.0f, gb = 0.0f;
         int gmi = -1;
@@ -4275,6 +4275,35 @@ static void VrInputKeys(PBYTE p)
         if (g_pulseVk[vk]) { p[vk] |= 0x80; --g_pulseVk[vk]; }
 }
 
+/* Manual-mode mouse-look probe: with VR input off (key 0), the game's own
+   mouse look is the only thing moving the camera. Log the candidate yaw/pitch
+   fields whenever they change, so a per-level probe shows which one the game
+   really uses and with what sign. */
+static void LookProbeTick(void)
+{
+    static float pa = 0, pb = 0, pc = 0, pd = 0, pe = 0, pf = 0;
+    static BOOL first = TRUE;
+    float ay = 0, ap = 0, by = 0, bp = 0, dy = 0, dp = 0;
+    int mi = -1;
+
+    if (!g_verboseDebug || g_vrExclusive || !g_exeBase) return;
+    if (!SafeRead(CamAddr(A_YAW), &ay) || !SafeRead(CamAddr(A_PITCH), &ap))
+        return;
+    SafeRead(CamAddr(B_YAW), &by);
+    SafeRead(CamAddr(B_PITCH), &bp);
+    SafeRead(g_exeBase + (0x491A58 - 0x400000), &dy);
+    SafeRead(g_exeBase + (0x491A5C - 0x400000), &dp);
+    if (!first &&
+        fabsf(ay-pa) < 0.0015f && fabsf(ap-pb) < 0.0015f &&
+        fabsf(by-pc) < 0.0015f && fabsf(bp-pd) < 0.0015f &&
+        fabsf(dy-pe) < 0.0015f && fabsf(dp-pf) < 0.0015f) return;
+    first = FALSE;
+    pa = ay; pb = ap; pc = by; pd = bp; pe = dy; pf = dp;
+    SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mi);
+    LogD("LOOK     map=%d A %+ .4f,%+ .4f  B %+ .4f,%+ .4f"
+         "  delta %+ .4f,%+ .4f", mi, ay, ap, by, bp, dy, dp);
+}
+
 /* Floating non-VR panel: the dominant hand's laser-pointer ray drives the
    game's mouse. The position is published through GetCursorPos; this adds the
    click. The trigger is edge-triggered and held for three frames because the
@@ -4296,8 +4325,7 @@ static void MenuPointerKeys(PBYTE p)
 }
 
 static void SteerLog(void)
-{
-    LogD("XR       packets=%ld  steering=%s  dof=%s", XrPackets(),
+{    LogD("XR       packets=%ld  steering=%s  dof=%s", XrPackets(),
         g_steer ? "ON" : "off", DofName(g_dofMode));
     LogD("XR       cluster=%s", ClusterName(g_cluster));
     if (!XrRunning()) {
@@ -8338,7 +8366,7 @@ static HRESULT __stdcall hkBeginScene(void* dev)
             if (levelActive && !wasLevelActive) {
                 Log("STEER    level start - waiting for the game's spawn yaw");
                 g_spawnTrace = 120;
-                g_spawnGrace = 60;
+                g_spawnGrace = 18;
                 g_haveRef = FALSE;
             }
             wasLevelActive = levelActive;
@@ -8550,8 +8578,7 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
         float ay = 0.0f, by = 0.0f;
         int mission = -1;
         WatchDump("periodic");
-        SteerLog();
-        if (g_exeBase)
+        SteerLog();        if (g_exeBase)
             SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mission);
         if (SafeRead(CamAddr(A_YAW), &ay) && SafeRead(CamAddr(B_YAW), &by))
             LogD("YAW      A %+ .4f rad (%+ .1f deg)  B %+ .4f (%+ .1f deg)"
@@ -8571,6 +8598,7 @@ static HRESULT __stdcall hkPresent(void* dev, const RECT* a, const RECT* b, HWND
     }
 #endif
 #if XOPS_DEV_BUILD
+    LookProbeTick();       /* manual-mode mouse-look field probe */
     BallisticTick();
     IdleTick();
     if ((g_frame % 5) == 0) SampleRanges();

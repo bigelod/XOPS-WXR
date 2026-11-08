@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  7 2026 13:26:02`, SHA-256
-`9d09c8360c63c6f28ecb743eef454ffe028d7af3261c6d8c30ea91ae3e7982ba`.
+Current dev build: `built Nov  8 2026 11:17:17`, SHA-256
+`0a1179df0ee70ec9d69eb8307ead612f21c3e66d2a23e34aa1136c22bcbf4b67`.
 Release build: 289,280 bytes, SHA-256
-`0e606579ed88ae6c944dbd63d5dfc5ae68fa1e3808530a6a8a529de153f86e97`.
+`ca58672b68392e0ab988999463326c9a8fb0620a85a418ede1fe563e7b4abe87`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,7 +1391,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 13:26 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 11:17 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
@@ -1461,7 +1461,7 @@ wrong value.
 
 Change:
 
-- On the level edge, set a 60-frame grace and do not write yaw. Log
+- On the level edge, set a 18-frame grace and do not write yaw. Log
   `SPAWN grace ... A=... B=...` so the raw spawn is visible.
 - After the grace, `SteerRecentre()` uses the **camera yaw A** as the origin
   (not B) and writes both A and B from it, so the presented spawn view is kept
@@ -1480,13 +1480,32 @@ BUILDING_EXT still spawns in the corridor and its right-stick recentre leaves
 A/B unchanged.
 
 The owner confirmed the view on PC and asked for a shorter grace: reduced from
-120 to **60 frames (1 s)**. They also report that aim is still wrong after
+120 to **18 frames (0.3 s)**. They also report that aim is still wrong after
 title -> DUEL_EXT, with a marked screenshot showing the laser on the target and
-the impact on the ground. The `AIM` log now also prints the resulting A/B
-pitch. That log is the next thing needed; the screenshot alone cannot tell
-whether A/B held the written pitch or the game replaced it.
+the impact on the ground. The owner's follow-up log (StrangeCrash) contains AIM lines for maps 6, 2 and
+4. They show the written yaw is held exactly and the read-back pitch matches
+the written value, so the game is not discarding the aim write. The remaining
+suspects are the hand ray/origin used by the shot versus the drawn laser, or a
+per-level look-field difference. A mouse-look probe was added for that.
 
-Build: `built Nov  7 2026 13:26:02`, dev SHA-256
-`9d09c8360c63c6f28ecb743eef454ffe028d7af3261c6d8c30ea91ae3e7982ba`;
+## 2026-11-08 - 0.3 s grace, per-level look probe, single-instance launcher
+
+- Spawn grace reduced from 60 to **18 frames (0.3 s)**; 1 s was reliable, and
+  the owner asked for the shorter value now.
+- Added a dev-only `LookProbeTick`: in manual mode (`0`) it logs
+  `LOOK map=<id> A yaw,pitch B yaw,pitch delta ...` whenever A/B yaw/pitch or
+  the input deltas change. This is the per-level probe for the remaining aim
+  bug: move the mouse left/right then up/down and see which field the game's
+  own look actually drives, then repeat on BUILDING_EXT as the baseline.
+- Crash analysis: the StrangeCrash launcher log shows `xops096.exe` started
+  twice 17 s apart (15:31:59 and 15:33:24) while the first was still running.
+  Two d3d8 proxies, hook sets and log writers is a plausible cause. The
+  launcher now enumerates processes and refuses to start a second instance,
+  with a warning dialog.
+- The provided probe log ends with a graceful `SHUTDOWN` after four level
+  starts; the Wine log is the `winhandler` process, not a game fault dump.
+
+Build: `built Nov  8 2026 11:17:17`, dev SHA-256
+`0a1179df0ee70ec9d69eb8307ead612f21c3e66d2a23e34aa1136c22bcbf4b67`;
 release 289,280 bytes, SHA-256
-`0e606579ed88ae6c944dbd63d5dfc5ae68fa1e3808530a6a8a529de153f86e97`.
+`ca58672b68392e0ab988999463326c9a8fb0620a85a418ede1fe563e7b4abe87`.

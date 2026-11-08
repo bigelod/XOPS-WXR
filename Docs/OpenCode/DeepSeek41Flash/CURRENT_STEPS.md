@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  7 2026 13:26:02`, SHA-256
-`9d09c8360c63c6f28ecb743eef454ffe028d7af3261c6d8c30ea91ae3e7982ba`,
+**Current build:** `built Nov  8 2026 11:17:17`, SHA-256
+`0a1179df0ee70ec9d69eb8307ead612f21c3e66d2a23e34aa1136c22bcbf4b67`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 Release build: 289,280 bytes, SHA-256
-`0e606579ed88ae6c944dbd63d5dfc5ae68fa1e3808530a6a8a529de153f86e97`.
+`ca58672b68392e0ab988999463326c9a8fb0620a85a418ede1fe563e7b4abe87`.
 Latest code commit: `aa75a19` (not pushed).
 
 ## Where we stopped (7 Nov, night)
@@ -18,11 +18,25 @@ Latest code commit: `aa75a19` (not pushed).
 **Working on device:** AER in gameplay and the AER/menu transition (the old
 `MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
 always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
-build was desktop-smoke-tested but not device-tested. The 13:26 build adds the
+build was desktop-smoke-tested but not device-tested. The 11:17 build adds the
 latest fixes below and was desktop-tested end to end (menus, movement, turn,
 fire).
 
-**New in the 13:26 build (not yet device-tested):**
+**New in the 11:17 build (not yet device-tested):**
+
+- **Spawn grace is now 0.3 s.** The 1 s grace was reliable on PC; the level
+  edge now waits 18 frames before taking the camera yaw as the origin. Same
+  recentre and right-stick behaviour as the 13:26 build.
+- **Per-level mouse-look probe (dev).** In manual mode (`0`), `LookProbeTick`
+  logs `LOOK map=<id> A yaw,pitch B yaw,pitch delta ...` whenever any of those
+  fields changes. This is the probe suggested for the remaining aim bug: move
+  the mouse left/right then up/down on a bad level and the log shows which
+  field the game's own look actually drives, per map.
+- **Launcher refuses a second game instance.** The 7 Nov StrangeCrash logs show
+  the launcher started `xops096.exe` twice 17 s apart while the first was still
+  running. Two d3d8 proxies/hook sets/log writers is a plausible cause of the
+  "strange crash after a few levels". Play now checks for a running
+  `xops096.exe` and shows a warning instead of starting another.
 
 - **The runtime mouse works on menus again.** The window procedure now blocks
   the mouse in **gameplay only**; menus and the floating panel let the
@@ -43,7 +57,7 @@ fire).
   `0x48C93B` / `0x48C82F` before calling the original consumer. The consumer
   then either sets the message-loop flag `0x491A9C` to 0 (title/menu: quit) or
   calls `0x413C00` (return to title), exactly as a physical ESC would.
-- **Physical ESC works in gameplay again (13:26).** The direct-input rebuild
+- **Physical ESC works in gameplay again (11:17).** The direct-input rebuild
   called `ZeroMemory` on the game's shared VK image at `0x48C920`, wiping
   `keys[VK_ESCAPE]` just before the ESC consumer read `0x48C93B` later in the
   same frame. `DirectInputBuild` now preserves the polled ESC byte, and
@@ -52,14 +66,14 @@ fire).
   `ESC consumer: physical ESC edge` and returns to the menu (`A44=61`,
   `1A6C=1`); the XrApi left menu still logs the injected edge and transitions
   the same way.
-- **Spawn yaw fixed for level changes (13:26).** A level applies its spawn
+- **Spawn yaw fixed for level changes (11:17).** A level applies its spawn
   orientation a few frames after the player exists. The old recentre ran on the
   rising edge and, on a level entered after quitting another one, read the
   pre-spawn value (`~0`) and pinned the view there. `SteerRecentre` also took
   the player-body yaw **B** as the origin, which on DUEL_EXT put the camera
   180 deg into the wall and made stick-forward move backwards.
   The mod now:
-  1. leaves the game's yaw untouched for 60 frames after the level edge
+  1. leaves the game's yaw untouched for 18 frames after the level edge
      (`SPAWN grace` log), so the game can apply its real spawn view;
   2. recentres from the **camera yaw A** (the view the game actually presents),
      not the animating body yaw;
@@ -114,7 +128,7 @@ fire).
 movement reads B. The spawn bug was a reference-capture problem, not a
 convention split: a level applies its spawn orientation after `LevelActive()`
 goes true, and the old recentre used the body yaw B before it had settled.
-The mod now waits 60 frames (1 s), takes A (the presented view) as the origin,
+The mod now waits 18 frames (0.3 s), takes A (the presented view) as the origin,
 and writes both A and B from it. Device pass: repeat the failing
 quit-and-reenter flow on DUEL_EXT and check the spawn view and stick-forward.
 
@@ -122,13 +136,15 @@ quit-and-reenter flow on DUEL_EXT and check the spawn view and stick-forward.
 returning to the title and entering DUEL_EXT the shot does not follow the hand
 laser: the MARKED screenshot shows the laser on the target and the impact on
 the ground below/left. BUILDING_EXT aim was correct in the same session. The
-`AIM` log now also prints the resulting A/B pitch (`pitch A ... B ...`).
-Reproduce the bad shot and capture both the `AIM shot ...` and `AIM base ...
-pitch ... map 6` lines; they show whether the game kept the written pitch or
-replaced/clamped it. That decides between a pitch-reference fix and a
-write-order fix; do not change yaw again without those numbers.
+owner's StrangeCrash log has AIM lines for maps 6, 2 and 4: the yaw written to
+A/B is held exactly, and the read-back pitch also matches the written value, so
+the game is *not* discarding the aim write. The remaining suspects are the hand
+ray/origin used by the shot versus the drawn laser, or a per-level difference
+in the look fields. A dev mouse-look probe (`LOOK ...`) now logs A/B yaw and
+pitch plus the input deltas in manual mode; run it per level and send the
+lines. That is the same approach used to solve the original 6DOF pitch/yaw.
 
-**Tomorrow's first pass:** copy the 13:26 `d3d8.dll` into the container, confirm
+**Tomorrow's first pass:** copy the 11:17 `d3d8.dll` into the container, confirm
 `INPUT direct player-update hook installed at IDA 0x413AC4`, test the left menu
 button as ESC, movement, A/B/X/Y/grips/triggers, spawn facing and shot
 alignment, and send the `STEER recentred`, `YAW ... map`, and `AIM base ... map`

@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  7 2026 13:26:02`, SHA-256
-`9d09c8360c63c6f28ecb743eef454ffe028d7af3261c6d8c30ea91ae3e7982ba`.
+**Last build:** `built Nov  8 2026 11:17:17`, SHA-256
+`0a1179df0ee70ec9d69eb8307ead612f21c3e66d2a23e34aa1136c22bcbf4b67`.
 Release: 289,280 bytes, SHA-256
-`0e606579ed88ae6c944dbd63d5dfc5ae68fa1e3808530a6a8a529de153f86e97`.
+`ca58672b68392e0ab988999463326c9a8fb0620a85a418ede1fe563e7b4abe87`.
 
 ---
 
@@ -68,19 +68,24 @@ direct-input build** and the spawn/aim base:
   longer needed. Confirm the stick moves the player and does not swap weapons.
 - **Spawn/aim:** capture the `STEER recentred. yaw A raw X -> Y (deg) B Z` line
   for several levels, especially the exact failing flow: BUILDING_EXT -> move
-  -> ESC -> DUEL_EXT. The mod now waits 60 frames for the game's spawn yaw,
+  -> ESC -> DUEL_EXT. The mod now waits 18 frames for the game's spawn yaw,
   then uses the camera yaw A as the origin. Confirm the spawn shows the open
   arena (not the gray wall) and that stick-forward moves toward what the
   camera sees. Right-stick recentre should leave the view still and re-zero
   the HMD XYZ/yaw.
 - **Aim on every level:** fire on a level that failed before and send the
   `YAW ... map <id>` and `AIM base ... -> ... map <id>` lines. BUILDING_EXT is
-  the known-good map; compare its map id with the failing ones. The logs show
-  whether the game clamps/overwrites A or B. The shot trace reads A
-  (`0x404CD5`); movement reads B, and both are now written from the same
-  origin. For the owner's title -> DUEL_EXT miss, the `AIM` log now also prints
-  `pitch A ... B ...`; capture that line from a bad shot. It distinguishes a
-  stale pitch reference from a write-order problem.
+  the known-good map; compare its map id with the failing ones. The owner's
+  7 Nov log shows the aim yaw/pitch write is held, so the next probe is the
+  game's own look fields, not the write. Enter manual mode (`0`), move the
+  mouse left/right then up/down in a repeated pattern on a failing level, and
+  send the `LOOK map=<id> A ...,... B ...,... delta ...,...` lines. It shows
+  which field changes with the mouse and in which direction. Repeat on
+  BUILDING_EXT for the known-good baseline.
+- **Strange crash:** the 7 Nov StrangeCrash logs show two `xops096.exe`
+  launches 17 s apart. The launcher now refuses a second instance. If a crash
+  still happens with one instance, check whether it follows a level start or
+  an ESC and note the last `screen ->` line.
 - **Hands:** tilt the head and confirm the hands/gun roll with the presented
   world. Crouch/stand and confirm the render follows the head while the hands
   stay at the level-start/recentre position. Right-stick click re-zeroes XYZ

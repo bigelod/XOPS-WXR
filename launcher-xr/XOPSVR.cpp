@@ -16,6 +16,7 @@
 #include <windows.h>
 #include <winhttp.h>
 #include <commctrl.h>
+#include <tlhelp32.h>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -761,6 +762,28 @@ static bool ResetXopsControls(const std::wstring& gameDir)
     return ok && wrote == sizeof(keys);
 }
 
+/* Starting a second XOPS while one is already running gives two d3d8 proxies,
+   two sets of hooks and two writers to the same log file - the "strange crash"
+   after a few level starts in the 7 Nov logs. Refuse instead. */
+static bool GameAlreadyRunning()
+{
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    bool found = false;
+    PROCESSENTRY32W pe;
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    pe.dwSize = sizeof(pe);
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (lstrcmpiW(pe.szExeFile, L"xops096.exe") == 0) {
+                found = true;
+                break;
+            }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    return found;
+}
+
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
 {
     g_exeDir = SelfDir();
@@ -773,6 +796,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
     if (r != ID_PLAY_ACTION) return 0;
 
     if (!FindGame(g_exeDir, g_gameDir, g_gameExe)) return 1;
+
+    if (GameAlreadyRunning()) {
+        Log(L"refused: xops096 is already running");
+        MessageBoxW(nullptr,
+            L"XOPS is already running. Close the existing game before starting another instance.",
+            kAppTitle, MB_OK | MB_ICONWARNING | MB_TOPMOST);
+        return 0;
+    }
 
     if (ResetXopsControls(g_gameDir))
         Log(L"reset XOPS key bindings to the mod defaults");
