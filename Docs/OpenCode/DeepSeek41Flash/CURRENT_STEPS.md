@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  8 2026 11:17:17`, SHA-256
-`0a1179df0ee70ec9d69eb8307ead612f21c3e66d2a23e34aa1136c22bcbf4b67`,
+**Current build:** `built Nov  8 2026 11:44:28`, SHA-256
+`8b827035c0c81aabc727cc9aa9c730a29cb71c4223f713b60f21c77bdc5ea662`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
-Release build: 289,280 bytes, SHA-256
-`ca58672b68392e0ab988999463326c9a8fb0620a85a418ede1fe563e7b4abe87`.
+Release build: 289,792 bytes, SHA-256
+`98595a0d8831a6b5b9be4287f787dd90320e4e27253a32ab736ece90de289860`.
 Latest code commit: `7f38281` (not pushed).
 
 ## Where we stopped (7 Nov, night)
@@ -18,11 +18,11 @@ Latest code commit: `7f38281` (not pushed).
 **Working on device:** AER in gameplay and the AER/menu transition (the old
 `MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
 always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
-build was desktop-smoke-tested but not device-tested. The 11:17 build adds the
+build was desktop-smoke-tested but not device-tested. The 11:44 build adds the
 latest fixes below and was desktop-tested end to end (menus, movement, turn,
 fire).
 
-**New in the 11:17 build (not yet device-tested):**
+**New in the 11:44 build (not yet device-tested):**
 
 - **Spawn grace is now 0.3 s.** The 1 s grace was reliable on PC; the level
   edge now waits 18 frames before taking the camera yaw as the origin. Same
@@ -57,7 +57,7 @@ fire).
   `0x48C93B` / `0x48C82F` before calling the original consumer. The consumer
   then either sets the message-loop flag `0x491A9C` to 0 (title/menu: quit) or
   calls `0x413C00` (return to title), exactly as a physical ESC would.
-- **Physical ESC works in gameplay again (11:17).** The direct-input rebuild
+- **Physical ESC works in gameplay again (11:44).** The direct-input rebuild
   called `ZeroMemory` on the game's shared VK image at `0x48C920`, wiping
   `keys[VK_ESCAPE]` just before the ESC consumer read `0x48C93B` later in the
   same frame. `DirectInputBuild` now preserves the polled ESC byte, and
@@ -66,7 +66,7 @@ fire).
   `ESC consumer: physical ESC edge` and returns to the menu (`A44=61`,
   `1A6C=1`); the XrApi left menu still logs the injected edge and transitions
   the same way.
-- **Spawn yaw fixed for level changes (11:17).** A level applies its spawn
+- **Spawn yaw fixed for level changes (11:44).** A level applies its spawn
   orientation a few frames after the player exists. The old recentre ran on the
   rising edge and, on a level entered after quitting another one, read the
   pre-spawn value (`~0`) and pinned the view there. `SteerRecentre` also took
@@ -132,19 +132,26 @@ The mod now waits 18 frames (0.3 s), takes A (the presented view) as the origin,
 and writes both A and B from it. Device pass: repeat the failing
 quit-and-reenter flow on DUEL_EXT and check the spawn view and stick-forward.
 
-**Open aim issue (owner, 7 Nov):** the spawn view is correct, but after
-returning to the title and entering DUEL_EXT the shot does not follow the hand
-laser: the MARKED screenshot shows the laser on the target and the impact on
-the ground below/left. BUILDING_EXT aim was correct in the same session. The
-owner's StrangeCrash log has AIM lines for maps 6, 2 and 4: the yaw written to
-A/B is held exactly, and the read-back pitch also matches the written value, so
-the game is *not* discarding the aim write. The remaining suspects are the hand
-ray/origin used by the shot versus the drawn laser, or a per-level difference
-in the look fields. A dev mouse-look probe (`LOOK ...`) now logs A/B yaw and
-pitch plus the input deltas in manual mode; run it per level and send the
-lines. That is the same approach used to solve the original 6DOF pitch/yaw.
+**Open aim issue (owner, 7-8 Nov):** the spawn view is correct, but after
+returning to the title and entering DUEL_EXT the owner sees bullets hitting the
+ground while the laser points at a target. BUILDING_EXT aim is correct in the
+same session. Evidence so far:
 
-**Tomorrow's first pass:** copy the 11:17 `d3d8.dll` into the container, confirm
+- The owner's StrangeCrash log (maps 6, 2, 4) shows the AIM yaw write held
+  exactly and the read-back pitch matching the written value: the game is not
+  discarding the aim write.
+- A new `SHOT pitch before/after` probe confirms the player update leaves the
+  shot pitch alone. Replaying the owner's exact logged pose on DUEL_EXT gives
+  `A +0.038 rad` (2.2 deg up) and bullets that follow the laser, not the
+  ground.
+- So the failing shot happens in a state not yet reproduced. The next capture
+  needs the live bad shot: the SHOT before/after pitch lines, the AIM lines,
+  and ideally the raw `XR raw:` packet from the frames around it. The LOOK
+  probe is also in this build for the per-level mouse-look comparison the
+  owner suggested: manual mode (`0`), mouse left/right then up/down, and send
+  the `LOOK map=<id> ...` lines for BUILDING_EXT and DUEL_EXT.
+
+**Tomorrow's first pass:** copy the 11:44 `d3d8.dll` into the container, confirm
 `INPUT direct player-update hook installed at IDA 0x413AC4`, test the left menu
 button as ESC, movement, A/B/X/Y/grips/triggers, spawn facing and shot
 alignment, and send the `STEER recentred`, `YAW ... map`, and `AIM base ... map`

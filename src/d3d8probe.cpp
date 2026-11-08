@@ -3544,7 +3544,7 @@ static void SteerTick(void)
        value and leaves the body 180 deg from the view. Leave the game alone
        for 0.3 s (18 frames), watch what it writes, then recentre from that. */
     if (g_spawnGrace > 0) {
-        float ga = 0.0f, gb = 0.0f;
+        float ga = 0.0f, gb = 0.0f, gap = 0.0f, gbp = 0.0f;
         int gmi = -1;
         if (!g_vrExclusive || !g_steer) {
             g_spawnGrace = 0;
@@ -3552,9 +3552,13 @@ static void SteerTick(void)
             --g_spawnGrace;
             SafeRead(CamAddr(A_YAW), &ga);
             SafeRead(CamAddr(B_YAW), &gb);
+            SafeRead(CamAddr(A_PITCH), &gap);
+            SafeRead(CamAddr(B_PITCH), &gbp);
             SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &gmi);
-            LogD("SPAWN    grace %d map=%d A=%+.4f B=%+.4f delta(B-A)=%+.4f",
-                 g_spawnGrace, gmi, ga, gb, gb - ga);
+            LogD("SPAWN    grace %d map=%d A %+ .4f,%+ .4f  B %+ .4f,%+ .4f"
+                 "  delta %+ .4f,%+ .4f",
+                 g_spawnGrace, gmi, ga, gap, gb, gbp,
+                 gb - ga, gbp - gap);
             if (g_spawnGrace == 0) {
                 Log("STEER    spawn grace over - recentring from the game's yaw");
                 SteerRecentre();
@@ -3600,14 +3604,26 @@ static void SteerTick(void)
        relative to the head. A 180 deg body/HMD split shows up here as A and B
        disagreeing, rather than being guessed from a screenshot. */
     if (g_spawnTrace > 0) {
-        float a = 0.0f, b = 0.0f;
+        float a = 0.0f, b = 0.0f, ap = 0.0f, bp = 0.0f;
+        float ax = 0.0f, ay = 0.0f, az = 0.0f;
+        float bx = 0.0f, by = 0.0f, bz = 0.0f;
         int mi = -1;
         SafeRead(CamAddr(A_YAW), &a);
         SafeRead(CamAddr(B_YAW), &b);
+        SafeRead(CamAddr(A_PITCH), &ap);
+        SafeRead(CamAddr(B_PITCH), &bp);
+        SafeRead(CamAddr(A_H1), &ax);
+        SafeRead(CamAddr(A_Y),  &ay);
+        SafeRead(CamAddr(A_H2), &az);
+        SafeRead(g_exeBase + (0x48E0A8 - 0x400000), &bx);
+        SafeRead(g_exeBase + (0x48E0AC - 0x400000), &by);
+        SafeRead(g_exeBase + (0x48E0B0 - 0x400000), &bz);
         SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mi);
-        LogD("SPAWN    f=%ld map=%d head=%+.4f A=%+.4f B=%+.4f"
-             " delta(B-A)=%+.4f",
-             g_frame, mi, g_pose.headYaw, a, b, b - a);
+        LogD("SPAWN    f=%ld map=%d head=%+.4f  A %+ .4f,%+ .4f"
+             "  B %+ .4f,%+ .4f  d %+ .4f,%+ .4f",
+             g_frame, mi, g_pose.headYaw, a, ap, b, bp, b - a, bp - ap);
+        LogD("SPAWN    pos A %+ .3f,%+ .3f,%+ .3f  B %+ .3f,%+ .3f,%+ .3f",
+             ax, ay, az, bx, by, bz);
         --g_spawnTrace;
     }
 
@@ -5063,6 +5079,21 @@ static void __cdecl PlayerUpdateHook(void)
         g_posed && g_pose.valid && g_gameKeys && g_gameInputMap) {
         DirectInputBuild(g_gameKeys);
         g_gameInputMap();
+    }
+    if (g_fireHeld) {
+        float a0 = 0, b0 = 0, a1 = 0, b1 = 0;
+        static int shotLogs = 0;
+        SafeRead(CamAddr(A_PITCH), &a0);
+        SafeRead(CamAddr(B_PITCH), &b0);
+        if (g_gamePlayerUpdate) g_gamePlayerUpdate();
+        SafeRead(CamAddr(A_PITCH), &a1);
+        SafeRead(CamAddr(B_PITCH), &b1);
+        if (shotLogs < 20) {
+            LogD("SHOT     pitch before A/B %+ .3f/%+ .3f  after %+ .3f/%+ .3f",
+                 a0, b0, a1, b1);
+            ++shotLogs;
+        }
+        return;
     }
     if (g_gamePlayerUpdate) g_gamePlayerUpdate();
 }

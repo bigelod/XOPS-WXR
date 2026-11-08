@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  8 2026 11:17:17`, SHA-256
-`0a1179df0ee70ec9d69eb8307ead612f21c3e66d2a23e34aa1136c22bcbf4b67`.
-Release build: 289,280 bytes, SHA-256
-`ca58672b68392e0ab988999463326c9a8fb0620a85a418ede1fe563e7b4abe87`.
+Current dev build: `built Nov  8 2026 11:44:28`, SHA-256
+`8b827035c0c81aabc727cc9aa9c730a29cb71c4223f713b60f21c77bdc5ea662`.
+Release build: 289,792 bytes, SHA-256
+`98595a0d8831a6b5b9be4287f787dd90320e4e27253a32ab736ece90de289860`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,7 +1391,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 11:17 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 11:44 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
@@ -1504,8 +1504,14 @@ per-level look-field difference. A mouse-look probe was added for that.
   with a warning dialog.
 - The provided probe log ends with a graceful `SHUTDOWN` after four level
   starts; the Wine log is the `winhandler` process, not a game fault dump.
+- Added a `SHOT pitch before/after` probe around the player update, and an
+  A/B pitch/position trace during the first 120 frames. Replaying the owner's
+  exact logged pose on DUEL_EXT gives `A +0.038 rad` and bullets that follow
+  the laser, so the aim write is not discarded and the failing state is still
+  not reproduced. The next capture needs the live bad shot's `SHOT`, `AIM` and
+  `XR raw` lines.
 
-Build: `built Nov  8 2026 11:17:17`, dev SHA-256
-`0a1179df0ee70ec9d69eb8307ead612f21c3e66d2a23e34aa1136c22bcbf4b67`;
-release 289,280 bytes, SHA-256
-`ca58672b68392e0ab988999463326c9a8fb0620a85a418ede1fe563e7b4abe87`.
+Build: `built Nov  8 2026 11:44:28`, dev SHA-256
+`8b827035c0c81aabc727cc9aa9c730a29cb71c4223f713b60f21c77bdc5ea662`;
+release 289,792 bytes, SHA-256
+`98595a0d8831a6b5b9be4287f787dd90320e4e27253a32ab736ece90de289860`.

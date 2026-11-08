@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  8 2026 11:17:17`, SHA-256
-`0a1179df0ee70ec9d69eb8307ead612f21c3e66d2a23e34aa1136c22bcbf4b67`.
-Release: 289,280 bytes, SHA-256
-`ca58672b68392e0ab988999463326c9a8fb0620a85a418ede1fe563e7b4abe87`.
+**Last build:** `built Nov  8 2026 11:44:28`, SHA-256
+`8b827035c0c81aabc727cc9aa9c730a29cb71c4223f713b60f21c77bdc5ea662`.
+Release: 289,792 bytes, SHA-256
+`98595a0d8831a6b5b9be4287f787dd90320e4e27253a32ab736ece90de289860`.
 
 ---
 
@@ -81,7 +81,10 @@ direct-input build** and the spawn/aim base:
   mouse left/right then up/down in a repeated pattern on a failing level, and
   send the `LOOK map=<id> A ...,... B ...,... delta ...,...` lines. It shows
   which field changes with the mouse and in which direction. Repeat on
-  BUILDING_EXT for the known-good baseline.
+  BUILDING_EXT for the known-good baseline. For the "bullets hit the ground"
+  case, also send the `SHOT pitch before ... after ...` lines and the
+  `XR raw:` packet from the bad frames; the replay of the owner's logged pose
+  on DUEL_EXT did not reproduce it.
 - **Strange crash:** the 7 Nov StrangeCrash logs show two `xops096.exe`
   launches 17 s apart. The launcher now refuses a second instance. If a crash
   still happens with one instance, check whether it follows a level start or
