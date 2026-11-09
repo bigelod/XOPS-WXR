@@ -3414,7 +3414,25 @@ static long   g_steerWrites = 0;
 /* Watch-table indices. A: 0=Y 1=h1 2=h2 3=yaw 4=pitch.
    B: 5=h2 6=h1 7=yaw 8=pitch - note h2 comes FIRST in B, and B has no Y
    entry, so B's height is not driven. */
-static UINT_PTR CamAddr(int i) { return WatchAddr(i); }
+/* A is a fixed global camera. B is the per-player look/orientation array:
+   index 6 is the slot the original watch list was measured on, and every
+   player is 0x50 bytes apart (watch VA = slot 6). The local player index is
+   not the same on every map - BUILDING_EXT runs as player 6, DUEL_EXT as
+   player 0 - so a hard-coded B address silently writes an inactive slot and
+   the game keeps its default aim. Resolve it every time. */
+static UINT_PTR CamAddr(int i)
+{
+    UINT_PTR a = WatchAddr(i);
+    if (i >= 5) {                    /* B cluster: B_H2, B_H1, B_YAW, B_PITCH */
+        int idx = 6, v = -1;
+        if (g_exeBase &&
+            SafeReadInt(g_exeBase + (0x48DDD8 - 0x400000), &v) &&
+            v >= 0 && v < 0x18)
+            idx = v;
+        a += (UINT_PTR)(idx - 6) * 0x50;
+    }
+    return a;
+}
 #define A_Y 0
 #define A_H1 1
 #define A_H2 2
@@ -3615,9 +3633,9 @@ static void SteerTick(void)
         SafeRead(CamAddr(A_H1), &ax);
         SafeRead(CamAddr(A_Y),  &ay);
         SafeRead(CamAddr(A_H2), &az);
-        SafeRead(g_exeBase + (0x48E0A8 - 0x400000), &bx);
-        SafeRead(g_exeBase + (0x48E0AC - 0x400000), &by);
-        SafeRead(g_exeBase + (0x48E0B0 - 0x400000), &bz);
+        SafeRead(CamAddr(B_H2), &bx);
+        SafeRead(CamAddr(B_H2) + 4, &by);
+        SafeRead(CamAddr(B_H1), &bz);
         SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mi);
         LogD("SPAWN    f=%ld map=%d head=%+.4f  A %+ .4f,%+ .4f"
              "  B %+ .4f,%+ .4f  d %+ .4f,%+ .4f",
@@ -3935,6 +3953,8 @@ static void SteerAimWrite(void)
     if (g_aimWrites <= 3 || (g_aimWrites % 60) == 0) {
         float ay = 0.0f, by = 0.0f, ap = 0.0f, bp = 0.0f;
         int mission = -1;
+        int pidx = -1;
+        SafeReadInt(g_exeBase + (0x48DDD8 - 0x400000), &pidx);
         SafeRead(CamAddr(A_YAW), &ay);
         SafeRead(CamAddr(B_YAW), &by);
         SafeRead(CamAddr(A_PITCH), &ap);
@@ -3946,9 +3966,9 @@ static void SteerAimWrite(void)
             yawOff, yawOff * 57.2957795f,
             pitchOff, pitchOff * 57.2957795f, g_aimWrites);
         LogD("AIM      base A %+ .3f B %+ .3f head %+ .3f -> A %+ .3f B %+ .3f"
-            "  pitch A %+ .3f B %+ .3f  (refA %+ .3f refB %+ .3f)  map %d",
+            "  pitch A %+ .3f B %+ .3f  (refA %+ .3f refB %+ .3f)  map %d  idx %d",
             yawBaseA, yawBaseB, g_pose.headYaw, ay, by, ap, bp,
-            g_refYaw, g_refYawB, mission);
+            g_refYaw, g_refYawB, mission, pidx);
     }
 }
 

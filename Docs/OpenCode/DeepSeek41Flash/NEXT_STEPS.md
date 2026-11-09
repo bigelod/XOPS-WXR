@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  8 2026 19:53:53`, SHA-256
-`8f55042735e6f6b853f4e74a6f7a043c717d741571ce8a8354a7a034a4e84152`.
+**Last build:** `built Nov  8 2026 20:14:00`, SHA-256
+`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`.
 Release: 290,304 bytes, SHA-256
-`3f5accac56a0466ac3273ead806bbbef8b52116a55396b60ea14bf4cca8190dd`.
+`d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
 
 ---
 
@@ -73,12 +73,11 @@ direct-input build** and the spawn/aim base:
   arena (not the gray wall) and that stick-forward moves toward what the
   camera sees. Right-stick recentre should leave the view still and re-zero
   the HMD XYZ/yaw.
-- **Aim after a level change:** repeat BUILDING_EXT -> menu -> DUEL_EXT and
-  fire at a crate. The 19:53 build writes the hand aim at EndScene for the next
-  frame's shot; the holes should land at the laser. If it still misses, send
-  `AIM pre-write`, `AIM shot`, `SHOT pitch` and the `LOOK map=<id>` lines from
-  the same shots. The LOOK probe is still available in manual mode (`0`) for
-  the per-level mouse-look comparison.
+- **Aim after a level change:** the per-map player slot is now resolved from
+  `0x48DDD8` (BUILDING_EXT is player 6, DUEL_EXT is player 0). Owner-verified
+  on PC: BUILDING_EXT -> menu -> DUEL_EXT, bullets follow the laser. Device
+  pass: repeat the same path and fire at a crate; the AIM log prints `idx`, so
+  any map with a different player slot is visible immediately.
 - **Strange crash:** the 7 Nov StrangeCrash logs show two `xops096.exe`
   launches 17 s apart. The launcher now refuses a second instance. If a crash
   still happens with one instance, check whether it follows a level start or

@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  8 2026 19:53:53`, SHA-256
-`8f55042735e6f6b853f4e74a6f7a043c717d741571ce8a8354a7a034a4e84152`,
+**Current build:** `built Nov  8 2026 20:14:00`, SHA-256
+`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 Release build: 290,304 bytes, SHA-256
-`3f5accac56a0466ac3273ead806bbbef8b52116a55396b60ea14bf4cca8190dd`.
+`d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
 Latest code commit: `5e691fa` (not pushed).
 
 ## Where we stopped (7 Nov, night)
@@ -18,21 +18,29 @@ Latest code commit: `5e691fa` (not pushed).
 **Working on device:** AER in gameplay and the AER/menu transition (the old
 `MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
 always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
-build was desktop-smoke-tested but not device-tested. The 19:53 build adds the
+build was desktop-smoke-tested but not device-tested. The 20:14 build adds the
 latest fixes below and was desktop-tested end to end (menus, movement, turn,
 fire).
 
-**New in the 19:53 build (not yet device-tested):**
+**New in the 20:14 build (not yet device-tested):**
+
+- **Per-map player slot fixed - the real aim bug.** The B cluster (player
+  look/aim) is a per-player array at `0x48DED4 + idx * 0x50`; the watch VAs
+  were measured on slot **6**. BUILDING_EXT runs as local player 6, but
+  DUEL_EXT runs as player **0** (`STATE SCREEN ... DDD8=6` on map 2 vs
+  `DDD8=0` on map 6). Every B write was therefore landing in an inactive slot
+  on other maps, and the game kept that map's default downward aim while the
+  camera view and the cloned gun looked correct. `CamAddr()` now resolves the
+  B indices through the live `0x48DDD8` value on every call. The AIM log also
+  prints `idx`. Owner-verified on PC: BUILDING_EXT -> menu -> DUEL_EXT, the
+  bullets now follow the laser.
 
 - **Aim write reaches the shot one frame earlier.** The game can process the
-  shot **before** its input poll. The aim written from `GetKeyboardState` was
-  therefore too late: the bullet used the previous BeginScene's head view, not
-  the hand laser. `hkEndScene` now leaves the hand aim in A/B after the frame
-  is drawn; the next frame's shot sees it, and BeginScene restores the head
-  view before anything is rendered. Desktop check: the new
-  `AIM pre-write A ...` line was the head view before the change
-  (`+3.149`), and is now the previous aim (`+3.503`, the 21.1 deg laser
-  offset) at the start of the firing frame.
+  shot **before** its input poll, so the input-phase aim alone was also one
+  frame late. `hkEndScene` leaves the hand aim in A/B after the frame is drawn;
+  the next frame's shot sees it, and BeginScene restores the head view before
+  anything is rendered. `AIM pre-write A` confirms the firing frame now starts
+  with the previous hand aim.
 
 - **Spawn grace is now 0.3 s.** The 1 s grace was reliable on PC; the level
   edge now waits 18 frames before taking the camera yaw as the origin. Same
@@ -67,7 +75,7 @@ fire).
   `0x48C93B` / `0x48C82F` before calling the original consumer. The consumer
   then either sets the message-loop flag `0x491A9C` to 0 (title/menu: quit) or
   calls `0x413C00` (return to title), exactly as a physical ESC would.
-- **Physical ESC works in gameplay again (19:53).** The direct-input rebuild
+- **Physical ESC works in gameplay again (20:14).** The direct-input rebuild
   called `ZeroMemory` on the game's shared VK image at `0x48C920`, wiping
   `keys[VK_ESCAPE]` just before the ESC consumer read `0x48C93B` later in the
   same frame. `DirectInputBuild` now preserves the polled ESC byte, and
@@ -76,7 +84,7 @@ fire).
   `ESC consumer: physical ESC edge` and returns to the menu (`A44=61`,
   `1A6C=1`); the XrApi left menu still logs the injected edge and transitions
   the same way.
-- **Spawn yaw fixed for level changes (19:53).** A level applies its spawn
+- **Spawn yaw fixed for level changes (20:14).** A level applies its spawn
   orientation a few frames after the player exists. The old recentre ran on the
   rising edge and, on a level entered after quitting another one, read the
   pre-spawn value (`~0`) and pinned the view there. `SteerRecentre` also took
@@ -142,19 +150,19 @@ The mod now waits 18 frames (0.3 s), takes A (the presented view) as the origin,
 and writes both A and B from it. Device pass: repeat the failing
 quit-and-reenter flow on DUEL_EXT and check the spawn view and stick-forward.
 
-**Aim fix (8 Nov):** the owner's paused PC test proved the miss: on DUEL_EXT
-the laser pointed 21.1 deg right while the bullets hit the ground near screen
-centre. The log showed the aim write itself was correct and survived the player
-update (`SHOT pitch before/after -0.205/-0.275`), so the write was not being
-discarded. The shot is processed **before** the input poll: it used the
-previous BeginScene view (`A +3.149`), not the hand aim (`A +3.516`). The mod
-now writes the hand aim at **EndScene** as well, after the frame is drawn, so
-the next frame's shot sees it. The `AIM pre-write A` diagnostic confirms the
-frame now starts with the previous aim. Device pass: repeat
-BUILDING_EXT -> menu -> DUEL_EXT and fire at a crate; the holes should land at
-the laser.
+**Aim fix (8 Nov, owner-verified on PC):** two separate problems stacked.
+First, the game's B cluster is a **per-player array** (`0x48DED4 + idx *
+0x50`), and the watch addresses were measured on slot 6. BUILDING_EXT runs as
+player 6 (`DDD8=6`) but DUEL_EXT as player 0 (`DDD8=0`), so every B write went
+to an inactive slot on other maps and the game kept the map's default downward
+aim. `CamAddr()` now resolves B through the live player index. Second, the
+shot can be processed before the input poll, so the aim is also left in A/B at
+**EndScene** for the next frame. After both changes the owner confirms the
+bullets follow the laser on the BUILDING_EXT -> menu -> DUEL_EXT path. The AIM
+log now prints `idx` so a future map with a different player slot is visible
+immediately. Device pass still required.
 
-**Tomorrow's first pass:** copy the 19:53 `d3d8.dll` into the container, confirm
+**Tomorrow's first pass:** copy the 20:14 `d3d8.dll` into the container, confirm
 `INPUT direct player-update hook installed at IDA 0x413AC4`, test the left menu
 button as ESC, movement, A/B/X/Y/grips/triggers, spawn facing and shot
 alignment, and send the `STEER recentred`, `YAW ... map`, and `AIM base ... map`

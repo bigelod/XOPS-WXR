@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  8 2026 19:53:53`, SHA-256
-`8f55042735e6f6b853f4e74a6f7a043c717d741571ce8a8354a7a034a4e84152`.
+Current dev build: `built Nov  8 2026 20:14:00`, SHA-256
+`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`.
 Release build: 290,304 bytes, SHA-256
-`3f5accac56a0466ac3273ead806bbbef8b52116a55396b60ea14bf4cca8190dd`.
+`d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,7 +1391,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 19:53 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 20:14 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
@@ -1516,10 +1516,31 @@ per-level look-field difference. A mouse-look probe was added for that.
   is drawn. The next frame's shot sees it; BeginScene restores the head view
   before anything is rendered. New `AIM pre-write A` diagnostic: before the
   change the frame started at the head (`+3.149`), now it starts at the
-  previous aim (`+3.503`). Device pass: BUILDING_EXT -> menu -> DUEL_EXT,
-  fire at a crate, holes should land at the laser.
+  previous aim (`+3.503`).
 
-Build: `built Nov  8 2026 19:53:53`, dev SHA-256
-`8f55042735e6f6b853f4e74a6f7a043c717d741571ce8a8354a7a034a4e84152`;
+### The actual root cause - per-map player slot
+
+That still was not enough. The owner then pointed out that the on-screen gun
+faced correctly but the bullets used a fixed downward angle. The STATE SCREEN
+lines hold the answer:
+
+```
+map 2  BUILDING_EXT  DDD8=6
+map 6  DUEL_EXT      DDD8=0
+```
+
+Cluster B (the player look/aim) is a **per-player array** at
+`0x48DED4 + idx * 0x50`; the watch VAs were measured on slot 6. BUILDING_EXT
+runs as player 6, so every hard-coded B write happened to land in the live
+slot. DUEL_EXT runs as player **0**, so the B writes landed in an inactive
+slot and the game kept the map's default downward aim, no matter what the
+camera or the cloned gun showed.
+
+`CamAddr()` now resolves B indices through `0x48DDD8` on every call, and the
+AIM log prints `idx`. Owner-verified on PC: BUILDING_EXT -> menu -> DUEL_EXT,
+the bullets follow the laser. Device pass still required.
+
+Build: `built Nov  8 2026 20:14:00`, dev SHA-256
+`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`;
 release 290,304 bytes, SHA-256
-`3f5accac56a0466ac3273ead806bbbef8b52116a55396b60ea14bf4cca8190dd`.
+`d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.

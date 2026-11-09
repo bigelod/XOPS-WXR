@@ -48,7 +48,11 @@ WinlatorXR and no build has been verified on the Quest 3.**
 | `0x0048E0A8`...`0x0048E0BC` | cluster B, the player's own orientation | `[device, run 11]` |
 
 Cluster A is the render copy; cluster B is what movement reads. The probe
-writes **both** by default. Yaw is positive; pitch is positive-down in XOPS,
+writes **both** by default. Cluster B is a **per-player array**: the addresses
+above are slot 6, stride `0x50`, and the live local index is at `0x48DDD8`
+(6 on BUILDING_EXT, **0** on DUEL_EXT). Resolve the index on every access; a
+hard-coded slot silently writes an inactive player and leaves that map's aim at
+its default angle. Yaw is positive; pitch is positive-down in XOPS,
 so the pose's positive-up pitch is negated.
 
 ### RESOLVED: pitch sign is `+1` (owner, 5 Nov 2026)
@@ -480,7 +484,7 @@ from the wrong yaw/height. The fixes:
 
 **7 Nov stopping point.** The AER/menu transition is device-confirmed. Gameplay
 input now runs the game's own input mapper from an XrApi-built image, so no
-Wine keyboard state is involved. The 19:53 build adds: `ESC`/`0` preserved when
+Wine keyboard state is involved. The 20:14 build adds: `ESC`/`0` preserved when
 the window is unfocused; the left controller menu button mapped to the game's
 own ESC consumer (hook at `0x413BA2`, call `0x413CF0` with a fresh ESC edge,
 no Wine key events); the direct-input image preserves the polled
@@ -591,10 +595,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  8 2026 19:53:53`, SHA-256
-`8f55042735e6f6b853f4e74a6f7a043c717d741571ce8a8354a7a034a4e84152`,
+Current handover build: `built Nov  8 2026 20:14:00`, SHA-256
+`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 290,304 bytes,
-SHA-256 `3f5accac56a0466ac3273ead806bbbef8b52116a55396b60ea14bf4cca8190dd`.
+SHA-256 `d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
 
 ---
 

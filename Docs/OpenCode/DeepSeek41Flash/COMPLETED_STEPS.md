@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  8 2026 19:53:53`, SHA-256
-`8f55042735e6f6b853f4e74a6f7a043c717d741571ce8a8354a7a034a4e84152`.
+**Last build covered:** `built Nov  8 2026 20:14:00`, SHA-256
+`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`.
 Release: 290,304 bytes, SHA-256
-`3f5accac56a0466ac3273ead806bbbef8b52116a55396b60ea14bf4cca8190dd`.
+`d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
 
 ---
 
@@ -32,7 +32,10 @@ Release: 290,304 bytes, SHA-256
 ## 2. Camera and 6DOF
 
 - Camera position/angles **solved and writable**; cluster A (render copy) and
-  cluster B (movement) both written.
+  cluster B (movement) both written. **B is a per-player array**
+  (`0x48DED4 + idx * 0x50`): the local index is 6 on BUILDING_EXT but 0 on
+  DUEL_EXT, so B addresses are resolved through `0x48DDD8` on every access.
+  Hard-coding slot 6 left other maps' aim at their default downward angle.
 - **Settled signs:** `yawSign +1`, `pitchSign +1`, `cluster both`; persisted in
   `xops_wxr_steer.ini`.
 - Head tracking, recentre, and the right-stick yaw offset (turn composes with
