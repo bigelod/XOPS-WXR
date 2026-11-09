@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  8 2026 11:44:28`, SHA-256
-`8b827035c0c81aabc727cc9aa9c730a29cb71c4223f713b60f21c77bdc5ea662`.
-Release build: 289,792 bytes, SHA-256
-`98595a0d8831a6b5b9be4287f787dd90320e4e27253a32ab736ece90de289860`.
+Current dev build: `built Nov  8 2026 19:53:53`, SHA-256
+`8f55042735e6f6b853f4e74a6f7a043c717d741571ce8a8354a7a034a4e84152`.
+Release build: 290,304 bytes, SHA-256
+`3f5accac56a0466ac3273ead806bbbef8b52116a55396b60ea14bf4cca8190dd`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,7 +1391,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 11:44 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 19:53 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
@@ -1505,13 +1505,21 @@ per-level look-field difference. A mouse-look probe was added for that.
 - The provided probe log ends with a graceful `SHUTDOWN` after four level
   starts; the Wine log is the `winhandler` process, not a game fault dump.
 - Added a `SHOT pitch before/after` probe around the player update, and an
-  A/B pitch/position trace during the first 120 frames. Replaying the owner's
-  exact logged pose on DUEL_EXT gives `A +0.038 rad` and bullets that follow
-  the laser, so the aim write is not discarded and the failing state is still
-  not reproduced. The next capture needs the live bad shot's `SHOT`, `AIM` and
-  `XR raw` lines.
+  A/B pitch/position trace during the first 120 frames.
+- **Root cause found with the owner's live PC log.** On DUEL_EXT the shot was
+  taken at `A +3.149` (the head view) while the hand aim was `+3.516`
+  (21.1 deg right). `SHOT pitch before/after -0.205/-0.275` proves the player
+  update does not discard the aim; the problem is **order**: the game processes
+  the shot before its input poll, so the aim written from `GetKeyboardState`
+  arrives one frame too late and the bullet uses the previous BeginScene view.
+- **Fix:** `hkEndScene` now writes the hand aim into A/B again after the frame
+  is drawn. The next frame's shot sees it; BeginScene restores the head view
+  before anything is rendered. New `AIM pre-write A` diagnostic: before the
+  change the frame started at the head (`+3.149`), now it starts at the
+  previous aim (`+3.503`). Device pass: BUILDING_EXT -> menu -> DUEL_EXT,
+  fire at a crate, holes should land at the laser.
 
-Build: `built Nov  8 2026 11:44:28`, dev SHA-256
-`8b827035c0c81aabc727cc9aa9c730a29cb71c4223f713b60f21c77bdc5ea662`;
-release 289,792 bytes, SHA-256
-`98595a0d8831a6b5b9be4287f787dd90320e4e27253a32ab736ece90de289860`.
+Build: `built Nov  8 2026 19:53:53`, dev SHA-256
+`8f55042735e6f6b853f4e74a6f7a043c717d741571ce8a8354a7a034a4e84152`;
+release 290,304 bytes, SHA-256
+`3f5accac56a0466ac3273ead806bbbef8b52116a55396b60ea14bf4cca8190dd`.

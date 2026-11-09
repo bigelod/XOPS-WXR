@@ -3960,8 +3960,18 @@ static void SteerAimEarly(void)
     if (!g_posed || !g_pose.valid) return;
     g_twoHanded = XrButton(&g_pose, XRB_L_GRIP) ? TRUE : FALSE;
     if (g_leftHanded ? XrButton(&g_pose, XRB_L_TRIGGER)
-                     : XrButton(&g_pose, XRB_R_TRIGGER))
+                     : XrButton(&g_pose, XRB_R_TRIGGER)) {
+        if (g_fireHeld) {
+            /* Value the game saw at the start of this frame. If the shot is
+               processed before the input poll, this - not the aim written
+               below - is the direction the bullet uses. */
+            float pa = 0.0f, pb = 0.0f;
+            SafeRead(CamAddr(A_YAW),   &pa);
+            SafeRead(CamAddr(A_PITCH), &pb);
+            LogD("AIM      pre-write A %+ .3f,%+ .3f", pa, pb);
+        }
         SteerAimWrite();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -8453,6 +8463,14 @@ static HRESULT __stdcall hkEndScene(void* dev)
     }
     g_3dPrevN = g_3dIdx;
     hr = o_EndScene(dev);
+    /* The game can process the shot before its input poll, so the aim written
+       in GetKeyboardState is one frame too late for it: the bullet then uses
+       the previous BeginScene's head view. Leave the hand aim in A/B after the
+       frame is drawn; the next frame's shot sees it, and BeginScene restores
+       the head view before anything is rendered. */
+    if (g_fireHeld && g_vrExclusive && InGameplay() &&
+        g_spawnGrace == 0 && g_haveRef && g_posed && g_pose.valid)
+        SteerAimWrite();
     /* Keep the game target bound - the title background is drawn between
        scenes. The back buffer is bound only in Present. */
     if (!g_compositeActive) DrawSyncPixel(dev);

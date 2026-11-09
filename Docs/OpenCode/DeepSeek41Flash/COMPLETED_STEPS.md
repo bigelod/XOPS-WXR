@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  8 2026 11:44:28`, SHA-256
-`8b827035c0c81aabc727cc9aa9c730a29cb71c4223f713b60f21c77bdc5ea662`.
-Release: 289,792 bytes, SHA-256
-`98595a0d8831a6b5b9be4287f787dd90320e4e27253a32ab736ece90de289860`.
+**Last build covered:** `built Nov  8 2026 19:53:53`, SHA-256
+`8f55042735e6f6b853f4e74a6f7a043c717d741571ce8a8354a7a034a4e84152`.
+Release: 290,304 bytes, SHA-256
+`3f5accac56a0466ac3273ead806bbbef8b52116a55396b60ea14bf4cca8190dd`.
 
 ---
 
@@ -40,7 +40,11 @@ Release: 289,792 bytes, SHA-256
 - **Focus-safe cursor:** when another window has focus, `SetCursorPos` does not
   move the real cursor and the game's look delta stays zero.
 - **Hand aim:** while firing, the game's shot is aimed at the laser endpoint
-  and the view is restored before the world is drawn.
+  and the view is restored before the world is drawn. The aim is also written
+  at `EndScene`, after the frame is drawn: the game can process the shot before
+  its input poll, so the input-phase write alone left the bullet on the
+  previous head view. `AIM pre-write A` confirms the next frame now starts with
+  the previous hand aim.
 - **Head roll:** the presented 640x480 game sprite is rotated as a 2D quad in
   `Present` by the head roll. The hands/gun/laser are built on a **no-roll head
   basis** (yaw/pitch only), so they behave like part of the VR camera and stay

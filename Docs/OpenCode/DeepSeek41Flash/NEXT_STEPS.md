@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  8 2026 11:44:28`, SHA-256
-`8b827035c0c81aabc727cc9aa9c730a29cb71c4223f713b60f21c77bdc5ea662`.
-Release: 289,792 bytes, SHA-256
-`98595a0d8831a6b5b9be4287f787dd90320e4e27253a32ab736ece90de289860`.
+**Last build:** `built Nov  8 2026 19:53:53`, SHA-256
+`8f55042735e6f6b853f4e74a6f7a043c717d741571ce8a8354a7a034a4e84152`.
+Release: 290,304 bytes, SHA-256
+`3f5accac56a0466ac3273ead806bbbef8b52116a55396b60ea14bf4cca8190dd`.
 
 ---
 
@@ -73,18 +73,12 @@ direct-input build** and the spawn/aim base:
   arena (not the gray wall) and that stick-forward moves toward what the
   camera sees. Right-stick recentre should leave the view still and re-zero
   the HMD XYZ/yaw.
-- **Aim on every level:** fire on a level that failed before and send the
-  `YAW ... map <id>` and `AIM base ... -> ... map <id>` lines. BUILDING_EXT is
-  the known-good map; compare its map id with the failing ones. The owner's
-  7 Nov log shows the aim yaw/pitch write is held, so the next probe is the
-  game's own look fields, not the write. Enter manual mode (`0`), move the
-  mouse left/right then up/down in a repeated pattern on a failing level, and
-  send the `LOOK map=<id> A ...,... B ...,... delta ...,...` lines. It shows
-  which field changes with the mouse and in which direction. Repeat on
-  BUILDING_EXT for the known-good baseline. For the "bullets hit the ground"
-  case, also send the `SHOT pitch before ... after ...` lines and the
-  `XR raw:` packet from the bad frames; the replay of the owner's logged pose
-  on DUEL_EXT did not reproduce it.
+- **Aim after a level change:** repeat BUILDING_EXT -> menu -> DUEL_EXT and
+  fire at a crate. The 19:53 build writes the hand aim at EndScene for the next
+  frame's shot; the holes should land at the laser. If it still misses, send
+  `AIM pre-write`, `AIM shot`, `SHOT pitch` and the `LOOK map=<id>` lines from
+  the same shots. The LOOK probe is still available in manual mode (`0`) for
+  the per-level mouse-look comparison.
 - **Strange crash:** the 7 Nov StrangeCrash logs show two `xops096.exe`
   launches 17 s apart. The launcher now refuses a second instance. If a crash
   still happens with one instance, check whether it follows a level start or
