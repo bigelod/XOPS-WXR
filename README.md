@@ -7,24 +7,63 @@ Thanks to Luboš, GmoLargey, and others for their work on [WinlatorXR](https://g
 
 The rest of the README below has been created with the help of AI:
 
+**Status: V0.1 alpha, PC-verified.** The full flow has been tested on Windows
+(both the game and the launcher); the final Quest 3 device pass is in progress.
+Mono is the shipping default. AER stereo is available experimentally.
+
 ## Features
 
 - **6DOF head tracking.** HMD yaw and pitch drive the game camera; your real-world forward direction is the direction the movement stick walks. Head yaw is written to both camera clusters so view and movement agree.
+- **Per-level recentre.** Every level start waits 0.1 s for the game to place
+  the spawn, then makes the current HMD XYZ/yaw the new origin against the
+  player model. It recentres from the camera yaw the game actually presents,
+  and resolves the player slot from the live player index, so aim stays correct
+  on maps that use a different slot (BUILDING_EXT runs as player 6, DUEL_EXT
+  as player 0). **Right-stick click** does the same at any time.
+- **Hand aim.** The game's shot is aimed at the hand laser. The aim is written
+  both in the input phase and after the frame is drawn, so a shot processed
+  early in the game's update still uses the hand direction.
 - **Visual-only head translation.** Leaning, crouching and standing move the rendered view, not the game's player position. The world is shifted at draw time by the HMD offset, so the game stays flat for gameplay while the view follows your head.
   - HMD height is clamped to **±1 m** before the gain.
-  - **Right-stick click** recentres: the current HMD height becomes the flat game player height (`0`).
   - `pos_scale` sets the gain (`1.0` = 1:1, `0` disables translation).
   - `eye_height` is a manual float vertical calibration offset (default `0`, range ±5 m).
-- **Hands, gun and laser.** Both tracked hands are drawn in the game's 3D pass with a no-roll head basis, so they stay fixed relative to the VR camera when the world rolls. They live in the default/recentre head-height frame, so moving the HMD moves the view, not the hands. The dominant hand carries a clone of the game's own weapon model and a depth-tested laser. The clone follows weapon swaps, drops, pickups and empty slots.
+- **Hands, gun and laser.** Both tracked hands are drawn in the game's 3D pass and stay world-anchored at the level-start/recentre position: they roll with the presented world, not with the current HMD height. The dominant hand carries a clone of the game's own weapon model and an always-on, depth-tested laser. The clone follows weapon swaps, drops, pickups and empty slots.
 - **Quest 3 hand roll corrected by default** (`hand_flip = false`). Set `hand_flip = true` to recreate the old/uncorrected roll on other headsets.
 - **Two-handed aim.** Hold the **left grip** and the gun points at the off hand; the laser, shot and haptics all follow it.
-- **Text-only HUD.** A target-resolution text/panel HUD replaces the game's spinning 3D weapon-slot models; the weapon still appears in the VR hand. Title, menus, objective, death and victory keep the game's own 2D UI.
+- **Text-only HUD.** A target-resolution text/panel HUD replaces the game's spinning 3D weapon-slot models; the weapon still appears in the VR hand.
 - **Haptics.** A short pulse per shot, driven by the magazine counter. Both controllers buzz while two-handed aim is held.
 - **Head roll.** The presented 640×480 game sprite rotates with head tilt; the HUD, sync pixel and hands stay fixed. Black sprite corners are accepted and hidden by the lenses. `roll = true`, `roll_sign = -1` by default.
-- **Automatic 2D/VR switching.** `MODE_VR = 0` on title/menu/death/victory, `MODE_VR = 1` in gameplay, so flat menus remain usable.
-- **Launcher.** Play, Options (including HMD position gain and HUD scale) and an update check. Config lives in the game folder, next to `xops096.exe`.
-- **Experimental AER stereo.** `stereo = aer` opts in; `mono` is the shipping default until the device pass confirms the eye sign.
+- **Floating panels for non-gameplay screens.** `MODE_VR` stays `1` for the
+  whole run; the title, menus, objective, death and victory screens are shown
+  as a centre-third panel with a dominant-hand laser pointer and the
+  WinlatorXR-supplied mouse. AER is used in gameplay only.
+- **VR-only gameplay input.** In gameplay the game is driven from XrApi, not
+  from the desktop keyboard/mouse; only `ESC` and `0` are accepted from the
+  physical keyboard. Menus keep physical keys. The left controller's menu
+  button runs the game's own ESC consumer. A **victory** result screen freezes
+  the game's mouse look so the camera cannot spin before the objectives panel.
+- **Launcher.** Play, Options (including HMD position gain and HUD scale) and
+  an update check. Config lives in the game folder, next to `xops096.exe`.
+  Play refuses to start a second game instance.
+- **Experimental AER stereo.** `stereo = aer` opts in; `mono` is the shipping
+  default.
 - **Debug keys are locked behind `0`.** WinlatorXR does not map `0`, so a device session cannot trigger probe/HUD/dump keys by accident.
+
+## To-do
+
+V0.1 is feature-complete. Remaining work is post-launch:
+
+- **Muzzle effects and hand/weapon placement.** Move the game's own muzzle
+  flash, smoke and shell effects from the hidden weapon position onto the VR
+  hand; polish per-weapon hand and muzzle offsets.
+- **AER stereo.** Keep it experimental for now; confirm the eye sign on device
+  and decide whether to expose it as a selectable presentation mode later.
+  Mono stays the default.
+- **Update channel.** Point the launcher's AutoUpdate at the XOPS-WXR channel
+  and enable the `d3d8.dll` download step.
+- **Optional menu simplification.** Call the game's title/mission-select action
+  (`0x411F80`) directly instead of relying on the cursor hit-test.
+- **Not planned:** SBS stereo.
 
 ## Default Controls
 
@@ -41,9 +80,14 @@ The rest of the README below has been created with the help of AI:
 | Switch weapon | A |
 | Drop weapon | X |
 | Zoom (toggle) | Y |
+| Menu / back | `ESC` or the left controller menu button |
+| Point / click on a menu | Dominant-hand laser, or the WinlatorXR mouse; right trigger clicks the laser |
 | Manual PC / debug mode | `0` (desktop keyboard; unlocks the debug keys) |
 
-Left-handed mode (`handedness = left`) swaps only **Shoot** and **Fire mode** (and the position of the gun to left hand).
+In gameplay only `ESC` and `0` are accepted from the physical keyboard; menus,
+objectives, death, victory and intro screens keep physical keys. Left-handed
+mode (`handedness = left`) swaps only **Shoot** and **Fire mode** (and the
+position of the gun to left hand).
 
 ## Setup - Release
 
@@ -64,7 +108,9 @@ Left-handed mode (`handedness = left`) swaps only **Shoot** and **Fire mode** (a
    - `XOPSVR.exe` — the launcher
    - `config.txt` — settings
    - `version.txt` — the launcher's local version
-5. Start `XOPSVR.exe` (or run `xops096.exe` directly).
+5. Start `XOPSVR.exe` (or run `xops096.exe` directly). The launcher refuses to
+   start a second copy while XOPS is already running; close the existing game
+   first.
 6. In the headset, use **mono** for the first run. AER stereo is experimental.
 
 **Config**
@@ -152,10 +198,12 @@ This produces `launcher-xr\XOPSVR.exe`. It is a build artifact and is not commit
 
 **Presentation.** The game renders into a dedicated **640×480** render target, keeping its native FOV. `Present` binds the real back buffer, draws that target as a 4:3 sprite (rotated as a 2D quad by head roll), then draws the replacement HUD and the sync pixel on top.
 
-**Camera and 6DOF.** The game camera lives in known globals (the render copy and the player's own orientation are separate clusters). `SteerTick` writes yaw and pitch from the HMD; head yaw is applied to both clusters so movement follows the head. The game re-clamps its camera Y every frame, so the HMD's **translation** is applied at draw time instead: the world vertex copies are shifted opposite the eye by `CameraOffset()` on the non-indexed and indexed world paths. The hands are placed in the default/recentre head-height frame and take only the head's **orientation**, so moving the HMD moves the view, not the hands. Right-stick click recentres; `pos_scale` and `eye_height` tune the result.
+**Camera and 6DOF.** The game camera lives in known globals: cluster **A** is the rendered view and cluster **B** is the player look/aim. B is a **per-player array** (`0x48DED4 + playerIndex * 0x50`); the local index is read from `0x48DDD8` on every access because different maps use different slots (BUILDING_EXT runs as player 6, DUEL_EXT as player 0). `SteerTick` writes yaw and pitch from the HMD to both clusters, so movement follows the head. Every level start waits 0.1 s for the game to place its spawn, then recentres from the camera yaw the game actually presents; right-stick click does the same at any time. The game's shot is aimed at the hand laser in the input phase and again at `EndScene` for a shot processed early in the next frame. The game re-clamps its camera Y every frame, so the HMD's **translation** is applied at draw time instead: the world vertex copies are shifted opposite the eye by `CameraOffset()` on the non-indexed and indexed world paths. `pos_scale` and `eye_height` tune the result. On a victory result screen the published cursor is frozen so the game's own mouse look cannot spin the camera before the objective panel.
+
+**Input.** Gameplay is driven from XrApi, not from the desktop: the mod builds the game's key image, calls its own mapper and player update, and uses the game's own ESC consumer for the left menu button. Only `ESC` and `0` pass from the physical keyboard in gameplay; menus keep physical keys. The non-gameplay panels accept both the dominant-hand laser and the WinlatorXR mouse, with the most recently moved pointer winning; the cursor is remapped from the centre-third panel into the game's 640x480 UI space.
 
 **XrApi.** The mod listens on UDP **7872** for head/hand poses, sticks, buttons, IPD, FOV and the sync id, and sends to **7278** the per-hand haptic durations, `MODE_VR`, `MODE_3D` and the FOV. Poses are converted from OpenXR (right-handed, +Y up, −Z forward, metres) into the game's left-handed, +Y-up, +Z-forward space. The 10×10 red sync pixel in the top-left echoes `HMD_SYNC`; blue carries the AER eye flag.
 
-**HUD, hands and weapon clone.** The custom HUD is a target-resolution D3D texture drawn inside the centre square. The game's own 2D HUD and spinning 3D slot models are suppressed in gameplay while the custom HUD is active; the slot capture and tail recording still run so the VR hand's cloned weapon model can be assembled from the game's own draws. The hands and laser are drawn with the game's white texture and glove texture using a no-roll head basis.
+**HUD, hands and weapon clone.** The custom HUD is a target-resolution D3D texture drawn inside the centre square. The game's own 2D HUD and spinning 3D slot models are suppressed in gameplay while the custom HUD is active; the slot capture and tail recording still run so the VR hand's cloned weapon model can be assembled from the game's own draws. The hands and laser are world-anchored at the level-start/recentre position and roll with the presented world.
 
-**Launcher.** `XOPSVR.exe` finds `xops096.exe` next to it (or up to two folders up), edits `config.txt` in the game folder, and checks the release channel over HTTPS. The current test channel is the Shogo WXR AutoUpdate URLs; the DLL download step is deliberately disabled until XOPS-WXR has its own channel.
+**Launcher.** `XOPSVR.exe` finds `xops096.exe` next to it (or up to two folders up), edits `config.txt` in the game folder, and checks the release channel over HTTPS. It refuses to start a second game instance. The current test channel is the Shogo WXR AutoUpdate URLs; the DLL download step is deliberately disabled until XOPS-WXR has its own channel (listed under To-do).
