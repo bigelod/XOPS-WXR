@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  8 2026 20:34:38`, SHA-256
-`26bd5b816e6593268bc855fd543c497ce72848f9bcfa180366eac8bebf9e7f2f`.
+**Last build:** `built Nov  8 2026 21:24:37`, SHA-256
+`df5856e78729380b0cf463b64c5f39f54d8fbb8d4c099643b9a0586e220f553d`.
 Release: 290,304 bytes, SHA-256
-`cae917cc4f49dd0f2afe8c30d05cb610a5e6b94086409d1a9f3c07a78ff0d738`.
+`502840eb1a76f50780980f07deacd859b4c685622cb4474e08273c121c6d1015`.
 
 ---
 
@@ -73,6 +73,9 @@ direct-input build** and the spawn/aim base:
   arena (not the gray wall) and that stick-forward moves toward what the
   camera sees. Right-stick recentre should leave the view still and re-zero
   the HMD XYZ/yaw.
+- **Victory screen:** win a level and confirm the camera stays still on the
+  result/victory screen until the objectives panel appears. The cursor is
+  frozen whenever `0x490A48 != 0` on a loaded mission; death is unchanged.
 - **Aim after a level change:** the per-map player slot is now resolved from
   `0x48DDD8` (BUILDING_EXT is player 6, DUEL_EXT is player 0). Owner-verified
   on PC: BUILDING_EXT -> menu -> DUEL_EXT, bullets follow the laser. Device

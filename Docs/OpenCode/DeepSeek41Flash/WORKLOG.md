@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  8 2026 20:34:38`, SHA-256
-`26bd5b816e6593268bc855fd543c497ce72848f9bcfa180366eac8bebf9e7f2f`.
+Current dev build: `built Nov  8 2026 21:24:37`, SHA-256
+`df5856e78729380b0cf463b64c5f39f54d8fbb8d4c099643b9a0586e220f553d`.
 Release build: 290,304 bytes, SHA-256
-`cae917cc4f49dd0f2afe8c30d05cb610a5e6b94086409d1a9f3c07a78ff0d738`.
+`502840eb1a76f50780980f07deacd859b4c685622cb4474e08273c121c6d1015`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,7 +1391,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 20:34 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 21:24 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
@@ -1550,7 +1550,17 @@ window** and used the previous level's origin. Firing is now suppressed while
 persistent miss would now show a post-recentre `AIM ... idx <n>` line for
 ALLEY_KT.
 
-Build: `built Nov  8 2026 20:34:38`, dev SHA-256
-`26bd5b816e6593268bc855fd543c497ce72848f9bcfa180366eac8bebf9e7f2f`;
+### Victory screen camera spin
+
+`InGameplay()` is false as soon as `0x490A48` becomes non-zero, so `SteerTick`
+stops writing the camera. The game's own mouse look keeps running on the
+victory result screen and turned the camera before the objectives panel; the
+death screen happens to stop it. `hkGetCursorPos` now returns the frozen
+cursor when a mission is loaded and `0x490A48 != 0`, the same path as VR
+gameplay, so the game's look delta is zero. The objective panel clears the
+result and resumes the normal hand/runtime pointer.
+
+Build: `built Nov  8 2026 21:24:37`, dev SHA-256
+`df5856e78729380b0cf463b64c5f39f54d8fbb8d4c099643b9a0586e220f553d`;
 release 290,304 bytes, SHA-256
-`cae917cc4f49dd0f2afe8c30d05cb610a5e6b94086409d1a9f3c07a78ff0d738`.
+`502840eb1a76f50780980f07deacd859b4c685622cb4474e08273c121c6d1015`.

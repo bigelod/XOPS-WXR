@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  8 2026 20:34:38`, SHA-256
-`26bd5b816e6593268bc855fd543c497ce72848f9bcfa180366eac8bebf9e7f2f`,
+**Current build:** `built Nov  8 2026 21:24:37`, SHA-256
+`df5856e78729380b0cf463b64c5f39f54d8fbb8d4c099643b9a0586e220f553d`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 Release build: 290,304 bytes, SHA-256
-`cae917cc4f49dd0f2afe8c30d05cb610a5e6b94086409d1a9f3c07a78ff0d738`.
+`502840eb1a76f50780980f07deacd859b4c685622cb4474e08273c121c6d1015`.
 Latest code commit: `b1b6958` (not pushed).
 
 ## Where we stopped (7 Nov, night)
@@ -18,11 +18,20 @@ Latest code commit: `b1b6958` (not pushed).
 **Working on device:** AER in gameplay and the AER/menu transition (the old
 `MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
 always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
-build was desktop-smoke-tested but not device-tested. The 20:34 build adds the
+build was desktop-smoke-tested but not device-tested. The 21:24 build adds the
 latest fixes below and was desktop-tested end to end (menus, movement, turn,
 fire).
 
-**New in the 20:34 build (not yet device-tested):**
+**New in the 21:24 build (not yet device-tested):**
+
+- **Victory screen no longer spins the camera.** `InGameplay()` is false on a
+  result screen, so `SteerTick` stops writing the camera. The game's own mouse
+  look keeps running on **victory** and turned the view before the objectives
+  panel appeared; death happens to stop it. `hkGetCursorPos` now returns the
+  frozen cursor whenever `0x490A48 != 0` on a loaded mission, exactly as in VR
+  gameplay, so the game's look delta stays zero. Menu clicks and the laser are
+  unaffected; the objectives panel resumes normal pointer behaviour when the
+  result clears.
 
 - **No firing during the spawn grace.** The one ALLEY_KT entry in the 20:14
   log (map 20) has an AIM line with `refA 0.000` and `A 0.032` immediately
@@ -84,7 +93,7 @@ fire).
   `0x48C93B` / `0x48C82F` before calling the original consumer. The consumer
   then either sets the message-loop flag `0x491A9C` to 0 (title/menu: quit) or
   calls `0x413C00` (return to title), exactly as a physical ESC would.
-- **Physical ESC works in gameplay again (20:34).** The direct-input rebuild
+- **Physical ESC works in gameplay again (21:24).** The direct-input rebuild
   called `ZeroMemory` on the game's shared VK image at `0x48C920`, wiping
   `keys[VK_ESCAPE]` just before the ESC consumer read `0x48C93B` later in the
   same frame. `DirectInputBuild` now preserves the polled ESC byte, and
@@ -93,7 +102,7 @@ fire).
   `ESC consumer: physical ESC edge` and returns to the menu (`A44=61`,
   `1A6C=1`); the XrApi left menu still logs the injected edge and transitions
   the same way.
-- **Spawn yaw fixed for level changes (20:34).** A level applies its spawn
+- **Spawn yaw fixed for level changes (21:24).** A level applies its spawn
   orientation a few frames after the player exists. The old recentre ran on the
   rising edge and, on a level entered after quitting another one, read the
   pre-spawn value (`~0`) and pinned the view there. `SteerRecentre` also took
@@ -171,7 +180,7 @@ bullets follow the laser on the BUILDING_EXT -> menu -> DUEL_EXT path. The AIM
 log now prints `idx` so a future map with a different player slot is visible
 immediately. Device pass still required.
 
-**Tomorrow's first pass:** copy the 20:34 `d3d8.dll` into the container, confirm
+**Tomorrow's first pass:** copy the 21:24 `d3d8.dll` into the container, confirm
 `INPUT direct player-update hook installed at IDA 0x413AC4`, test the left menu
 button as ESC, movement, A/B/X/Y/grips/triggers, spawn facing and shot
 alignment, and send the `STEER recentred`, `YAW ... map`, and `AIM base ... map`

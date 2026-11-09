@@ -78,6 +78,7 @@ static void ManualModeEdge(PBYTE p);
 static BOOL MenuPointerPos(float* x, float* y);
 static BOOL VrMenuPanel(void);
 static BOOL InGameplay(void);
+static BOOL ResultScreen(void);
 static BOOL LevelActive(void);
 static BOOL g_steer = TRUE;    /* always-on by default; 3 is a debug toggle */
 static int  g_spawnTrace = 0;  /* frames left of A/B spawn-yaw logging */
@@ -2472,6 +2473,14 @@ static BOOL WINAPI hkGetCursorPos(LPPOINT p)
         *p = g_lastCursor;
         return TRUE;
     }
+    /* Victory/death result screen: the game's own mouse-look is still live
+       there. Victory keeps turning the camera before the objective panel;
+       hand it a frozen cursor just like gameplay. */
+    if (g_vrExclusive && ResultScreen()) {
+        if (!p) return FALSE;
+        *p = g_lastCursor;
+        return TRUE;
+    }
     /* Floating non-VR panel: two pointers are valid here. The dominant hand is
        the VR laser; WinlatorXR's own mouse also works on the flat screens. Let
        whichever moved most recently drive the game's cursor, so the two do not
@@ -4120,6 +4129,22 @@ static BOOL LevelActive(void)
         }
     }
     return FALSE;
+}
+
+/* Victory/death result screen before the objectives panel. The game keeps
+   running its own mouse-look there even though the player no longer exists;
+   on victory it spins the camera before the objective screen appears. Death
+   happens to stop it, victory does not. Freeze the published cursor in this
+   state, exactly like VR gameplay. */
+static BOOL ResultScreen(void)
+{
+    int mission = -1, result = -1;
+    if (!g_exeBase) return FALSE;
+    if (!SafeReadInt(g_exeBase + (0x490A44 - 0x400000), &mission) ||
+        !SafeReadInt(g_exeBase + (0x490A48 - 0x400000), &result))
+        return FALSE;
+    if (mission == 0x40) return FALSE;    /* title */
+    return result != 0;
 }
 
 /* Haptics are driven by the magazine counter falling. Both slots are watched
