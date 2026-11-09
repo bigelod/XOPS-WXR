@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  8 2026 20:28:57`, SHA-256
-`6e7e4568bab26902ea11aa5efec72fea5697ca228a3eea4ed1bb14fc9188e0bf`.
+Current dev build: `built Nov  8 2026 20:34:38`, SHA-256
+`26bd5b816e6593268bc855fd543c497ce72848f9bcfa180366eac8bebf9e7f2f`.
 Release build: 290,304 bytes, SHA-256
-`4e5fbe5c7b701a44a8478422b111d4f8d22baf890cc945e2b9257287dee98229`.
+`cae917cc4f49dd0f2afe8c30d05cb610a5e6b94086409d1a9f3c07a78ff0d738`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,7 +1391,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 20:28 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 20:34 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
@@ -1480,7 +1480,7 @@ BUILDING_EXT still spawns in the corridor and its right-stick recentre leaves
 A/B unchanged.
 
 The owner confirmed the view on PC and asked for a shorter grace: reduced from
-120 to **18 frames (0.3 s)**. They also report that aim is still wrong after
+120 to **6 frames (0.1 s)**. They also report that aim is still wrong after
 title -> DUEL_EXT, with a marked screenshot showing the laser on the target and
 the impact on the ground. The owner's follow-up log (StrangeCrash) contains AIM lines for maps 6, 2 and
 4. They show the written yaw is held exactly and the read-back pitch matches
@@ -1488,9 +1488,9 @@ the written value, so the game is not discarding the aim write. The remaining
 suspects are the hand ray/origin used by the shot versus the drawn laser, or a
 per-level look-field difference. A mouse-look probe was added for that.
 
-## 2026-11-08 - 0.3 s grace, per-level look probe, single-instance launcher
+## 2026-11-08 - 0.1 s grace, per-level look probe, single-instance launcher
 
-- Spawn grace reduced from 60 to **18 frames (0.3 s)**; 1 s was reliable, and
+- Spawn grace reduced from 60 to **6 frames (0.1 s)**; 1 s was reliable, and
   the owner asked for the shorter value now.
 - Added a dev-only `LookProbeTick`: in manual mode (`0`) it logs
   `LOOK map=<id> A yaw,pitch B yaw,pitch delta ...` whenever A/B yaw/pitch or
@@ -1550,7 +1550,7 @@ window** and used the previous level's origin. Firing is now suppressed while
 persistent miss would now show a post-recentre `AIM ... idx <n>` line for
 ALLEY_KT.
 
-Build: `built Nov  8 2026 20:28:57`, dev SHA-256
-`6e7e4568bab26902ea11aa5efec72fea5697ca228a3eea4ed1bb14fc9188e0bf`;
+Build: `built Nov  8 2026 20:34:38`, dev SHA-256
+`26bd5b816e6593268bc855fd543c497ce72848f9bcfa180366eac8bebf9e7f2f`;
 release 290,304 bytes, SHA-256
-`4e5fbe5c7b701a44a8478422b111d4f8d22baf890cc945e2b9257287dee98229`.
+`cae917cc4f49dd0f2afe8c30d05cb610a5e6b94086409d1a9f3c07a78ff0d738`.

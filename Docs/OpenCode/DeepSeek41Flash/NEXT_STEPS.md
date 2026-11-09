@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  8 2026 20:28:57`, SHA-256
-`6e7e4568bab26902ea11aa5efec72fea5697ca228a3eea4ed1bb14fc9188e0bf`.
+**Last build:** `built Nov  8 2026 20:34:38`, SHA-256
+`26bd5b816e6593268bc855fd543c497ce72848f9bcfa180366eac8bebf9e7f2f`.
 Release: 290,304 bytes, SHA-256
-`4e5fbe5c7b701a44a8478422b111d4f8d22baf890cc945e2b9257287dee98229`.
+`cae917cc4f49dd0f2afe8c30d05cb610a5e6b94086409d1a9f3c07a78ff0d738`.
 
 ---
 
@@ -68,7 +68,7 @@ direct-input build** and the spawn/aim base:
   longer needed. Confirm the stick moves the player and does not swap weapons.
 - **Spawn/aim:** capture the `STEER recentred. yaw A raw X -> Y (deg) B Z` line
   for several levels, especially the exact failing flow: BUILDING_EXT -> move
-  -> ESC -> DUEL_EXT. The mod now waits 18 frames for the game's spawn yaw,
+  -> ESC -> DUEL_EXT. The mod now waits 6 frames for the game's spawn yaw,
   then uses the camera yaw A as the origin. Confirm the spawn shows the open
   arena (not the gray wall) and that stick-forward moves toward what the
   camera sees. Right-stick recentre should leave the view still and re-zero

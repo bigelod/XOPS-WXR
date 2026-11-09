@@ -3560,7 +3560,7 @@ static void SteerTick(void)
     /* A new level applies its spawn orientation a few frames after the player
        exists. Writing our yaw during that window pins the map to the stale
        value and leaves the body 180 deg from the view. Leave the game alone
-       for 0.3 s (18 frames), watch what it writes, then recentre from that. */
+       for 0.1 s (6 frames), watch what it writes, then recentre from that. */
     if (g_spawnGrace > 0) {
         float ga = 0.0f, gb = 0.0f, gap = 0.0f, gbp = 0.0f;
         int gmi = -1;
@@ -8431,7 +8431,7 @@ static HRESULT __stdcall hkBeginScene(void* dev)
             if (levelActive && !wasLevelActive) {
                 Log("STEER    level start - waiting for the game's spawn yaw");
                 g_spawnTrace = 120;
-                g_spawnGrace = 18;
+                g_spawnGrace = 6;
                 g_haveRef = FALSE;
             }
             wasLevelActive = levelActive;

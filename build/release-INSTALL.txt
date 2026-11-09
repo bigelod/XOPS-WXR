@@ -30,7 +30,7 @@ left grip two-handed aim, left trigger fire mode, right trigger shoot,
 right grip jump, B reload, A switch, X drop, Y zoom (the laser stays on).
 Left-handed mode swaps only shoot and fire mode.
 Every level start makes the current head position and facing the new origin.
-It waits about 0.3 seconds for the game to finish placing the spawn, then
+It waits about 0.1 seconds for the game to finish placing the spawn, then
 recentres from the game's own spawn view, so entering a level after quitting
 another keeps the intended starting direction. The right-stick click recentres
 the same way.

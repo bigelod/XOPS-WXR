@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  8 2026 20:28:57`, SHA-256
-`6e7e4568bab26902ea11aa5efec72fea5697ca228a3eea4ed1bb14fc9188e0bf`.
+**Last build covered:** `built Nov  8 2026 20:34:38`, SHA-256
+`26bd5b816e6593268bc855fd543c497ce72848f9bcfa180366eac8bebf9e7f2f`.
 Release: 290,304 bytes, SHA-256
-`4e5fbe5c7b701a44a8478422b111d4f8d22baf890cc945e2b9257287dee98229`.
+`cae917cc4f49dd0f2afe8c30d05cb610a5e6b94086409d1a9f3c07a78ff0d738`.
 
 ---
 
@@ -80,7 +80,7 @@ Release: 290,304 bytes, SHA-256
   `SteerRecentre()`, so the current HMD height becomes the flat game player
   height (`0`); a level start does the same after a short grace. The game
   applies its spawn orientation a few frames after the player exists, so the
-  mod leaves A/B alone for 18 frames, then takes the **camera yaw A** (the
+  mod leaves A/B alone for 6 frames, then takes the **camera yaw A** (the
   view the game actually presents) as the origin and writes both A and B from
   it. Taking the animating body yaw B instead put DUEL_EXT's camera 180 deg
   into the wall when a level was entered after quitting another. Head yaw is
