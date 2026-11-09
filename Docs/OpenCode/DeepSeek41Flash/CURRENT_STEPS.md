@@ -11,7 +11,7 @@ deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 Release build: 290,304 bytes, SHA-256
 `502840eb1a76f50780980f07deacd859b4c685622cb4474e08273c121c6d1015`.
-Latest code commit: `fc261c3` (not pushed).
+Latest code commit: `36ea165` (not pushed).
 
 ## Where we stopped (8 Nov, night)
 
