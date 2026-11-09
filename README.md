@@ -7,9 +7,10 @@ Thanks to Luboš, GmoLargey, and others for their work on [WinlatorXR](https://g
 
 The rest of the README below has been created with the help of AI:
 
-**Status: V0.1 alpha, PC-verified.** The full flow has been tested on Windows
-(both the game and the launcher); the final Quest 3 device pass is in progress.
-Mono is the shipping default. AER stereo is available experimentally.
+**Status: V0.1 alpha, device-verified on Quest 3.** Tested end to end on Quest 3
+with both left- and right-handed setups, in both mono and AER. **Mono is the
+recommended default** because it is more comfortable; AER works but can be
+less comfortable for some players.
 
 ## Features
 
@@ -45,8 +46,8 @@ Mono is the shipping default. AER stereo is available experimentally.
 - **Launcher.** Play, Options (including HMD position gain and HUD scale) and
   an update check. Config lives in the game folder, next to `xops096.exe`.
   Play refuses to start a second game instance.
-- **Experimental AER stereo.** `stereo = aer` opts in; `mono` is the shipping
-  default.
+- **Experimental AER stereo.** `stereo = aer` opts in; it is device-verified on
+  Quest 3, but **mono is the recommended default** for comfort.
 - **Debug keys are locked behind `0`.** WinlatorXR does not map `0`, so a device session cannot trigger probe/HUD/dump keys by accident.
 
 ## To-do
@@ -56,9 +57,9 @@ V0.1 is feature-complete. Remaining work is post-launch:
 - **Muzzle effects and hand/weapon placement.** Move the game's own muzzle
   flash, smoke and shell effects from the hidden weapon position onto the VR
   hand; polish per-weapon hand and muzzle offsets.
-- **AER stereo.** Keep it experimental for now; confirm the eye sign on device
-  and decide whether to expose it as a selectable presentation mode later.
-  Mono stays the default.
+- **AER stereo (optional).** Device-verified on Quest 3, but mono is more
+  comfortable; keep mono the default and decide later whether to expose AER
+  more prominently.
 - **Update channel.** Point the launcher's AutoUpdate at the XOPS-WXR channel
   and enable the `d3d8.dll` download step.
 - **Optional menu simplification.** Call the game's title/mission-select action
@@ -111,7 +112,8 @@ position of the gun to left hand).
 5. Start `XOPSVR.exe` (or run `xops096.exe` directly). The launcher refuses to
    start a second copy while XOPS is already running; close the existing game
    first.
-6. In the headset, use **mono** for the first run. AER stereo is experimental.
+6. In the headset, **mono** is recommended for the first run; AER is also
+   available but can be less comfortable.
 
 **Config**
 
@@ -124,7 +126,7 @@ haptics = true
 haptics_hand = dominant     # dominant | both | left | right
 haptic_frames = 2           # 1..5
 verbose_debug = false       # true while testing
-stereo = mono               # experimental: aer
+stereo = mono               # mono recommended; aer optional (less comfortable)
 roll = true
 roll_sign = -1              # +1 if the horizon tilts the wrong way
 eye_height = 0.0            # manual render offset, metres, +/-5

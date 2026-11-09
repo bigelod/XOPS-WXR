@@ -39,7 +39,15 @@ secondary). What is missing is the support hand:
   effect draws to the dominant hand's muzzle point.
 - **Reuse the game's effects**; do not author new ones.
 
-## 4. Quest 3 device pass (next)
+## 4. Quest 3 device pass (complete for V0.1)
+
+**V0.1 alpha passed on Quest 3** with both left- and right-handed setups, in
+mono and AER. Aim across level changes, spawn facing, ESC/left menu, runtime
+mouse and hand pointer on the panels, movement/buttons, victory camera freeze
+and the launcher all worked. Mono is more comfortable and remains the
+recommended default; AER is device-verified but optional.
+
+The checklist below is retained for the next build/regression pass:
 
 Earlier device runs confirmed startup, injection, the DXVK export fix, AER in
 gameplay, the AER/menu transition, `MODE_VR=1` menus in mono and AER,

@@ -13,16 +13,16 @@ Release build: 290,304 bytes, SHA-256
 `502840eb1a76f50780980f07deacd859b4c685622cb4474e08273c121c6d1015`.
 Latest code commit: `fc261c3` (not pushed).
 
-## Where we stopped (7 Nov, night)
+## Where we stopped (8 Nov, night)
 
-**Working on device:** AER in gameplay and the AER/menu transition (the old
-`MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
-always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
-build was desktop-smoke-tested but not device-tested. The 21:24 build adds the
-latest fixes below and was desktop-tested end to end (menus, movement, turn,
-fire).
+**V0.1 alpha device-passed on Quest 3.** Tested with both left- and right-handed
+setups, in mono and AER. Everything listed below works: aim across level
+changes, spawn facing, ESC/left menu, runtime mouse and hand pointer on the
+panels, movement/buttons, victory camera freeze and the launcher. **Mono is
+more comfortable and remains the recommended default**; AER is device-verified
+but optional.
 
-**New in the 21:24 build (not yet device-tested):**
+**New in the 21:24 build (now device-tested):**
 
 - **Victory screen no longer spins the camera.** `InGameplay()` is false on a
   result screen, so `SteerTick` stops writing the camera. The game's own mouse

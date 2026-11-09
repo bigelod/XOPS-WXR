@@ -1564,3 +1564,11 @@ Build: `built Nov  8 2026 21:24:37`, dev SHA-256
 `df5856e78729380b0cf463b64c5f39f54d8fbb8d4c099643b9a0586e220f553d`;
 release 290,304 bytes, SHA-256
 `502840eb1a76f50780980f07deacd859b4c685622cb4474e08273c121c6d1015`.
+
+## 2026-11-08 - V0.1 alpha device pass
+
+Quest 3 pass complete: both left- and right-handed setups, mono and AER. Aim
+across level changes, spawn facing, ESC/left menu, runtime mouse and hand
+pointer on the panels, movement/buttons, victory camera freeze and the launcher
+all behaved. Mono is more comfortable and stays the recommended default; AER
+works but is optional. V0.1 alpha is good to go.
