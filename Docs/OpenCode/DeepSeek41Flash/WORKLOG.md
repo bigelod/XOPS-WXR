@@ -1220,10 +1220,10 @@ The replacement HUD was only adjustable through the dev `H` key and
 1.1 default; config overrides the INI) and a **HUD scale** field to the
 launcher Options. The release package ships `hud_scale = 1.0`.
 
-Current dev build: `built Nov  8 2026 20:14:00`, SHA-256
-`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`.
+Current dev build: `built Nov  8 2026 20:28:57`, SHA-256
+`6e7e4568bab26902ea11aa5efec72fea5697ca228a3eea4ed1bb14fc9188e0bf`.
 Release build: 290,304 bytes, SHA-256
-`d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
+`4e5fbe5c7b701a44a8478422b111d4f8d22baf890cc945e2b9257287dee98229`.
 
 ### Device follow-up: version 0.4, pitch sign, release verbose
 
@@ -1391,7 +1391,7 @@ Owner findings after the direct-input build:
   the single authority and derive A from it (or patch the clamp), with the
   camera offset zeroed at level load.
 
-**Paused 7 Nov night.** Next session: device-test the 20:14 build (left menu
+**Paused 7 Nov night.** Next session: device-test the 20:28 build (left menu
 as ESC, canonical controls, early aim), capture `STEER recentred`, `YAW ... map`
 and `AIM base ... map` lines from BUILDING_EXT and a failing map, and
 re-confirm the input policy. See `CURRENT_STEPS.md` "Where we stopped" and
@@ -1540,7 +1540,17 @@ camera or the cloned gun showed.
 AIM log prints `idx`. Owner-verified on PC: BUILDING_EXT -> menu -> DUEL_EXT,
 the bullets follow the laser. Device pass still required.
 
-Build: `built Nov  8 2026 20:14:00`, dev SHA-256
-`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`;
+### ALLEY_KT
+
+The owner reports ALLEY_KT still looking wrong. The 20:14 log has only one
+ALLEY_KT-era AIM line (map 20): `refA 0.000`, `A 0.032`, immediately before
+the map-20 `STEER recentred` line. That shot was taken **inside the grace
+window** and used the previous level's origin. Firing is now suppressed while
+`g_spawnGrace > 0` and `SteerAimEarly` returns during the grace. Retest; a
+persistent miss would now show a post-recentre `AIM ... idx <n>` line for
+ALLEY_KT.
+
+Build: `built Nov  8 2026 20:28:57`, dev SHA-256
+`6e7e4568bab26902ea11aa5efec72fea5697ca228a3eea4ed1bb14fc9188e0bf`;
 release 290,304 bytes, SHA-256
-`d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
+`4e5fbe5c7b701a44a8478422b111d4f8d22baf890cc945e2b9257287dee98229`.

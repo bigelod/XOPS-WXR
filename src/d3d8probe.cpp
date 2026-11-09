@@ -3978,6 +3978,7 @@ static void SteerAimEarly(void)
 {
     if (!g_directInput || !g_vrExclusive || !InGameplay()) return;
     if (!g_posed || !g_pose.valid) return;
+    if (g_spawnGrace > 0) return;   /* wait for the level-start recentre */
     g_twoHanded = XrButton(&g_pose, XRB_L_GRIP) ? TRUE : FALSE;
     if (g_leftHanded ? XrButton(&g_pose, XRB_L_TRIGGER)
                      : XrButton(&g_pose, XRB_R_TRIGGER)) {
@@ -5074,11 +5075,14 @@ static void DirectInputBuild(BYTE* keys)
         shoot = XrButton(&g_pose, XRB_L_TRIGGER) ? TRUE : FALSE;
         fireMode = VrEdge(XRB_R_TRIGGER);
     }
-    if (shoot) {
+    if (shoot && g_spawnGrace == 0) {
         keys[VK_LBUTTON] = 0x80;
         g_fireHeld = TRUE;
         g_flashFrames = 4;
     } else {
+        /* No firing until the level-start recentre has completed. A shot in
+           the grace window uses the previous level's origin, which is exactly
+           the "default angle" miss on a level entered from another one. */
         g_fireHeld = FALSE;
     }
     if (fireMode) keys['X'] = 0x80;      /* fire-mode toggle */

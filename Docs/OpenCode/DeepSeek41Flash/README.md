@@ -484,7 +484,7 @@ from the wrong yaw/height. The fixes:
 
 **7 Nov stopping point.** The AER/menu transition is device-confirmed. Gameplay
 input now runs the game's own input mapper from an XrApi-built image, so no
-Wine keyboard state is involved. The 20:14 build adds: `ESC`/`0` preserved when
+Wine keyboard state is involved. The 20:28 build adds: `ESC`/`0` preserved when
 the window is unfocused; the left controller menu button mapped to the game's
 own ESC consumer (hook at `0x413BA2`, call `0x413CF0` with a fresh ESC edge,
 no Wine key events); the direct-input image preserves the polled
@@ -595,10 +595,10 @@ SHA-256 (`match=True`). Dev output is `out\dev\d3d8.dll`; release output is
 Line 1 of `xops_wxr_probe.log` is the build stamp. **Check it before
 interpreting any report** - a stale build is invisible otherwise.
 
-Current handover build: `built Nov  8 2026 20:14:00`, SHA-256
-`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`,
+Current handover build: `built Nov  8 2026 20:28:57`, SHA-256
+`6e7e4568bab26902ea11aa5efec72fea5697ca228a3eea4ed1bb14fc9188e0bf`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`). Release: 290,304 bytes,
-SHA-256 `d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
+SHA-256 `4e5fbe5c7b701a44a8478422b111d4f8d22baf890cc945e2b9257287dee98229`.
 
 ---
 

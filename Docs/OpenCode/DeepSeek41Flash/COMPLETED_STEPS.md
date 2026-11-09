@@ -4,10 +4,10 @@
 also **desktop/PC-verified**. Device verification on the Quest 3 is a separate
 pass; `BUG_FIXES.md` will be created from that run.
 
-**Last build covered:** `built Nov  8 2026 20:14:00`, SHA-256
-`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`.
+**Last build covered:** `built Nov  8 2026 20:28:57`, SHA-256
+`6e7e4568bab26902ea11aa5efec72fea5697ca228a3eea4ed1bb14fc9188e0bf`.
 Release: 290,304 bytes, SHA-256
-`d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
+`4e5fbe5c7b701a44a8478422b111d4f8d22baf890cc945e2b9257287dee98229`.
 
 ---
 

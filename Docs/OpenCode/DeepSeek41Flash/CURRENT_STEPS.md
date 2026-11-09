@@ -5,12 +5,12 @@
 left), `WORKLOG.md` (history), `README.md` (long-form architecture).
 This file is the current state and how the pieces fit.
 
-**Current build:** `built Nov  8 2026 20:14:00`, SHA-256
-`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`,
+**Current build:** `built Nov  8 2026 20:28:57`, SHA-256
+`6e7e4568bab26902ea11aa5efec72fea5697ca228a3eea4ed1bb14fc9188e0bf`,
 deployed to `E:\tmp\Q3Mods\xops096` (`match=True`).
 
 Release build: 290,304 bytes, SHA-256
-`d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
+`4e5fbe5c7b701a44a8478422b111d4f8d22baf890cc945e2b9257287dee98229`.
 Latest code commit: `e6d0850` (not pushed).
 
 ## Where we stopped (7 Nov, night)
@@ -18,11 +18,20 @@ Latest code commit: `e6d0850` (not pushed).
 **Working on device:** AER in gameplay and the AER/menu transition (the old
 `MODE_VR 1 -> 0` issue is gone); VR presentation, world-anchored hands and the
 always-on laser behaved correctly in the 23:02 build. The 00:39 direct-input
-build was desktop-smoke-tested but not device-tested. The 20:14 build adds the
+build was desktop-smoke-tested but not device-tested. The 20:28 build adds the
 latest fixes below and was desktop-tested end to end (menus, movement, turn,
 fire).
 
-**New in the 20:14 build (not yet device-tested):**
+**New in the 20:28 build (not yet device-tested):**
+
+- **No firing during the spawn grace.** The one ALLEY_KT entry in the 20:14
+  log (map 20) has an AIM line with `refA 0.000` and `A 0.032` immediately
+  before its `STEER recentred` line: the shot happened in the grace window and
+  used the **previous** level's origin. The trigger is now suppressed while
+  `g_spawnGrace > 0` (18 frames / 0.3 s), and `SteerAimEarly` returns during
+  the grace, so no shot can use a stale origin. Retest ALLEY_KT; if it still
+  misses, the log should now show a post-recentre `AIM ... map <id> idx <n>`
+  line to compare.
 
 - **Per-map player slot fixed - the real aim bug.** The B cluster (player
   look/aim) is a per-player array at `0x48DED4 + idx * 0x50`; the watch VAs
@@ -75,7 +84,7 @@ fire).
   `0x48C93B` / `0x48C82F` before calling the original consumer. The consumer
   then either sets the message-loop flag `0x491A9C` to 0 (title/menu: quit) or
   calls `0x413C00` (return to title), exactly as a physical ESC would.
-- **Physical ESC works in gameplay again (20:14).** The direct-input rebuild
+- **Physical ESC works in gameplay again (20:28).** The direct-input rebuild
   called `ZeroMemory` on the game's shared VK image at `0x48C920`, wiping
   `keys[VK_ESCAPE]` just before the ESC consumer read `0x48C93B` later in the
   same frame. `DirectInputBuild` now preserves the polled ESC byte, and
@@ -84,7 +93,7 @@ fire).
   `ESC consumer: physical ESC edge` and returns to the menu (`A44=61`,
   `1A6C=1`); the XrApi left menu still logs the injected edge and transitions
   the same way.
-- **Spawn yaw fixed for level changes (20:14).** A level applies its spawn
+- **Spawn yaw fixed for level changes (20:28).** A level applies its spawn
   orientation a few frames after the player exists. The old recentre ran on the
   rising edge and, on a level entered after quitting another one, read the
   pre-spawn value (`~0`) and pinned the view there. `SteerRecentre` also took
@@ -162,7 +171,7 @@ bullets follow the laser on the BUILDING_EXT -> menu -> DUEL_EXT path. The AIM
 log now prints `idx` so a future map with a different player slot is visible
 immediately. Device pass still required.
 
-**Tomorrow's first pass:** copy the 20:14 `d3d8.dll` into the container, confirm
+**Tomorrow's first pass:** copy the 20:28 `d3d8.dll` into the container, confirm
 `INPUT direct player-update hook installed at IDA 0x413AC4`, test the left menu
 button as ESC, movement, A/B/X/Y/grips/triggers, spawn facing and shot
 alignment, and send the `STEER recentred`, `YAW ... map`, and `AIM base ... map`

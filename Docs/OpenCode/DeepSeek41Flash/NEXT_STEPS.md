@@ -4,10 +4,10 @@
 `COMPLETED_STEPS.md`; history is in `WORKLOG.md`; architecture is in
 `README.md` and `CURRENT_STEPS.md`.
 
-**Last build:** `built Nov  8 2026 20:14:00`, SHA-256
-`34f14b708018a015333aa648249dcea9d558d41de3f42545b55856accb041325`.
+**Last build:** `built Nov  8 2026 20:28:57`, SHA-256
+`6e7e4568bab26902ea11aa5efec72fea5697ca228a3eea4ed1bb14fc9188e0bf`.
 Release: 290,304 bytes, SHA-256
-`d3214cb7ece0eae2daee77cd521c25cba36248ae821213d5679cc7a6b6828569`.
+`4e5fbe5c7b701a44a8478422b111d4f8d22baf890cc945e2b9257287dee98229`.
 
 ---
 
@@ -77,7 +77,10 @@ direct-input build** and the spawn/aim base:
   `0x48DDD8` (BUILDING_EXT is player 6, DUEL_EXT is player 0). Owner-verified
   on PC: BUILDING_EXT -> menu -> DUEL_EXT, bullets follow the laser. Device
   pass: repeat the same path and fire at a crate; the AIM log prints `idx`, so
-  any map with a different player slot is visible immediately.
+  any map with a different player slot is visible immediately. **ALLEY_KT:**
+  the only logged shot was inside the spawn grace (stale origin); firing is
+  now suppressed for the 18-frame grace. Retest ALLEY_KT; a persistent miss
+  needs its post-recentre `AIM ... map <id> idx <n>` line.
 - **Strange crash:** the 7 Nov StrangeCrash logs show two `xops096.exe`
   launches 17 s apart. The launcher now refuses a second instance. If a crash
   still happens with one instance, check whether it follows a level start or
