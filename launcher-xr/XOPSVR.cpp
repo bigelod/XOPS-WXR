@@ -1,10 +1,9 @@
 ﻿// XOPSVR.cpp - WinlatorXR launcher for XOPS-WXR.
 //
-// One window with Play and Options. Before launching it checks the release
-// channel for a newer version and shows the release notes. For now that
-// channel is Shogo WXR's AutoUpdate folder (so the check can be tested before
-// XOPS-WXR has its own published files) and the module download step is
-// deliberately disabled: this build never downloads a DLL.
+// One window with Play and Options. Before launching it checks XOPS-WXR's
+// AutoUpdate channel for a newer version, shows the release notes, and on YES
+// downloads d3d8.dll, replaces the one next to xops096.exe, and advances the
+// local version.txt. The game must not be running while the module is replaced.
 //
 // Play launches xops096.exe next to the launcher (or up to two folders up).
 // Options edits config.txt one folder above the game, the same file the mod
@@ -26,19 +25,21 @@
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "comctl32.lib")
 
+bool GameAlreadyRunning();
+
 namespace {
 
 // --- release channel -------------------------------------------------------
-// TEMP: test against Shogo WXR's published channel until XOPS-WXR has its own
-// AutoUpdate files. The notes/version are real Shogo release data; the DLL
-// download is disabled below and must never pull Shogo's CShell.dll.
+// XOPS-WXR's published AutoUpdate folder on the main branch.
 const wchar_t* const kVersionUrl =
-    L"https://raw.githubusercontent.com/WinlatorXR/Shogo-VR-WXR/refs/heads/main/AutoUpdate/version.txt";
+    L"https://github.com/bigelod/XOPS-WXR/raw/refs/heads/main/AutoUpdate/version.txt";
 const wchar_t* const kNotesUrl =
-    L"https://raw.githubusercontent.com/WinlatorXR/Shogo-VR-WXR/refs/heads/main/AutoUpdate/notes.txt";
+    L"https://github.com/bigelod/XOPS-WXR/raw/refs/heads/main/AutoUpdate/notes.txt";
+const wchar_t* const kModUrl =
+    L"https://github.com/bigelod/XOPS-WXR/raw/refs/heads/main/AutoUpdate/d3d8.dll";
 
-// Deliberately off for now: no DLL download, no version.txt write on YES.
-const bool kEnableModDownload = false;
+// Update install is enabled now that the project has its own channel.
+const bool kEnableModDownload = true;
 
 const wchar_t* const kAppTitle = L"XOPS-WXR";
 const wchar_t* const kGameExe  = L"xops096.exe";
@@ -192,7 +193,7 @@ void Log(const std::wstring& msg)
     CloseHandle(h);
 }
 
-// --- HTTPS (version/notes only; no file download) --------------------------
+// --- HTTPS (version, notes and the module download) ------------------------
 bool HttpGetText(const std::wstring& url, std::string& text, std::wstring& err)
 {
     const std::wstring httpsPrefix = L"https://";
@@ -232,6 +233,9 @@ bool HttpGetText(const std::wstring& url, std::string& text, std::wstring& err)
         if (!req) {
             err = L"WinHttpOpenRequest failed";
         } else {
+            DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+            WinHttpSetOption(req, WINHTTP_OPTION_REDIRECT_POLICY,
+                             &redirect, sizeof(redirect));
             if (WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                     WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
                 WinHttpReceiveResponse(req, nullptr)) {
@@ -655,18 +659,79 @@ void CheckForUpdate(HWND h)
     }
 
     if (!kEnableModDownload) {
-        Log(L"update: download disabled in this test build (Shogo test channel)");
+        Log(L"update: download disabled in this build");
         MessageBoxW(h,
-            L"The module download is disabled in this test build.\r\n"
-            L"Nothing was changed. This check only verifies the version and notes channel.",
+            L"The module download is disabled in this build.\r\n"
+            L"Nothing was changed.",
             kAppTitle, MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
-        SetDlgItemTextW(h, IDC_STATUS, L"Update available (download disabled for now).");
+        SetDlgItemTextW(h, IDC_STATUS, L"Update available (download disabled).");
         return;
     }
 
-    // The real XOPS-WXR module download/install will live here once the
-    // project has its own AutoUpdate/d3d8.dll. Never download Shogo's DLL.
-    Log(L"update: no install path for this build");
+    if (g_gameDir.empty()) {
+        Log(L"update: game folder unknown, cannot install");
+        MessageBoxW(h, L"xops096.exe was not found next to the launcher; the module was not installed.",
+            kAppTitle, MB_OK | MB_ICONWARNING | MB_TOPMOST);
+        SetDlgItemTextW(h, IDC_STATUS, L"Update available; game folder not found.");
+        return;
+    }
+
+    if (GameAlreadyRunning()) {
+        Log(L"update: refused, xops096 is running");
+        MessageBoxW(h,
+            L"XOPS is running. Close the game, then check for updates again.\r\n"
+            L"Nothing was changed.",
+            kAppTitle, MB_OK | MB_ICONWARNING | MB_TOPMOST);
+        SetDlgItemTextW(h, IDC_STATUS, L"Update available; close XOPS and retry.");
+        return;
+    }
+
+    SetDlgItemTextW(h, IDC_STATUS, L"Downloading module...");
+    std::string dll;
+    if (!HttpGetText(kModUrl, dll, err)) {
+        Log(L"update: module download failed (" + err + L")");
+        MessageBoxW(h, (L"The module download failed:\r\n" + err).c_str(),
+            kAppTitle, MB_OK | MB_ICONERROR | MB_TOPMOST);
+        SetDlgItemTextW(h, IDC_STATUS, L"Update download failed.");
+        return;
+    }
+    if (dll.size() < 64 * 1024 || dll.size() < 2 ||
+        dll[0] != 'M' || dll[1] != 'Z') {
+        Log(L"update: downloaded file is not a valid DLL");
+        MessageBoxW(h, L"The downloaded file is not a valid d3d8.dll. Nothing was changed.",
+            kAppTitle, MB_OK | MB_ICONERROR | MB_TOPMOST);
+        SetDlgItemTextW(h, IDC_STATUS, L"Update download was not a valid DLL.");
+        return;
+    }
+
+    const std::wstring target = g_gameDir + L"d3d8.dll";
+    const std::wstring temp = target + L".new";
+    if (!WriteFileText(temp, dll)) {
+        Log(L"update: could not write the temporary DLL");
+        MessageBoxW(h, L"Could not write the downloaded module. Check the game folder permissions.",
+            kAppTitle, MB_OK | MB_ICONERROR | MB_TOPMOST);
+        SetDlgItemTextW(h, IDC_STATUS, L"Update install failed (write).");
+        return;
+    }
+    if (!MoveFileExW(temp.c_str(), target.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        Log(L"update: could not replace d3d8.dll (err " +
+            std::to_wstring(GetLastError()) + L")");
+        DeleteFileW(temp.c_str());
+        MessageBoxW(h, L"Could not replace d3d8.dll. Close any program using it and retry.",
+            kAppTitle, MB_OK | MB_ICONERROR | MB_TOPMOST);
+        SetDlgItemTextW(h, IDC_STATUS, L"Update install failed (replace).");
+        return;
+    }
+
+    /* Only advance the local version once the module is in place, so a failed
+       install cannot claim to be the new version. */
+    WriteFileText(g_exeDir + L"version.txt", online + "\r\n");
+    Log(L"update: installed version " + Widen(online) + L" (" +
+        std::to_wstring(dll.size()) + L" bytes)");
+    MessageBoxW(h, L"Update installed. Use Play to start the game.",
+        kAppTitle, MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
+    SetDlgItemTextW(h, IDC_STATUS, (L"Updated to " + Widen(online) + L".").c_str());
 }
 
 bool FindGame(const std::wstring& self, std::wstring& game, std::wstring& exe)

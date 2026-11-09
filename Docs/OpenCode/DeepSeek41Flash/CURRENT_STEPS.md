@@ -24,6 +24,13 @@ but optional.
 
 **New in the 21:24 build (now device-tested):**
 
+- **Launcher update channel live.** The three AutoUpdate URLs now point at
+  `github.com/bigelod/XOPS-WXR/main/AutoUpdate/` (`version.txt`, `notes.txt`,
+  `d3d8.dll`), and YES actually installs the module: HTTP GET with redirects,
+  `MZ` + minimum-size check, replace `d3d8.dll` next to `xops096.exe`, then
+  write `version.txt` last. It refuses while the game is running. Tested on PC:
+  forced 0.0 -> 0.1, downloaded 290,304 bytes, installed, version advanced.
+
 - **Victory screen no longer spins the camera.** `InGameplay()` is false on a
   result screen, so `SteerTick` stops writing the camera. The game's own mouse
   look keeps running on **victory** and turned the view before the objectives

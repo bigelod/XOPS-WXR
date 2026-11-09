@@ -131,21 +131,26 @@ direct-input build** and the spawn/aim base:
   half. Only attempt once AER is confirmed on device; it is allowed to be
   postponed until after V1.0.
 
-## 6. Launcher - first version done, release plumbing left
+## 6. Launcher - update channel done
 
-`launcher-xr/` now has `XOPSVR.exe` (see `COMPLETED_STEPS.md`): Play, Options
-and the update check work on the PC. What is left for a real release:
+`launcher-xr/` has `XOPSVR.exe`: Play, Options, the update check and the module
+install. It now checks XOPS-WXR's own channel:
 
-- Replace the temporary **Shogo test URLs** with the XOPS-WXR channel
-  (`AutoUpdate/version.txt`, `notes.txt`) once those are published.
-- Implement the **d3d8.dll download/install** behind the YES answer. It must
-  stage both files, verify a minimum size, install the DLL next to
-  `xops096.exe`, write `version.txt` last, and roll back on any failure -
-  exactly the Shogo order. Never download Shogo's CShell.dll.
-- Release step: put the new `d3d8.dll` in `AutoUpdate/`, rewrite
-  `AutoUpdate/notes.txt`, bump `AutoUpdate/version.txt` and
-  `launcher-xr/version.txt`, then commit/push.
-- Optional: an icon and an updater for `XOPSVR.exe` itself.
+```
+https://github.com/bigelod/XOPS-WXR/raw/refs/heads/main/AutoUpdate/version.txt
+https://github.com/bigelod/XOPS-WXR/raw/refs/heads/main/AutoUpdate/notes.txt
+https://github.com/bigelod/XOPS-WXR/raw/refs/heads/main/AutoUpdate/d3d8.dll
+```
+
+On YES it downloads the DLL, checks the `MZ` header and a minimum size, replaces
+`d3d8.dll` next to `xops096.exe`, and writes `version.txt` last. It refuses while
+the game is running. Tested on PC: a forced 0.0 -> 0.1 update downloaded
+290,304 bytes, installed, and wrote the new version.
+
+Release step remains: put the new `d3d8.dll` in `AutoUpdate/`, rewrite
+`AutoUpdate/notes.txt`, bump `AutoUpdate/version.txt` and
+`launcher-xr/version.txt`, then commit/push. Optional: an icon and an updater
+for `XOPSVR.exe` itself.
 
 ## 7. Separate the mod from the probe
 

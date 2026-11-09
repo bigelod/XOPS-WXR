@@ -44,8 +44,9 @@ less comfortable for some players.
   button runs the game's own ESC consumer. A **victory** result screen freezes
   the game's mouse look so the camera cannot spin before the objectives panel.
 - **Launcher.** Play, Options (including HMD position gain and HUD scale) and
-  an update check. Config lives in the game folder, next to `xops096.exe`.
-  Play refuses to start a second game instance.
+  an update check against XOPS-WXR's own AutoUpdate channel. Config lives in
+  the game folder, next to `xops096.exe`. Play refuses to start a second game
+  instance; the updater refuses to run while the game is open.
 - **Experimental AER stereo.** `stereo = aer` opts in; it is device-verified on
   Quest 3, but **mono is the recommended default** for comfort.
 - **Debug keys are locked behind `0`.** WinlatorXR does not map `0`, so a device session cannot trigger probe/HUD/dump keys by accident.
@@ -60,8 +61,6 @@ V0.1 is feature-complete. Remaining work is post-launch:
 - **AER stereo (optional).** Device-verified on Quest 3, but mono is more
   comfortable; keep mono the default and decide later whether to expose AER
   more prominently.
-- **Update channel.** Point the launcher's AutoUpdate at the XOPS-WXR channel
-  and enable the `d3d8.dll` download step.
 - **Optional menu simplification.** Call the game's title/mission-select action
   (`0x411F80`) directly instead of relying on the cursor hit-test.
 - **Not planned:** SBS stereo.
@@ -143,6 +142,10 @@ The launcher's **Options** dialog edits the same file, including **HMD position 
 - If the view moves too far when you move your head, lower `pos_scale` (or set it to `0` to disable translation) in Options.
 - If the horizon rolls the wrong way, set `roll_sign = +1`.
 - If the hands are rolled on a non-Quest-3 headset, set `hand_flip = true`.
+- The launcher checks XOPS-WXR's GitHub AutoUpdate channel on startup. If it
+  offers an update, close XOPS before accepting; it replaces `d3d8.dll` next to
+  `xops096.exe` and advances `version.txt`. A failed or invalid download leaves
+  the existing DLL untouched.
 
 ## Build Advice - For Contributors
 
@@ -208,4 +211,4 @@ This produces `launcher-xr\XOPSVR.exe`. It is a build artifact and is not commit
 
 **HUD, hands and weapon clone.** The custom HUD is a target-resolution D3D texture drawn inside the centre square. The game's own 2D HUD and spinning 3D slot models are suppressed in gameplay while the custom HUD is active; the slot capture and tail recording still run so the VR hand's cloned weapon model can be assembled from the game's own draws. The hands and laser are world-anchored at the level-start/recentre position and roll with the presented world.
 
-**Launcher.** `XOPSVR.exe` finds `xops096.exe` next to it (or up to two folders up), edits `config.txt` in the game folder, and checks the release channel over HTTPS. It refuses to start a second game instance. The current test channel is the Shogo WXR AutoUpdate URLs; the DLL download step is deliberately disabled until XOPS-WXR has its own channel (listed under To-do).
+**Launcher.** `XOPSVR.exe` finds `xops096.exe` next to it (or up to two folders up), edits `config.txt` in the game folder, and checks XOPS-WXR's AutoUpdate channel over HTTPS (`version.txt`, `notes.txt`, `d3d8.dll` under `github.com/bigelod/XOPS-WXR`). On YES it downloads and verifies the DLL, replaces the one next to `xops096.exe`, then advances `version.txt`. It refuses to update while the game is running and refuses to start a second game instance.

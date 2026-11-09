@@ -1572,3 +1572,21 @@ across level changes, spawn facing, ESC/left menu, runtime mouse and hand
 pointer on the panels, movement/buttons, victory camera freeze and the launcher
 all behaved. Mono is more comfortable and stays the recommended default; AER
 works but is optional. V0.1 alpha is good to go.
+
+## 2026-11-08 - launcher update channel
+
+Pointed the launcher at XOPS-WXR's own GitHub AutoUpdate channel and enabled
+the install step:
+
+```
+AutoUpdate/version.txt
+AutoUpdate/notes.txt
+AutoUpdate/d3d8.dll
+```
+
+`HttpGetText` now follows GitHub's redirects; YES downloads the DLL, checks the
+`MZ` header and a 64 KB minimum, replaces `d3d8.dll` next to `xops096.exe`,
+then writes `version.txt` last. It refuses while `xops096.exe` is running.
+Tested on PC by forcing a local 0.0: online 0.1 downloaded 290,304 bytes,
+installed, hash matched the release, and `version.txt` advanced. The online
+DLL is the same 21:24 release (`502840eb...`).
